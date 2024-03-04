@@ -1,6 +1,6 @@
 # HaritoraX Interpreter
 
-A node.js package that allows you to communicate with the HaritoraX trackers.
+A node.js package that allows you to communicate with the HaritoraX FBT trackers.
 
 ## Installation
 
@@ -29,4 +29,4 @@ const lorem_ipsum = "dolor_sit_amet";
 
 ## License
 
-This package is licensed under the [MIT](https://opensource.org/license/mit/) License - see the [LICENSE.md](LICENSE.md) file for details.
+This package is licensed under the [MIT](https://opensource.org/license/mit/) License - see the [LICENSE](LICENSE) file for details.
