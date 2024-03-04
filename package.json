@@ -1,0 +1,20 @@
+{
+  "name": "haritorax-interpreter",
+  "version": "1.0.0",
+  "description": "Communicate with the HaritoraX trackers",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "JovannMC",
+  "license": "MIT",
+  "keywords": [
+    "haritorax",
+    "gx6",
+    "interpreter"
+  ],
+  "dependencies": {
+    "eslint": "^8.57.0",
+    "serialport": "^12.0.0"
+  }
+}
