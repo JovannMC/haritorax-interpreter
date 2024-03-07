@@ -1,5 +1,6 @@
 "use strict";
 
+import { Buffer } from "buffer";
 import { EventEmitter } from "events";
 import GX6 from "../mode/gx6.js";
 import bluetooth from "../mode/bluetooth.js";
@@ -125,7 +126,7 @@ function processIMUData(data, bodyPart) {
 */
 
 function processTrackerData(data, bodyPart) {
-    if (data.trim() === '7f7f7f7f7f7f') {
+    if (data.trim() === "7f7f7f7f7f7f") {
         console.log(`Searching for tracker ${bodyPart}...`);
     } else {
         console.log(`Other tracker ${bodyPart} data processed: ${data}`);
@@ -144,7 +145,7 @@ function decodeIMUPacket(data) {
             throw new Error("Too few bytes to decode IMU packet");
         }
 
-        const buffer = Buffer.from(data, 'base64');
+        const buffer = Buffer.from(data, "base64");
         const rotationX = buffer.readInt16LE(0);
         const rotationY = buffer.readInt16LE(2);
         const rotationZ = buffer.readInt16LE(4);

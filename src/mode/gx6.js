@@ -29,7 +29,7 @@ export default class GX6 extends EventEmitter {
                 path: port,
                 baudRate: baudRate
             });
-            const parser = serial.pipe(new ReadlineParser({ delimiter: '\n' }))
+            const parser = serial.pipe(new ReadlineParser({ delimiter: "\n" }));
             activePorts[port] = serial;
             
             serial.on("open", () => {
@@ -39,7 +39,7 @@ export default class GX6 extends EventEmitter {
             parser.on("data", data => {
                 this.emit("data", port, data);
             });
-        });;
+        });
     }
 
     stopConnection() {
