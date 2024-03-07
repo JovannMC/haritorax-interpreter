@@ -1,3 +1,4 @@
+# THIS IS INCOMPLETE!! THIS IS A PLACEHOLDER README.
 # HaritoraX Interpreter
 
 A node.js package that allows you to communicate with the HaritoraX FBT trackers.
