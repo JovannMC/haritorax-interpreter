@@ -2,20 +2,20 @@
 
 import { EventEmitter } from "events";
 
-export default class bluetooth extends EventEmitter {
+export default class bt_gx6 extends EventEmitter {
     constructor() {
         super();
     }
     
     startConnection() {
-        console.log("Connected to bluetooth");
+        console.log("Connected to bt + gx6");
         this.emit("connected");
     }
 
     stopConnection() {
-        console.log("Disconnected from bluetooth");
+        console.log("Connected to bt + gx6");
         this.emit("disconnected");
     }
 }
 
-export { bluetooth };
+export { bt_gx6 };

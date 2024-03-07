@@ -1,13 +1,14 @@
 {
   "name": "haritorax-interpreter",
   "version": "1.0.0",
+  "repository": "https://github.com/JovannMC/haritorax-interpreter",
   "type": "module",
   "description": "Communicate with the HaritoraX trackers",
-  "main": "/src/index.js",
+  "main": "./src/index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "JovannMC",
+  "author": "JovannMC <jovannmc@femboyfurry.net> (https://femboyfurry.net)",
   "license": "MIT",
   "keywords": [
     "haritorax",

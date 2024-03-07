@@ -1,5 +1,5 @@
 "use strict";
 
-import GX6 from "./mode/gx6.js";
+import HaritoraXWireless from "./devices/haritorax-wireless.js";
 
-export { GX6 };
+export { HaritoraXWireless };
