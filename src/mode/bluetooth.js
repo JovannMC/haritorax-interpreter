@@ -2,7 +2,7 @@
 
 import { EventEmitter } from "events";
 
-export default class bluetooth extends EventEmitter {
+export default class Bluetooth extends EventEmitter {
     constructor() {
         super();
     }
@@ -18,4 +18,4 @@ export default class bluetooth extends EventEmitter {
     }
 }
 
-export { bluetooth };
+export { Bluetooth };

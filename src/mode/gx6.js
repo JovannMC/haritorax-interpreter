@@ -44,7 +44,10 @@ export default class GX6 extends EventEmitter {
 
     stopConnection() {
         for (let port in activePorts) {
-            if (activePorts[port].isOpen) activePorts[port].close();
+            if (activePorts[port].isOpen) {
+                activePorts[port].close();
+                activePorts[port].destroy();
+            }
         }
         this.emit("disconnected");
     }
@@ -66,7 +69,6 @@ export default class GX6 extends EventEmitter {
     getTrackerInfo(tracker) {
         const port = trackerAssignment.get(tracker);
         if (port) {
-            console.log(`Tracker ${tracker} is index ${port[0]} and is in port ${port[1]}`);
             return port;
         }
         return null;
