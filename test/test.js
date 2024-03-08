@@ -1,6 +1,6 @@
 import { HaritoraXWireless } from "haritorax-interpreter";
 
-let trackers = new HaritoraXWireless();
+let trackers = new HaritoraXWireless(true);
 trackers.startConnection("gx6");
 
 /*setTimeout(() => {

@@ -9,6 +9,8 @@ const gx6 = new GX6();
 const bluetooth = new Bluetooth();
 let haritora;
 
+let debug = false;
+
 const trackerButtons = new Map([
     // trackerName, [mainButton, subButton]
     ["rightKnee", [0, 0]],
@@ -71,6 +73,28 @@ const trackerSettings = new Map([
 **/
 
 /**
+ * The "button" event which provides info about the tracker's button data.
+ * 
+ * @event this#button
+ * @type {object}
+ * @property {string} trackerName - The name of the tracker. (rightKnee, rightAnkle, hip, chest, leftKnee, leftAnkle)
+ * @property {number} mainButton - Amount of times the main button was pressed.
+ * @property {number} subButton - Amount of times the sub button was pressed.
+ * @property {boolean} isOn - Whether the tracker is turning on/is on (true) or turning off/is off (false).
+**/
+
+/**
+ * The "battery" event which provides info about the tracker's battery data.
+ * 
+ * @event this#battery
+ * @type {object}
+ * @property {string} trackerName - The name of the tracker. (rightKnee, rightAnkle, hip, chest, leftKnee, leftAnkle)
+ * @property {number} batteryRemaining - The remaining battery percentage of the tracker.
+ * @property {number} batteryVoltage - The voltage of the tracker's battery.
+ * @property {string} chargeStatus - The charge status of the tracker. (discharging, charging(?), charged(?))
+ */
+
+/**
  * The "info" event which provides info about the tracker or dongle.
  *
  * @event this#info
@@ -88,10 +112,13 @@ const trackerSettings = new Map([
  * 
  * This class represents a HaritoraX wireless device. It provides methods to start/stop a connection,
  * set settings for all/individual trackers, and emits events for: IMU data, tracker data, button data, battery data, and settings data.
+ * 
+ * @param {boolean} debugMode - Enable logging of debug messages. (true or false)
 **/
 export default class HaritoraXWireless extends EventEmitter {
-    constructor() {
+    constructor(debugMode = false) {
         super();
+        debug = debugMode;
         haritora = this;
     }
 
@@ -139,7 +166,7 @@ export default class HaritoraXWireless extends EventEmitter {
     **/ 
 
     setTrackerSettings(trackerName, fpsMode, sensorMode, sensorAutoCorrection, ankleMotionDetection) {
-        console.log(`Setting tracker settings for ${trackerName}...`);
+        log(`Setting tracker settings for ${trackerName}...`);
         const sensorModeBit = sensorMode === 1 ? "1" : "0"; // If a value other than 1, default to mode 2
         const postureDataRateBit = fpsMode === 50 ? "0" : "1"; // If a value other than 1, default to 100FPS
         const ankleMotionDetectionBit = ankleMotionDetection ? "1" : "0"; // If a value other than 1, default to disabled
@@ -162,7 +189,7 @@ export default class HaritoraXWireless extends EventEmitter {
                 modeValueBuffer = Buffer.from("o0:" + hexValue + "\r\n" + "o1:" + nextValue + "\r\n", "utf-8");
             }
             
-            console.log(`${trackerName} - Calculated hex value: ${hexValue}`);
+            log(`${trackerName} - Calculated hex value: ${hexValue}`);
         } else if (trackerName === "rightAnkle" || trackerName === "chest" || trackerName === "leftAnkle") {
             const entries = Array.from(trackerSettings.entries());
             const currentIndex = entries.findIndex(([key]) => key === trackerName);
@@ -174,21 +201,21 @@ export default class HaritoraXWireless extends EventEmitter {
                 modeValueBuffer = Buffer.from("o0:" + previousValue + "\r\n" + "o1:" + hexValue + "\r\n", "utf-8");
             }
 
-            console.log(`${trackerName} - Calculated hex value: ${hexValue}`);
+            log(`${trackerName} - Calculated hex value: ${hexValue}`);
         } else {
-            console.log(`Invalid tracker name: ${trackerName}`);
+            log(`Invalid tracker name: ${trackerName}`);
             return;
         }
 
-        console.log(`Setting the following settings onto tracker ${trackerName}:`);
-        console.log(`FPS mode: ${fpsMode}`);
-        console.log(`Sensor mode: ${sensorMode}`);
-        console.log(`Sensor auto correction: ${sensorAutoCorrection}`);
-        console.log(`Ankle motion detection: ${ankleMotionDetection}`);
-        console.log(`Raw hex data calculated to be sent: ${hexValue}`);
+        log(`Setting the following settings onto tracker ${trackerName}:`);
+        log(`FPS mode: ${fpsMode}`);
+        log(`Sensor mode: ${sensorMode}`);
+        log(`Sensor auto correction: ${sensorAutoCorrection}`);
+        log(`Ankle motion detection: ${ankleMotionDetection}`);
+        log(`Raw hex data calculated to be sent: ${hexValue}`);
 
         try {
-            console.log(`Sending tracker settings to ${trackerName}: ${modeValueBuffer.toString()}`);
+            log(`Sending tracker settings to ${trackerName}: ${modeValueBuffer.toString()}`);
             let ports = gx6.getActivePorts();
             let trackerInfo = gx6.getTrackerInfo(trackerName);
             let trackerPort = trackerInfo[1];
@@ -198,7 +225,7 @@ export default class HaritoraXWireless extends EventEmitter {
                     console.error(`${trackerName} - Error writing data to serial port ${trackerPort}: ${err.message}`);
                 } else {
                     trackerSettings.set(trackerName, hexValue);
-                    console.log(`${trackerName} - Data written to serial port ${trackerPort}: ${modeValueBuffer.toString()}`);
+                    log(`${trackerName} - Data written to serial port ${trackerPort}: ${modeValueBuffer.toString()}`);
                 }
             });
         } catch (error) {
@@ -238,12 +265,12 @@ export default class HaritoraXWireless extends EventEmitter {
             const hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
             const modeValueBuffer = Buffer.from("o0:" + hexValue + "\r\n" + "o1:" + hexValue + "\r\n", "utf-8");
 
-            console.log("Setting the following settings onto all trackers:");
-            console.log(`FPS mode: ${fpsMode}`);
-            console.log(`Sensor mode: ${sensorMode}`);
-            console.log(`Sensor auto correction: ${sensorAutoCorrection}`);
-            console.log(`Ankle motion detection: ${ankleMotionDetection}`);
-            console.log(`Raw hex data calculated to be sent: ${hexValue}`);
+            log("Setting the following settings onto all trackers:");
+            log(`FPS mode: ${fpsMode}`);
+            log(`Sensor mode: ${sensorMode}`);
+            log(`Sensor auto correction: ${sensorAutoCorrection}`);
+            log(`Ankle motion detection: ${ankleMotionDetection}`);
+            log(`Raw hex data calculated to be sent: ${hexValue}`);
 
             let ports = gx6.getActivePorts();
             for (let trackerName of trackerSettings.keys()) {
@@ -255,7 +282,7 @@ export default class HaritoraXWireless extends EventEmitter {
                         console.error(`${trackerName} - Error writing data to serial port ${trackerPort}: ${err.message}`);
                     } else {
                         trackerSettings.set(trackerName, hexValue);
-                        console.log(`${trackerName} - Data written to serial port ${trackerPort}: ${modeValueBuffer.toString()}`);
+                        log(`${trackerName} - Data written to serial port ${trackerPort}: ${modeValueBuffer.toString()}`);
                     }
                 });
             }
@@ -302,7 +329,7 @@ gx6.on("data", (port, data) => {
         // Tracker info
         processInfoData(value, trackerName);
     } else {
-        console.log(`${port} - Unknown data: ${data}`);
+        log(`${port} - Unknown data: ${data}`);
     }
 });
 
@@ -321,7 +348,7 @@ gx6.on("data", (port, data) => {
 function processIMUData(data, trackerName) {
     // Check if the data is valid
     if (!data || !data.length === 24) {
-        console.log(`Invalid IMU packet for tracker ${trackerName}: ${data}`);
+        log(`Invalid IMU packet for tracker ${trackerName}: ${data}`);
         return false;
     }
 
@@ -329,13 +356,13 @@ function processIMUData(data, trackerName) {
     try {
         const { rotation, gravity, ankle } = decodeIMUPacket(data);
         
-        console.log(`Tracker ${trackerName} rotation: (${rotation.x.toFixed(5)}, ${rotation.y.toFixed(5)}, ${rotation.z.toFixed(5)}, ${rotation.w.toFixed(5)})`);
-        console.log(`Tracker ${trackerName} gravity: (${gravity.x.toFixed(5)}, ${gravity.y.toFixed(5)}, ${gravity.z.toFixed(5)})`);
-        if (ankle) console.log(`Tracker ${trackerName} ankle: ${ankle}`);
+        log(`Tracker ${trackerName} rotation: (${rotation.x.toFixed(5)}, ${rotation.y.toFixed(5)}, ${rotation.z.toFixed(5)}, ${rotation.w.toFixed(5)})`);
+        log(`Tracker ${trackerName} gravity: (${gravity.x.toFixed(5)}, ${gravity.y.toFixed(5)}, ${gravity.z.toFixed(5)})`);
+        if (ankle) log(`Tracker ${trackerName} ankle: ${ankle}`);
 
         haritora.emit("imu", trackerName, rotation, gravity, ankle);
     } catch (err) {
-        console.log(`Error decoding tracker ${trackerName} IMU packet: ${data}`);
+        log(`Error decoding tracker ${trackerName} IMU packet: ${data}`);
     }
 }
 
@@ -404,9 +431,9 @@ function processTrackerData(data, trackerName) {
     */
     
     if (data === "7f7f7f7f7f7f") {
-        console.log(`Searching for tracker ${trackerName}...`);
+        log(`Searching for tracker ${trackerName}...`);
     } else {
-        console.log(`Tracker ${trackerName} other data processed: ${data}`);
+        log(`Tracker ${trackerName} other data processed: ${data}`);
     }
 
     // TODO - Find out what the other data represents, then add to emitter
@@ -430,11 +457,11 @@ function processButtonData(data, trackerName) {
     let mainButton = parseInt(data[6], 16); // 7th character (0-indexed)
     let subButton = parseInt(data[9], 16); // 10th character (0-indexed)
     trackerButtons.set(trackerName, [mainButton, subButton]);
-    console.log(`Tracker ${trackerName} main button: ${mainButton}`);
-    console.log(`Tracker ${trackerName} sub button: ${subButton}`);
+    log(`Tracker ${trackerName} main button: ${mainButton}`);
+    log(`Tracker ${trackerName} sub button: ${subButton}`);
 
     if (data[0] === "0" || data[7] === "f" || data[8] === "f" || data[10] === "f" || data[11] === "f") {
-        console.log(`Tracker ${trackerName} is off/turning off...`);
+        log(`Tracker ${trackerName} is off/turning off...`);
         // last argument - false = turning off/is off
         haritora.emit("button", trackerName, mainButton, subButton, false);
         return;
@@ -462,14 +489,14 @@ function processBatteryData(data, trackerName) {
 
     try {
         const batteryInfo = JSON.parse(data);
-        console.log(`Tracker ${trackerName} remaining: ${batteryInfo["battery remaining"]}%`);
-        console.log(`Tracker ${trackerName} voltage: ${batteryInfo["battery voltage"]}`);
-        console.log(`Tracker ${trackerName} Status: ${batteryInfo["charge status"]}`);
+        log(`Tracker ${trackerName} remaining: ${batteryInfo["battery remaining"]}%`);
+        log(`Tracker ${trackerName} voltage: ${batteryInfo["battery voltage"]}`);
+        log(`Tracker ${trackerName} Status: ${batteryInfo["charge status"]}`);
         batteryRemaining = batteryInfo["battery remaining"];
         batteryVoltage = batteryInfo["battery voltage"];
         chargeStatus = batteryInfo["charge status"];
     } catch (err) {
-        console.log(`Error processing battery data: ${err}`);
+        log(`Error processing battery data: ${err}`);
     }
 
     haritora.emit("battery", trackerName, batteryRemaining, batteryVoltage, chargeStatus);
@@ -508,12 +535,12 @@ function processTrackerSettings(data, trackerName) {
 
     const sensorAutoCorrectionText = sensorAutoCorrectionComponents.join(", ");
 
-    console.log(`Tracker ${trackerName} settings:`);
-    console.log(`Sensor Mode: ${sensorModeText}`);
-    console.log(`Posture Data Transfer Rate: ${postureDataRateText}`);
-    console.log(`Sensor Auto Correction: ${sensorAutoCorrectionText}`);
-    console.log(`Ankle Motion Detection: ${ankleMotionDetectionText}`);
-    console.log(`Raw data: ${data}`);
+    log(`Tracker ${trackerName} settings:`);
+    log(`Sensor Mode: ${sensorModeText}`);
+    log(`Posture Data Transfer Rate: ${postureDataRateText}`);
+    log(`Sensor Auto Correction: ${sensorAutoCorrectionText}`);
+    log(`Ankle Motion Detection: ${ankleMotionDetectionText}`);
+    log(`Raw data: ${data}`);
 
     if (trackerSettings.has(trackerName) && trackerSettings.get(trackerName) !== data) {
         trackerSettings.set(trackerName, data);
@@ -543,33 +570,41 @@ function processInfoData(data, trackerName) {
         type = "dongle";
         try {
             const dongleInfo = JSON.parse(data);
-            console.log(`Dongle version: ${dongleInfo["version"]}`);
-            console.log(`Dongle model: ${dongleInfo["model"]}`);
-            console.log(`Dongle serial: ${dongleInfo["serial no"]}`);
+            log(`Dongle version: ${dongleInfo["version"]}`);
+            log(`Dongle model: ${dongleInfo["model"]}`);
+            log(`Dongle serial: ${dongleInfo["serial no"]}`);
 
             version = dongleInfo["version"];
             model = dongleInfo["model"];
             serial = dongleInfo["serial no"];
         } catch (err) {
-            console.log(`Error processing dongle info data: ${err}`);
+            log(`Error processing dongle info data: ${err}`);
         }
     } else {
         type = "tracker";
         try {
             const trackerInfo = JSON.parse(data);
-            console.log(`Tracker ${trackerName} version: ${trackerInfo["version"]}`);
-            console.log(`Tracker ${trackerName} model: ${trackerInfo["model"]}`);
-            console.log(`Tracker ${trackerName} serial: ${trackerInfo["serial no"]}`);
+            log(`Tracker ${trackerName} version: ${trackerInfo["version"]}`);
+            log(`Tracker ${trackerName} model: ${trackerInfo["model"]}`);
+            log(`Tracker ${trackerName} serial: ${trackerInfo["serial no"]}`);
 
             version = trackerInfo["version"];
             model = trackerInfo["model"];
             serial = trackerInfo["serial no"];
         } catch (err) {
-            console.log(`Error processing tracker info data: ${err}`);
+            log(`Error processing tracker info data: ${err}`);
         }
     }
 
     haritora.emit("info", type, version, model, serial);
+}
+
+
+
+function log(message) {
+    if (debug) {
+        console.log(message);
+    }
 }
 
 
