@@ -8,9 +8,8 @@ trackers.startConnection("gx6");
     trackers.stopConnection("gx6");
 }, 5000);*/
 
-trackers.on("settings", (trackerName, sensorModeText, postureDataRateText, sensorAutoCorrectionComponents, ankleMotionDetectionText) => {
-    // handle the event
-    console.log("settings from event: " + trackerName, sensorModeText, postureDataRateText, sensorAutoCorrectionComponents, ankleMotionDetectionText);
+trackers.on("imu", (tracker, rotation, gravity, ankle) => {
+    console.log(`IMU event fired, tracker: ${tracker}, rotation: ${rotation}, gravity: ${gravity}, ankle: ${ankle}`);
 });
 
 setTimeout(() => {

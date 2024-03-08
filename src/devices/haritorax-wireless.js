@@ -7,6 +7,7 @@ import Bluetooth from "../mode/bluetooth.js";
 
 const gx6 = new GX6();
 const bluetooth = new Bluetooth();
+let haritora;
 
 const trackerButtons = new Map([
     // trackerName, [mainButton, subButton]
@@ -28,14 +29,12 @@ const trackerSettings = new Map([
     ["leftAnkle", ""]
 ]);
 
-
-
 // JSDoc comments for events
 
 /**
  * The "imu" event which provides info about the tracker's IMU data.
  * 
- * @event gx6#imu
+ * @event this#imu
  * @type {object}
  * @property {string} trackerName - The name of the tracker. Possible values: "rightKnee", "rightAnkle", "hip", "chest", "leftKnee", "leftAnkle".
  * @property {object} rotation - The rotation data of the tracker.
@@ -53,7 +52,7 @@ const trackerSettings = new Map([
 /** 
  * The "tracker" event which provides info about the tracker's other data.
  * 
- * @event gx6#tracker
+ * @event this#tracker
  * @type {object}
  * @property {string} trackerName - The name of the tracker. (rightKnee, rightAnkle, hip, chest, leftKnee, leftAnkle)
  * @property {string} data - The data received from the tracker.
@@ -62,7 +61,7 @@ const trackerSettings = new Map([
 /** 
  * The "settings" event which provides info about the tracker settings.
  * 
- * @event gx6#settings
+ * @event this#settings
  * @type {object}
  * @property {string} trackerName - The name of the tracker.
  * @property {number} sensorMode - The sensor mode, which controls whether magnetometer is used (1 or 2).
@@ -74,7 +73,7 @@ const trackerSettings = new Map([
 /**
  * The "info" event which provides info about the tracker or dongle.
  *
- * @event gx6#info
+ * @event this#info
  * @type {object}
  * @property {string} type - The type of the device. (tracker or dongle)
  * @property {string} version - The version of the device.
@@ -91,6 +90,11 @@ const trackerSettings = new Map([
  * set settings for all/individual trackers, and emits events for: IMU data, tracker data, button data, battery data, and settings data.
 **/
 export default class HaritoraXWireless extends EventEmitter {
+    constructor() {
+        super();
+        haritora = this;
+    }
+
     /**
      * Starts the connection to the trackers with the specified mode.
      * 
@@ -128,7 +132,7 @@ export default class HaritoraXWireless extends EventEmitter {
      * @param {string} sensorAutoCorrection - The sensor auto correction mode, multiple or none can be used (accel, gyro, mag).
      * @param {boolean} ankleMotionDetection - Whether ankle motion detection is enabled. (true or false)
      * @returns {boolean} - Whether the settings were successfully sent to the tracker.
-     * @fires gx6#settings
+     * @fires this#settings
      * 
      * @example
      * trackers.setTrackerSettings("rightAnkle", 100, 1, ['accel', 'gyro'], true);
@@ -202,7 +206,7 @@ export default class HaritoraXWireless extends EventEmitter {
             return false;
         }
 
-        gx6.emit("settings", trackerName, sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
+        this.emit("settings", trackerName, sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
         return true;
     }
 
@@ -215,7 +219,7 @@ export default class HaritoraXWireless extends EventEmitter {
      * @param {string} sensorAutoCorrection - The sensor auto correction mode, multiple or none can be used (accel, gyro, mag).
      * @param {boolean} ankleMotionDetection - Whether ankle motion detection is enabled. (true or false)
      * @returns {boolean} - Whether the settings were successfully sent to all trackers.
-     * @fires gx6#settings
+     * @fires this#settings
      * 
      * @example
      * trackers.setAllTrackerSettings(50, 2, ['mag'], false);
@@ -261,13 +265,11 @@ export default class HaritoraXWireless extends EventEmitter {
         }
 
         for (let trackerName of trackerSettings.keys()) {
-            gx6.emit("settings", trackerName, sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
+            this.emit("settings", trackerName, sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
         }
         return true;
     }
 }
-
-
 
 gx6.on("data", (port, data) => {
     const splitData = data.toString().split(/:(.+)/);
@@ -313,7 +315,7 @@ gx6.on("data", (port, data) => {
  * 
  * @param {string} data - The data to process.
  * @param {string} trackerName - The name of the tracker.
- * @fires gx6#imu
+ * @fires haritora#imu
 **/
 
 function processIMUData(data, trackerName) {
@@ -331,7 +333,7 @@ function processIMUData(data, trackerName) {
         console.log(`Tracker ${trackerName} gravity: (${gravity.x.toFixed(5)}, ${gravity.y.toFixed(5)}, ${gravity.z.toFixed(5)})`);
         if (ankle) console.log(`Tracker ${trackerName} ankle: ${ankle}`);
 
-        gx6.emit("imu", trackerName, rotation, gravity, ankle);
+        haritora.emit("imu", trackerName, rotation, gravity, ankle);
     } catch (err) {
         console.log(`Error decoding tracker ${trackerName} IMU packet: ${data}`);
     }
@@ -392,7 +394,7 @@ function decodeIMUPacket(data) {
  * @function processButtonData
  * @param {string} data - The data to process.
  * @param {string} trackerName - The name of the tracker.
- * @fires gx6#tracker
+ * @fires haritora#tracker
 **/
 
 function processTrackerData(data, trackerName) {
@@ -408,7 +410,7 @@ function processTrackerData(data, trackerName) {
     }
 
     // TODO - Find out what the other data represents, then add to emitter
-    gx6.emit("tracker", trackerName, data);
+    haritora.emit("tracker", trackerName, data);
 }
 
 
@@ -419,7 +421,7 @@ function processTrackerData(data, trackerName) {
  * @function processButtonData
  * @param {string} data - The data to process.
  * @param {string} trackerName - The name of the tracker.
- * @fires gx6#button
+ * @fires haritora#button
 **/
 
 function processButtonData(data, trackerName) {
@@ -434,12 +436,12 @@ function processButtonData(data, trackerName) {
     if (data[0] === "0" || data[7] === "f" || data[8] === "f" || data[10] === "f" || data[11] === "f") {
         console.log(`Tracker ${trackerName} is off/turning off...`);
         // last argument - false = turning off/is off
-        gx6.emit("button", trackerName, mainButton, subButton, false);
+        haritora.emit("button", trackerName, mainButton, subButton, false);
         return;
     }
 
     // last argument - true = turning on/is on
-    gx6.emit("button", trackerName, mainButton, subButton, true);
+    haritora.emit("button", trackerName, mainButton, subButton, true);
 }
 
 
@@ -450,7 +452,7 @@ function processButtonData(data, trackerName) {
  * @function processBatteryData
  * @param {string} data - The data to process.
  * @param {string} trackerName - The name of the tracker.
- * @fires gx6#battery
+ * @fires haritora#battery
 **/
 
 function processBatteryData(data, trackerName) {
@@ -470,7 +472,7 @@ function processBatteryData(data, trackerName) {
         console.log(`Error processing battery data: ${err}`);
     }
 
-    gx6.emit("battery", trackerName, batteryRemaining, batteryVoltage, chargeStatus);
+    haritora.emit("battery", trackerName, batteryRemaining, batteryVoltage, chargeStatus);
 }
 
 
@@ -480,7 +482,7 @@ function processBatteryData(data, trackerName) {
  * @function processTrackerSettings
  * @param {string} data - The data to process.
  * @param {string} trackerName - The name of the tracker.
- * @fires gx6#settings
+ * @fires haritora#settings
 **/
 
 function processTrackerSettings(data, trackerName) {
@@ -518,7 +520,7 @@ function processTrackerSettings(data, trackerName) {
     }
 
     
-    gx6.emit("settings", trackerName, sensorModeText, postureDataRateText, sensorAutoCorrectionComponents, ankleMotionDetectionText);
+    haritora.emit("settings", trackerName, sensorModeText, postureDataRateText, sensorAutoCorrectionComponents, ankleMotionDetectionText);
 }
 
 
@@ -528,7 +530,7 @@ function processTrackerSettings(data, trackerName) {
  * @function processInfoData
  * @param {string} data - The data to process.
  * @param {string} trackerName - The name of the tracker.
- * @fires gx6#info
+ * @fires haritora#info
 **/
 
 function processInfoData(data, trackerName) {
@@ -567,7 +569,7 @@ function processInfoData(data, trackerName) {
         }
     }
 
-    gx6.emit("info", type, version, model, serial);
+    haritora.emit("info", type, version, model, serial);
 }
 
 
