@@ -3,10 +3,10 @@
 import { Buffer } from "buffer";
 import { EventEmitter } from "events";
 import GX6 from "../mode/gx6.js";
-import Bluetooth from "../mode/bluetooth.js";
+//import Bluetooth from "../mode/bluetooth.js";
 
 const gx6 = new GX6();
-const bluetooth = new Bluetooth();
+//const bluetooth = new Bluetooth();
 let haritora;
 
 let debug = false;
@@ -114,6 +114,9 @@ const trackerSettings = new Map([
  * set settings for all/individual trackers, and emits events for: IMU data, tracker data, button data, battery data, and settings data.
  * 
  * @param {boolean} debugMode - Enable logging of debug messages. (true or false)
+ * 
+ * @example
+ * let device = new HaritoraXWireless(true);
 **/
 export default class HaritoraXWireless extends EventEmitter {
     constructor(debugMode = false) {
@@ -126,13 +129,16 @@ export default class HaritoraXWireless extends EventEmitter {
      * Starts the connection to the trackers with the specified mode.
      * 
      * @param {string} connectionMode - Connect to the trackers with the specified mode (gx6 or bluetooth).
+     * 
+     * @example
+     * device.startConnection("gx6");
     **/
     startConnection(connectionMode) {
         if (connectionMode === "gx6") {
             gx6.startConnection();
-        } else if (connectionMode === "bluetooth") {
+        } /*else if (connectionMode === "bluetooth") {
             bluetooth.startConnection();
-        }
+        }*/
     }
 
 
@@ -140,13 +146,16 @@ export default class HaritoraXWireless extends EventEmitter {
      * Stops the connection to the trackers with the specified mode.
      * 
      * @param {string} connectionMode - Disconnect from the trackers with the specified mode (gx6 or bluetooth).
+     * 
+     * @example
+     * device.stopConnection("gx6");
     **/
     stopConnection(connectionMode) {
         if (connectionMode === "gx6") {
             gx6.stopConnection();
-        } else if (connectionMode === "bluetooth") {
+        } /*else if (connectionMode === "bluetooth") {
             bluetooth.stopConnection();
-        }
+        }*/
     }
 
 

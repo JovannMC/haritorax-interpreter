@@ -1,16 +1,20 @@
-# THIS IS INCOMPLETE!! THIS IS A PLACEHOLDER README.
 # HaritoraX Interpreter
 
-A node.js package that allows you to communicate with the HaritoraX FBT trackers.
+A node.js package that allows you to communicate and interact with the HaritoraX FBT trackers. No HaritoraConfigurator software needed!
 
 ## Installation
 
 `npm install haritorax-interpreter`
 
+## Documentation
+
+Will write actual documentation at some point, for now refer to the source code, examples, and JSDoc comments.
+
 ## Supported devices
+
 | Device             | Supported | Elbow/Hip support |
 |--------------------|-----------|-------------------|
-| HaritoraX Wireless |     X     |         X         |
+| HaritoraX Wireless |     Y     |         X         |
 | HaritoraX 1.1B     |     X     |         X         |
 | HaritoraX 1.1      |     X     |         X         |
 | HaritoraX 1.0      |     X     |         X         |
@@ -19,13 +23,33 @@ A node.js package that allows you to communicate with the HaritoraX FBT trackers
 | Communication mode        | Supported |
 |---------------------------|-----------|
 | Bluetooth                 |     X     |
-| GX6 Communication Dongle  |     X     |
+| GX6 Communication Dongle  |     Y     |
 | GX2 Communication Dongle  |     X     |
 
 ## Example
 
 ```js
-const lorem_ipsum = "dolor_sit_amet";
+import { HaritoraXWireless } from "haritorax-interpreter";
+
+let device = new HaritoraXWireless(true);
+device.startConnection("gx6");
+
+trackers.on("imu", (trackerName, rotation, gravity, ankle) => {
+    // IMU data received, do stuff
+});
+
+setTimeout(() => {
+    // apply the following settings to the rightAnkle tracker:
+    // posture data transfer rate: 100FPS
+    // sensor mode: 1 (magnetometer enabled)
+    // sensor auto correction mode: accelerometer and gyroscope
+    // ankle motion detection: enabled
+    trackers.setTrackerSettings("rightAnkle", 100, 1, ['accel', 'gyro'], true);
+}, 2000)
+
+setTimeout(() => {
+    device.stopConnection("gx6");
+}, 10000)
 ```
 
 ## License
