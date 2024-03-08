@@ -4,7 +4,7 @@ A node.js package that allows you to communicate and interact with the HaritoraX
 
 ## Installation
 
-`npm install haritorax-interpreter`
+`npm install haritorax-interpreter` (publishing soon)
 
 ## Documentation
 
