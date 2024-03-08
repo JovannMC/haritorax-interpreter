@@ -28,7 +28,74 @@ const trackerSettings = new Map([
     ["leftAnkle", ""]
 ]);
 
+
+
+// JSDoc comments for events
+
+/**
+ * The "imu" event which provides info about the tracker's IMU data.
+ * 
+ * @event gx6#imu
+ * @type {object}
+ * @property {string} trackerName - The name of the tracker. Possible values: "rightKnee", "rightAnkle", "hip", "chest", "leftKnee", "leftAnkle".
+ * @property {object} rotation - The rotation data of the tracker.
+ * @property {number} rotation.x - The x component of the rotation.
+ * @property {number} rotation.y - The y component of the rotation.
+ * @property {number} rotation.z - The z component of the rotation.
+ * @property {number} rotation.w - The w component of the rotation.
+ * @property {object} gravity - The gravity data of the tracker.
+ * @property {number} gravity.x - The x component of the gravity.
+ * @property {number} gravity.y - The y component of the gravity.
+ * @property {number} gravity.z - The z component of the gravity.
+ * @property {number|null} ankle - The ankle motion data of the tracker if enabled. Null if disabled.
+**/
+
+/** 
+ * The "tracker" event which provides info about the tracker's other data.
+ * 
+ * @event gx6#tracker
+ * @type {object}
+ * @property {string} trackerName - The name of the tracker. (rightKnee, rightAnkle, hip, chest, leftKnee, leftAnkle)
+ * @property {string} data - The data received from the tracker.
+**/
+
+/** 
+ * The "settings" event which provides info about the tracker settings.
+ * 
+ * @event gx6#settings
+ * @type {object}
+ * @property {string} trackerName - The name of the tracker.
+ * @property {number} sensorMode - The sensor mode, which controls whether magnetometer is used (1 or 2).
+ * @property {number} fpsMode - The posture data transfer rate/FPS (50 or 100).
+ * @property {string} sensorAutoCorrection - The sensor auto correction mode, multiple or none can be used (accel, gyro, mag).
+ * @property {boolean} ankleMotionDetection - Whether ankle motion detection is enabled. (true or false)
+**/
+
+/**
+ * The "info" event which provides info about the tracker or dongle.
+ *
+ * @event gx6#info
+ * @type {object}
+ * @property {string} type - The type of the device. (tracker or dongle)
+ * @property {string} version - The version of the device.
+ * @property {string} model - The model of the device.
+ * @property {string} serial - The serial number of the device.
+**/
+
+
+
+/**
+ * The HaritoraXWireless class.
+ * 
+ * This class represents a HaritoraX wireless device. It provides methods to start/stop a connection,
+ * set settings for all/individual trackers, and emits events for: IMU data, tracker data, button data, battery data, and settings data.
+**/
 export default class HaritoraXWireless extends EventEmitter {
+    /**
+     * Starts the connection to the trackers with the specified mode.
+     * 
+     * @param {string} connectionMode - Connect to the trackers with the specified mode (gx6 or bluetooth).
+    **/
     startConnection(connectionMode) {
         if (connectionMode === "gx6") {
             gx6.startConnection();
@@ -37,6 +104,12 @@ export default class HaritoraXWireless extends EventEmitter {
         }
     }
 
+
+    /**
+     * Stops the connection to the trackers with the specified mode.
+     * 
+     * @param {string} connectionMode - Disconnect from the trackers with the specified mode (gx6 or bluetooth).
+    **/
     stopConnection(connectionMode) {
         if (connectionMode === "gx6") {
             gx6.stopConnection();
@@ -45,27 +118,156 @@ export default class HaritoraXWireless extends EventEmitter {
         }
     }
 
-    // ! To remove after testing
-    getTrackers() {
-        return gx6.getTrackers();
+
+    /**
+     * Sets the tracker settings for a specific tracker.
+     * 
+     * @param {string} trackerName - The name of the tracker to apply settings to (rightKnee, rightAnkle, hip, chest, leftKnee, leftAnkle).
+     * @param {number} fpsMode - The posture data transfer rate/FPS (50 or 100).
+     * @param {number} sensorMode - The sensor mode, which controls whether magnetometer is used (1 or 2).
+     * @param {string} sensorAutoCorrection - The sensor auto correction mode, multiple or none can be used (accel, gyro, mag).
+     * @param {boolean} ankleMotionDetection - Whether ankle motion detection is enabled. (true or false)
+     * @returns {boolean} - Whether the settings were successfully sent to the tracker.
+     * @fires gx6#settings
+     * 
+     * @example
+     * trackers.setTrackerSettings("rightAnkle", 100, 1, ['accel', 'gyro'], true);
+    **/ 
+
+    setTrackerSettings(trackerName, fpsMode, sensorMode, sensorAutoCorrection, ankleMotionDetection) {
+        console.log(`Setting tracker settings for ${trackerName}...`);
+        const sensorModeBit = sensorMode === 1 ? "1" : "0"; // If a value other than 1, default to mode 2
+        const postureDataRateBit = fpsMode === 50 ? "0" : "1"; // If a value other than 1, default to 100FPS
+        const ankleMotionDetectionBit = ankleMotionDetection ? "1" : "0"; // If a value other than 1, default to disabled
+        let sensorAutoCorrectionBit = 0;
+        if (sensorAutoCorrection.includes("accel")) sensorAutoCorrectionBit |= 0x01;
+        if (sensorAutoCorrection.includes("gyro")) sensorAutoCorrectionBit |= 0x02;
+        if (sensorAutoCorrection.includes("mag")) sensorAutoCorrectionBit |= 0x04;
+
+        let hexValue = null;
+        let modeValueBuffer = null;
+        
+        if (trackerName === "rightKnee" || trackerName === "hip" || trackerName === "leftKnee") {
+            const entries = Array.from(trackerSettings.entries());
+            const currentIndex = entries.findIndex(([key]) => key === trackerName);
+
+            hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
+            if (currentIndex !== -1 && currentIndex < entries.length - 1) {
+                const nextKey = entries[currentIndex + 1][0];
+                let nextValue = trackerSettings.get(nextKey);
+                modeValueBuffer = Buffer.from("o0:" + hexValue + "\r\n" + "o1:" + nextValue + "\r\n", "utf-8");
+            }
+            
+            console.log(`${trackerName} - Calculated hex value: ${hexValue}`);
+        } else if (trackerName === "rightAnkle" || trackerName === "chest" || trackerName === "leftAnkle") {
+            const entries = Array.from(trackerSettings.entries());
+            const currentIndex = entries.findIndex(([key]) => key === trackerName);
+
+            hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
+            if (currentIndex !== -1 && currentIndex > 0) {
+                const previousKey = entries[currentIndex - 1][0];
+                let previousValue = trackerSettings.get(previousKey);
+                modeValueBuffer = Buffer.from("o0:" + previousValue + "\r\n" + "o1:" + hexValue + "\r\n", "utf-8");
+            }
+
+            console.log(`${trackerName} - Calculated hex value: ${hexValue}`);
+        } else {
+            console.log(`Invalid tracker name: ${trackerName}`);
+            return;
+        }
+
+        console.log(`Setting the following settings onto tracker ${trackerName}:`);
+        console.log(`FPS mode: ${fpsMode}`);
+        console.log(`Sensor mode: ${sensorMode}`);
+        console.log(`Sensor auto correction: ${sensorAutoCorrection}`);
+        console.log(`Ankle motion detection: ${ankleMotionDetection}`);
+        console.log(`Raw hex data calculated to be sent: ${hexValue}`);
+
+        try {
+            console.log(`Sending tracker settings to ${trackerName}: ${modeValueBuffer.toString()}`);
+            let ports = gx6.getActivePorts();
+            let trackerInfo = gx6.getTrackerInfo(trackerName);
+            let trackerPort = trackerInfo[1];
+
+            ports[trackerPort].write(modeValueBuffer, (err) => {
+                if (err) {
+                    console.error(`${trackerName} - Error writing data to serial port ${trackerPort}: ${err.message}`);
+                } else {
+                    trackerSettings.set(trackerName, hexValue);
+                    console.log(`${trackerName} - Data written to serial port ${trackerPort}: ${modeValueBuffer.toString()}`);
+                }
+            });
+        } catch (error) {
+            console.error(`Error sending tracker settings: ${error.message}`);
+            return false;
+        }
+
+        gx6.emit("settings", trackerName, sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
+        return true;
     }
 
-    getTrackersInPort(port) {
-        return gx6.getTrackersInPort(port);
-    }
+    
+    /**
+     * Sets the tracker settings for all connected trackers
+     *
+     * @param {number} fpsMode - The posture data transfer rate/FPS (50 or 100).
+     * @param {number} sensorMode - The sensor mode, which controls whether magnetometer is used (1 or 2).
+     * @param {string} sensorAutoCorrection - The sensor auto correction mode, multiple or none can be used (accel, gyro, mag).
+     * @param {boolean} ankleMotionDetection - Whether ankle motion detection is enabled. (true or false)
+     * @returns {boolean} - Whether the settings were successfully sent to all trackers.
+     * @fires gx6#settings
+     * 
+     * @example
+     * trackers.setAllTrackerSettings(50, 2, ['mag'], false);
+    **/
 
-    getTrackerInfo(tracker) {
-        return gx6.getTrackerInfo(tracker);
-    }
+    setAllTrackerSettings(fpsMode, sensorMode, sensorAutoCorrection, ankleMotionDetection) {
+        try {
+            const sensorModeBit = sensorMode === 1 ? "1" : "0";
+            const postureDataRateBit = fpsMode === 100 ? "1" : "0";
+            let sensorAutoCorrectionBit = 0;
+            if (sensorAutoCorrection.includes("accel")) sensorAutoCorrectionBit |= 0x01;
+            if (sensorAutoCorrection.includes("gyro")) sensorAutoCorrectionBit |= 0x02;
+            if (sensorAutoCorrection.includes("mag")) sensorAutoCorrectionBit |= 0x04;
+            const ankleMotionDetectionBit = ankleMotionDetection ? "1" : "0";
 
-    getPartFromInfo(trackerId, port) {
-        return gx6.getPartFromInfo(trackerId, port);
-    }
+            const hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
+            const modeValueBuffer = Buffer.from("o0:" + hexValue + "\r\n" + "o1:" + hexValue + "\r\n", "utf-8");
 
-    getActivePorts() {
-        return gx6.getActivePorts();
+            console.log("Setting the following settings onto all trackers:");
+            console.log(`FPS mode: ${fpsMode}`);
+            console.log(`Sensor mode: ${sensorMode}`);
+            console.log(`Sensor auto correction: ${sensorAutoCorrection}`);
+            console.log(`Ankle motion detection: ${ankleMotionDetection}`);
+            console.log(`Raw hex data calculated to be sent: ${hexValue}`);
+
+            let ports = gx6.getActivePorts();
+            for (let trackerName of trackerSettings.keys()) {
+                let trackerInfo = gx6.getTrackerInfo(trackerName);
+                let trackerPort = trackerInfo[1];
+
+                ports[trackerPort].write(modeValueBuffer, (err) => {
+                    if (err) {
+                        console.error(`${trackerName} - Error writing data to serial port ${trackerPort}: ${err.message}`);
+                    } else {
+                        trackerSettings.set(trackerName, hexValue);
+                        console.log(`${trackerName} - Data written to serial port ${trackerPort}: ${modeValueBuffer.toString()}`);
+                    }
+                });
+            }
+        } catch (error) {
+            console.error("Error sending tracker settings:\n", error);
+            return false;
+        }
+
+        for (let trackerName of trackerSettings.keys()) {
+            gx6.emit("settings", trackerName, sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
+        }
+        return true;
     }
 }
+
+
 
 gx6.on("data", (port, data) => {
     const splitData = data.toString().split(/:(.+)/);
@@ -79,22 +281,22 @@ gx6.on("data", (port, data) => {
     // Check what body part the tracker is assigned to
     let trackerName = gx6.getPartFromInfo(trackerId, port);
     
-    if (identifier.includes("X")) {
+    if (identifier.toLowerCase().includes("x")) {
         // IMU data
         processIMUData(value, trackerName);
-    } else if (identifier.includes("a")) {
+    } else if (identifier.toLowerCase().includes("a")) {
         // Tracker data
         processTrackerData(value, trackerName);
-    } else if (identifier.includes("r") && trackerName !== "(DONGLE)") {
+    } else if (identifier.toLowerCase().includes("r") && trackerName !== "(DONGLE)") {
         // Tracker button info
         processButtonData(value, trackerName);
-    } else if (identifier.includes("v")) {
+    } else if (identifier.toLowerCase().includes("v")) {
         // Tracker battery info
         processBatteryData(value, trackerName);
-    } else if (identifier.includes("o") && trackerName !== "(DONGLE)") {
+    } else if (identifier.toLowerCase().includes("o") && trackerName !== "(DONGLE)") {
         // Tracker settings
         processTrackerSettings(value, trackerName);
-    } else if (identifier.includes("i")) {
+    } else if (identifier.toLowerCase().includes("i")) {
         // Tracker info
         processInfoData(value, trackerName);
     } else {
@@ -102,32 +304,32 @@ gx6.on("data", (port, data) => {
     }
 });
 
-/*
-* Tracker data
-* This is obviously the IMU tracking data, the juicy stuff. Ankle motion data also included (if enabled).
-* Can be used to forward to other software such as SlimeVR's server!
-* Rotation has: x, y, z, w
-* Gravity has: x, y, z
-* Ankle has: ? (unknown, assuming distance?)
-*/
 
-function logIMUData(trackerName, rotation, gravity, ankle) {
-    console.log(`Tracker ${trackerName} rotation: (${rotation.x.toFixed(5)}, ${rotation.y.toFixed(5)}, ${rotation.z.toFixed(5)}, ${rotation.w.toFixed(5)})`);
-    console.log(`Tracker ${trackerName} gravity: (${gravity.x.toFixed(5)}, ${gravity.y.toFixed(5)}, ${gravity.z.toFixed(5)})`);
-    if (ankle) console.log(`Tracker ${trackerName} ankle: ${ankle}`);
-}
+/**
+ * Processes the IMU data received from the tracker by the dongle.
+ * The data contains the information about the rotation, gravity, and ankle motion (if enabled) of the tracker.
+ *
+ * @function processIMUData
+ * 
+ * @param {string} data - The data to process.
+ * @param {string} trackerName - The name of the tracker.
+ * @fires gx6#imu
+**/
 
 function processIMUData(data, trackerName) {
     // Check if the data is valid
     if (!data || !data.length === 24) {
         console.log(`Invalid IMU packet for tracker ${trackerName}: ${data}`);
-        return;
+        return false;
     }
 
     // Decode and log the data
     try {
         const { rotation, gravity, ankle } = decodeIMUPacket(data);
-        logIMUData(trackerName, rotation, gravity, ankle);
+        
+        console.log(`Tracker ${trackerName} rotation: (${rotation.x.toFixed(5)}, ${rotation.y.toFixed(5)}, ${rotation.z.toFixed(5)}, ${rotation.w.toFixed(5)})`);
+        console.log(`Tracker ${trackerName} gravity: (${gravity.x.toFixed(5)}, ${gravity.y.toFixed(5)}, ${gravity.z.toFixed(5)})`);
+        if (ankle) console.log(`Tracker ${trackerName} ankle: ${ankle}`);
 
         gx6.emit("imu", trackerName, rotation, gravity, ankle);
     } catch (err) {
@@ -135,11 +337,12 @@ function processIMUData(data, trackerName) {
     }
 }
 
-/*
-* Decoding IMU packet
-* The logic to decode the IMU packet received by the dongle. Thanks to sim1222's project for helping with the math :p
-* https://github.com/sim1222/haritorax-slimevr-bridge/
-*/
+
+/**
+ * The logic to decode the IMU packet received by the dongle. 
+ * Thanks to sim1222's project for helping with the math :p
+ * @see {@link https://github.com/sim1222/haritorax-slimevr-bridge/}
+**/
 
 function decodeIMUPacket(data) {
     try {
@@ -181,14 +384,23 @@ function decodeIMUPacket(data) {
     }
 }
 
-/*
-* Tracker data
-* Currently unsure what other data a0/a1 could represent other than trying to find the trackers,
-* I see other values for it too. This could also be used to report calibration data when running the
-* calibration through the software. Also, could be if the tracker is just turned on/off.
-*/
+
+/**
+ * Processes other tracker data received from the tracker by the dongle.
+ * Read function comments for more information.
+ * 
+ * @function processButtonData
+ * @param {string} data - The data to process.
+ * @param {string} trackerName - The name of the tracker.
+ * @fires gx6#tracker
+**/
 
 function processTrackerData(data, trackerName) {
+    /* 
+    * Currently unsure what other data a0/a1 could represent other than trying to find the trackers, I see other values for it too reporting every second (mag info?).
+    * This could also be used to report calibration data when running the calibration through the software.
+    */
+    
     if (data === "7f7f7f7f7f7f") {
         console.log(`Searching for tracker ${trackerName}...`);
     } else {
@@ -199,11 +411,16 @@ function processTrackerData(data, trackerName) {
     gx6.emit("tracker", trackerName, data);
 }
 
-/*
-* Tracker button data
-* Here we're processing the button pressed, the 7th/10th character in the decoded data is the
-* amount of times the main/sub buttons were pressed respectively.
-*/
+
+/**
+ * Processes the button data received from the tracker by the dongle.
+ * The data contains the information about the main and sub buttons on the tracker.
+ * 
+ * @function processButtonData
+ * @param {string} data - The data to process.
+ * @param {string} trackerName - The name of the tracker.
+ * @fires gx6#button
+**/
 
 function processButtonData(data, trackerName) {
     // Character 1 turns 0 when the tracker is turning off/is off (1 when turning on/is on)
@@ -221,15 +438,20 @@ function processButtonData(data, trackerName) {
         return;
     }
 
-    // last argument - false = turning off/is off
+    // last argument - true = turning on/is on
     gx6.emit("button", trackerName, mainButton, subButton, true);
 }
 
-/*
-* Tracker battery info
-* This contains the information about the battery, voltage, and charge status of the tracker.
-* Can be used to forward to other software such as SlimeVR's server!
-*/
+
+/**
+ * Processes the battery data received from the tracker by the dongle.
+ * It contains the information about the battery percentage, voltage, and charge status of the tracker.
+ * 
+ * @function processBatteryData
+ * @param {string} data - The data to process.
+ * @param {string} trackerName - The name of the tracker.
+ * @fires gx6#battery
+**/
 
 function processBatteryData(data, trackerName) {
     let batteryRemaining;
@@ -251,9 +473,15 @@ function processBatteryData(data, trackerName) {
     gx6.emit("battery", trackerName, batteryRemaining, batteryVoltage, chargeStatus);
 }
 
-/*
-*   Tracker settings
-*/
+
+/**
+ * Processes the tracker settings data received from the dongle by the tracker.
+ * 
+ * @function processTrackerSettings
+ * @param {string} data - The data to process.
+ * @param {string} trackerName - The name of the tracker.
+ * @fires gx6#settings
+**/
 
 function processTrackerSettings(data, trackerName) {
     const sensorMode = parseInt(data[6]);
@@ -261,9 +489,9 @@ function processTrackerSettings(data, trackerName) {
     const sensorAutoCorrection = parseInt(data[10]);
     const ankleMotionDetection = parseInt(data[13]);
 
-    const sensorModeText = sensorMode === 0 ? "Mode 2" : "Mode 1";
-    const postureDataRateText = postureDataRate === 0 ? "50FPS" : "100FPS";
-    const ankleMotionDetectionText = ankleMotionDetection === 0 ? "Disabled" : "Enabled";
+    const sensorModeText = sensorMode === 0 ? "2" : "1";
+    const postureDataRateText = postureDataRate === 0 ? "50" : "100";
+    const ankleMotionDetectionText = ankleMotionDetection === 0 ? "false" : "true";
 
     const sensorAutoCorrectionComponents = [];
     if (sensorAutoCorrection & 1) {
@@ -289,121 +517,19 @@ function processTrackerSettings(data, trackerName) {
         trackerSettings.set(trackerName, data);
     }
 
+    
     gx6.emit("settings", trackerName, sensorModeText, postureDataRateText, sensorAutoCorrectionComponents, ankleMotionDetectionText);
 }
 
-function setTrackerSettings(trackerName, fpsMode, sensorMode, sensorAutoCorrection, ankleMotionDetection) {
-    console.log(`Setting tracker settings for ${trackerName}...`);
-    const sensorModeBit = sensorMode === 1 ? "1" : "0"; // If a value other than 1, default to mode 2
-    const postureDataRateBit = fpsMode === 50 ? "0" : "1"; // If a value other than 1, default to 100FPS
-    const ankleMotionDetectionBit = ankleMotionDetection ? "1" : "0"; // If a value other than 1, default to disabled
-    let sensorAutoCorrectionBit = 0;
-    if (sensorAutoCorrection.includes("Accel")) sensorAutoCorrectionBit |= 0x01;
-    if (sensorAutoCorrection.includes("Gyro")) sensorAutoCorrectionBit |= 0x02;
-    if (sensorAutoCorrection.includes("Mag")) sensorAutoCorrectionBit |= 0x04;
 
-    let hexValue = null;
-    let modeValueBuffer = null;
-    
-    if (trackerName === "rightKnee" || trackerName === "hip" || trackerName === "leftKnee") {
-        const entries = Array.from(trackerSettings.entries());
-        const currentIndex = entries.findIndex(([key]) => key === trackerName);
-
-        hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
-        if (currentIndex !== -1 && currentIndex < entries.length - 1) {
-            const nextKey = entries[currentIndex + 1][0];
-            let nextValue = trackerSettings.get(nextKey);
-            modeValueBuffer = Buffer.from("o0:" + hexValue + "\r\n" + "o1:" + nextValue + "\r\n", "utf-8");
-        }
-        
-        console.log(`${trackerName} - Calculated hex value: ${hexValue}`);
-    } else if (trackerName === "rightAnkle" || trackerName === "chest" || trackerName === "leftAnkle") {
-        const entries = Array.from(trackerSettings.entries());
-        const currentIndex = entries.findIndex(([key]) => key === trackerName);
-
-        hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
-        if (currentIndex !== -1 && currentIndex > 0) {
-            const previousKey = entries[currentIndex - 1][0];
-            let previousValue = trackerSettings.get(previousKey);
-            modeValueBuffer = Buffer.from("o0:" + previousValue + "\r\n" + "o1:" + hexValue + "\r\n", "utf-8");
-        }
-
-        console.log(`${trackerName} - Calculated hex value: ${hexValue}`);
-    } else {
-        console.log(`Invalid tracker name: ${trackerName}`);
-        return;
-    }
-
-    console.log(`Setting the following settings onto tracker ${trackerName}:`);
-    console.log(`FPS mode: ${fpsMode}`);
-    console.log(`Sensor mode: ${sensorMode}`);
-    console.log(`Sensor auto correction: ${sensorAutoCorrection}`);
-    console.log(`Ankle motion detection: ${ankleMotionDetection}`);
-    console.log(`Raw hex data calculated to be sent: ${hexValue}`);
-
-    try {
-        console.log(`Sending tracker settings to ${trackerName}: ${modeValueBuffer.toString()}`);
-        let ports = gx6.getActivePorts();
-        let trackerInfo = gx6.getTrackerInfo(trackerName);
-        let trackerPort = trackerInfo[1];
-
-        ports[trackerPort].write(modeValueBuffer, (err) => {
-            if (err) {
-                console.error(`${trackerName} - Error writing data to serial port ${trackerPort}: ${err.message}`);
-            } else {
-                trackerSettings.set(trackerName, hexValue);
-                console.log(`${trackerName} - Data written to serial port ${trackerPort}: ${modeValueBuffer.toString()}`);
-            }
-        });
-    } catch (error) {
-        console.error(`Error sending tracker settings: ${error.message}`);
-    }
-
-    gx6.emit("settings", trackerName, sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
-}
-
-function setAllTrackerSettings(fpsMode, sensorMode, sensorAutoCorrection, ankleMotionDetection) {
-    try {
-        const sensorModeBit = sensorMode === 1 ? "1" : "0";
-        const postureDataRateBit = fpsMode === 100 ? "1" : "0";
-        let sensorAutoCorrectionBit = 0;
-        if (sensorAutoCorrection.includes("Accel")) sensorAutoCorrectionBit |= 0x01;
-        if (sensorAutoCorrection.includes("Gyro")) sensorAutoCorrectionBit |= 0x02;
-        if (sensorAutoCorrection.includes("Mag")) sensorAutoCorrectionBit |= 0x04;
-        const ankleMotionDetectionBit = ankleMotionDetection ? "1" : "0";
-
-        const hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
-        const modeValueBuffer = Buffer.from("o0:" + hexValue + "\r\n" + "o1:" + hexValue + "\r\n", "utf-8");
-
-        console.log("Setting the following settings onto all trackers:");
-        console.log(`FPS mode: ${fpsMode}`);
-        console.log(`Sensor mode: ${sensorMode}`);
-        console.log(`Sensor auto correction: ${sensorAutoCorrection}`);
-        console.log(`Ankle motion detection: ${ankleMotionDetection}`);
-        console.log(`Raw hex data calculated to be sent: ${hexValue}`);
-
-        let ports = gx6.getActivePorts();
-        for (let trackerName of trackerSettings.keys()) {
-            let trackerInfo = gx6.getTrackerInfo(trackerName);
-            let trackerPort = trackerInfo[1];
-
-            ports[trackerPort].write(modeValueBuffer, (err) => {
-                if (err) {
-                    console.error(`${trackerName} - Error writing data to serial port ${trackerPort}: ${err.message}`);
-                } else {
-                    trackerSettings.set(trackerName, hexValue);
-                    console.log(`${trackerName} - Data written to serial port ${trackerPort}: ${modeValueBuffer.toString()}`);
-                }
-            });
-        }
-    } catch (error) {
-        console.error("Error sending tracker settings:", error.message);
-    }
-
-    for (let trackerName of trackerSettings.keys()) {
-        gx6.emit("settings", trackerName, sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
-    }
-}
+/**
+ * Processes the info data received from the tracker or dongle.
+ * 
+ * @function processInfoData
+ * @param {string} data - The data to process.
+ * @param {string} trackerName - The name of the tracker.
+ * @fires gx6#info
+**/
 
 function processInfoData(data, trackerName) {
     let type;
@@ -444,4 +570,6 @@ function processInfoData(data, trackerName) {
     gx6.emit("info", type, version, model, serial);
 }
 
-export { HaritoraXWireless, setTrackerSettings, setAllTrackerSettings };
+
+
+export { HaritoraXWireless };

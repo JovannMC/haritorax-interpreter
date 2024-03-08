@@ -1,5 +1,5 @@
 "use strict";
 
-import { HaritoraXWireless, setTrackerSettings, setAllTrackerSettings } from "./devices/haritorax-wireless.js";
+import { HaritoraXWireless } from "./devices/haritorax-wireless.js";
 
-export { HaritoraXWireless, setTrackerSettings, setAllTrackerSettings };
+export { HaritoraXWireless };
