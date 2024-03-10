@@ -36,7 +36,7 @@ import { HaritoraXWireless } from "haritorax-interpreter";
 let device = new HaritoraXWireless(true);
 device.startConnection("gx6");
 
-trackers.on("imu", (trackerName, rotation, gravity, ankle) => {
+device.on("imu", (trackerName, rotation, gravity, ankle) => {
     // IMU data received, do stuff
 });
 
@@ -46,7 +46,7 @@ setTimeout(() => {
     // sensor mode: 1 (magnetometer enabled)
     // sensor auto correction mode: accelerometer and gyroscope
     // ankle motion detection: enabled
-    trackers.setTrackerSettings("rightAnkle", 100, 1, ['accel', 'gyro'], true);
+    device.setTrackerSettings("rightAnkle", 100, 1, ['accel', 'gyro'], true);
 }, 2000)
 
 setTimeout(() => {
