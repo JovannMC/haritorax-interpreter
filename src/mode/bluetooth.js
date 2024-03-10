@@ -28,7 +28,7 @@ const characteristics = new Map([
 
 let activeDevices = [];
 
-// ! TODO - multiple trackers
+// TODO - multiple trackers
 
 export default class Bluetooth extends EventEmitter {
     constructor() {
@@ -44,11 +44,8 @@ export default class Bluetooth extends EventEmitter {
 
     onDiscover(peripheral) {
         const { advertisement: { localName } } = peripheral;
-        if (localName && localName.startsWith("HaritoraXW-")) {
+        if (localName && localName.startsWith("HaritoraXW-") && !activeDevices.includes(peripheral)) {
             console.log(`Found device: ${localName}`);
-            console.log(peripheral.toString());
-            console.log(`manufacturerData: ${peripheral.advertisement.manufacturerData}`);
-            noble.stopScanning();
     
             peripheral.connect(error => {
                 if (error) {
@@ -76,7 +73,7 @@ export default class Bluetooth extends EventEmitter {
                 
                             characteristics.forEach(characteristic => {
                                 characteristic.on("data", (data) => {
-                                    emitData(this, service.uuid, characteristic.uuid, data);
+                                    emitData(this, localName, service.uuid, characteristic.uuid, data);
                                 });
                                 characteristic.subscribe(error => {
                                     if (error) {
@@ -115,11 +112,18 @@ export default class Bluetooth extends EventEmitter {
         this.emit("disconnected");
     }
 
+    getServices() {
+        return services;
+    }
+
+    getCharacteristics() {
+        return characteristics;
+    }
 }
 
-function emitData(classInstance, service, characteristic, data) {
+function emitData(classInstance, localName, service, characteristic, data) {
     //console.log(`Data from ${services.get(service)} - ${characteristics.get(characteristic)}:`, data);
-    classInstance.emit("data", services.get(service), characteristics.get(characteristic), data);
+    classInstance.emit("data", localName, services.get(service), characteristics.get(characteristic), data);
 }
 
 export { Bluetooth };

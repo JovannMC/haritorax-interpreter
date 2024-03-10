@@ -342,6 +342,21 @@ gx6.on("data", (port, data) => {
     }
 });
 
+bluetooth.on("data", (localName, service, characteristic, data) => {
+    if (characteristic === "Sensor") {
+        processIMUData(data, localName);
+    } else if (characteristic === "MainButton" || characteristic === "SecondaryButton") {
+        // TODO - Process button data
+    } else if (characteristic === "Battery") {
+        // TODO - Process battery data
+    } else if (characteristic === "Settings") {
+        // TODO - Process settings data
+    } else if (characteristic === "Info") {
+        // TODO - Process info data
+    } else {
+        log(`Unknown data: ${data} from ${localName} - ${service} - ${characteristic}`);
+    }
+});
 
 /**
  * Processes the IMU data received from the tracker by the dongle.
@@ -371,7 +386,7 @@ function processIMUData(data, trackerName) {
 
         haritora.emit("imu", trackerName, rotation, gravity, ankle);
     } catch (err) {
-        log(`Error decoding tracker ${trackerName} IMU packet: ${data}`);
+        log(`Error decoding tracker ${trackerName} IMU packet data: ${err.message}`);
     }
 }
 
@@ -411,8 +426,7 @@ function decodeIMUPacket(data) {
         };
 
         let ankle = null;
-        if (data.slice(-2) !== "==") {
-            // or buffer.length - 2
+        if (data.slice(-2) !== "==" && data.length > 14){
             ankle = buffer.readInt16LE(14);
         }
 
