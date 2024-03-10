@@ -3,10 +3,10 @@
 import { Buffer } from "buffer";
 import { EventEmitter } from "events";
 import GX6 from "../mode/gx6.js";
-//import Bluetooth from "../mode/bluetooth.js";
+import Bluetooth from "../mode/bluetooth.js";
 
 const gx6 = new GX6();
-//const bluetooth = new Bluetooth();
+const bluetooth = new Bluetooth();
 let haritora;
 
 let debug = false;
@@ -136,9 +136,9 @@ export default class HaritoraXWireless extends EventEmitter {
     startConnection(connectionMode) {
         if (connectionMode === "gx6") {
             gx6.startConnection();
-        } /*else if (connectionMode === "bluetooth") {
+        } else if (connectionMode === "bluetooth") {
             bluetooth.startConnection();
-        }*/
+        }
     }
 
 
@@ -153,9 +153,9 @@ export default class HaritoraXWireless extends EventEmitter {
     stopConnection(connectionMode) {
         if (connectionMode === "gx6") {
             gx6.stopConnection();
-        } /*else if (connectionMode === "bluetooth") {
+        } else if (connectionMode === "bluetooth") {
             bluetooth.stopConnection();
-        }*/
+        }
     }
 
 

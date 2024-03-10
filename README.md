@@ -2,6 +2,8 @@
 
 A node.js package that allows you to communicate and interact with the HaritoraX FBT trackers. No HaritoraConfigurator software needed!
 
+Check out the Haritora-GX6 proof-of-concept repository here: https://github.com/JovannMC/haritora-gx6-poc
+
 ## Installation
 
 `npm install haritorax-interpreter` (publishing soon)

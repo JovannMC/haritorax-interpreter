@@ -16,6 +16,7 @@
     "interpreter"
   ],
   "dependencies": {
+    "@abandonware/noble": "^1.9.2-24",
     "serialport": "^12.0.0"
   },
   "devDependencies": {
