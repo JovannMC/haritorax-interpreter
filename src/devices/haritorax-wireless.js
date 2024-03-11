@@ -7,6 +7,8 @@ import Bluetooth from "../mode/bluetooth.js";
 
 const gx6 = new GX6();
 const bluetooth = new Bluetooth();
+let gx6Enabled = false;
+let bluetoothEnabled = false;
 let haritora;
 
 let debug = false;
@@ -136,8 +138,10 @@ export default class HaritoraXWireless extends EventEmitter {
     startConnection(connectionMode) {
         if (connectionMode === "gx6") {
             gx6.startConnection();
+            gx6Enabled = true;
         } else if (connectionMode === "bluetooth") {
             bluetooth.startConnection();
+            bluetoothEnabled = true;
         }
     }
 
@@ -153,8 +157,10 @@ export default class HaritoraXWireless extends EventEmitter {
     stopConnection(connectionMode) {
         if (connectionMode === "gx6") {
             gx6.stopConnection();
+            gx6Enabled = false;
         } else if (connectionMode === "bluetooth") {
             bluetooth.stopConnection();
+            bluetoothEnabled = false;
         }
     }
 
@@ -175,71 +181,77 @@ export default class HaritoraXWireless extends EventEmitter {
     **/ 
 
     setTrackerSettings(trackerName, fpsMode, sensorMode, sensorAutoCorrection, ankleMotionDetection) {
-        log(`Setting tracker settings for ${trackerName}...`);
-        const sensorModeBit = sensorMode === 1 ? "1" : "0"; // If a value other than 1, default to mode 2
-        const postureDataRateBit = fpsMode === 50 ? "0" : "1"; // If a value other than 1, default to 100FPS
-        const ankleMotionDetectionBit = ankleMotionDetection ? "1" : "0"; // If a value other than 1, default to disabled
-        let sensorAutoCorrectionBit = 0;
-        if (sensorAutoCorrection.includes("accel")) sensorAutoCorrectionBit |= 0x01;
-        if (sensorAutoCorrection.includes("gyro")) sensorAutoCorrectionBit |= 0x02;
-        if (sensorAutoCorrection.includes("mag")) sensorAutoCorrectionBit |= 0x04;
-
-        let hexValue = null;
-        let modeValueBuffer = null;
-        
-        if (trackerName === "rightKnee" || trackerName === "hip" || trackerName === "leftKnee") {
-            const entries = Array.from(trackerSettings.entries());
-            const currentIndex = entries.findIndex(([key]) => key === trackerName);
-
-            hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
-            if (currentIndex !== -1 && currentIndex < entries.length - 1) {
-                const nextKey = entries[currentIndex + 1][0];
-                let nextValue = trackerSettings.get(nextKey);
-                modeValueBuffer = Buffer.from("o0:" + hexValue + "\r\n" + "o1:" + nextValue + "\r\n", "utf-8");
-            }
-            
-            log(`${trackerName} - Calculated hex value: ${hexValue}`);
-        } else if (trackerName === "rightAnkle" || trackerName === "chest" || trackerName === "leftAnkle") {
-            const entries = Array.from(trackerSettings.entries());
-            const currentIndex = entries.findIndex(([key]) => key === trackerName);
-
-            hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
-            if (currentIndex !== -1 && currentIndex > 0) {
-                const previousKey = entries[currentIndex - 1][0];
-                let previousValue = trackerSettings.get(previousKey);
-                modeValueBuffer = Buffer.from("o0:" + previousValue + "\r\n" + "o1:" + hexValue + "\r\n", "utf-8");
-            }
-
-            log(`${trackerName} - Calculated hex value: ${hexValue}`);
-        } else {
-            log(`Invalid tracker name: ${trackerName}`);
-            return;
-        }
-
-        log(`Setting the following settings onto tracker ${trackerName}:`);
-        log(`FPS mode: ${fpsMode}`);
-        log(`Sensor mode: ${sensorMode}`);
-        log(`Sensor auto correction: ${sensorAutoCorrection}`);
-        log(`Ankle motion detection: ${ankleMotionDetection}`);
-        log(`Raw hex data calculated to be sent: ${hexValue}`);
-
-        try {
-            log(`Sending tracker settings to ${trackerName}: ${modeValueBuffer.toString()}`);
-            let ports = gx6.getActivePorts();
-            let trackerInfo = gx6.getTrackerInfo(trackerName);
-            let trackerPort = trackerInfo[1];
-
-            ports[trackerPort].write(modeValueBuffer, (err) => {
-                if (err) {
-                    console.error(`${trackerName} - Error writing data to serial port ${trackerPort}: ${err.message}`);
-                } else {
-                    trackerSettings.set(trackerName, hexValue);
-                    log(`${trackerName} - Data written to serial port ${trackerPort}: ${modeValueBuffer.toString()}`);
-                }
-            });
-        } catch (error) {
-            console.error(`Error sending tracker settings: ${error.message}`);
+        if (bluetoothEnabled) {
+            // Bluetooth
+            log(`Setting tracker settings for ${trackerName} (BT)...`);
             return false;
+        } else {
+            log(`Setting tracker settings for ${trackerName}...`);
+            const sensorModeBit = sensorMode === 1 ? "1" : "0"; // If a value other than 1, default to mode 2
+            const postureDataRateBit = fpsMode === 50 ? "0" : "1"; // If a value other than 1, default to 100FPS
+            const ankleMotionDetectionBit = ankleMotionDetection ? "1" : "0"; // If a value other than 1, default to disabled
+            let sensorAutoCorrectionBit = 0;
+            if (sensorAutoCorrection.includes("accel")) sensorAutoCorrectionBit |= 0x01;
+            if (sensorAutoCorrection.includes("gyro")) sensorAutoCorrectionBit |= 0x02;
+            if (sensorAutoCorrection.includes("mag")) sensorAutoCorrectionBit |= 0x04;
+
+            let hexValue = null;
+            let modeValueBuffer = null;
+            
+            if (trackerName === "rightKnee" || trackerName === "hip" || trackerName === "leftKnee") {
+                const entries = Array.from(trackerSettings.entries());
+                const currentIndex = entries.findIndex(([key]) => key === trackerName);
+
+                hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
+                if (currentIndex !== -1 && currentIndex < entries.length - 1) {
+                    const nextKey = entries[currentIndex + 1][0];
+                    let nextValue = trackerSettings.get(nextKey);
+                    modeValueBuffer = Buffer.from("o0:" + hexValue + "\r\n" + "o1:" + nextValue + "\r\n", "utf-8");
+                }
+                
+                log(`${trackerName} - Calculated hex value: ${hexValue}`);
+            } else if (trackerName === "rightAnkle" || trackerName === "chest" || trackerName === "leftAnkle") {
+                const entries = Array.from(trackerSettings.entries());
+                const currentIndex = entries.findIndex(([key]) => key === trackerName);
+
+                hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
+                if (currentIndex !== -1 && currentIndex > 0) {
+                    const previousKey = entries[currentIndex - 1][0];
+                    let previousValue = trackerSettings.get(previousKey);
+                    modeValueBuffer = Buffer.from("o0:" + previousValue + "\r\n" + "o1:" + hexValue + "\r\n", "utf-8");
+                }
+
+                log(`${trackerName} - Calculated hex value: ${hexValue}`);
+            } else {
+                log(`Invalid tracker name: ${trackerName}`);
+                return;
+            }
+
+            log(`Setting the following settings onto tracker ${trackerName}:`);
+            log(`FPS mode: ${fpsMode}`);
+            log(`Sensor mode: ${sensorMode}`);
+            log(`Sensor auto correction: ${sensorAutoCorrection}`);
+            log(`Ankle motion detection: ${ankleMotionDetection}`);
+            log(`Raw hex data calculated to be sent: ${hexValue}`);
+
+            try {
+                log(`Sending tracker settings to ${trackerName}: ${modeValueBuffer.toString()}`);
+                let ports = gx6.getActivePorts();
+                let trackerInfo = gx6.getTrackerInfo(trackerName);
+                let trackerPort = trackerInfo[1];
+
+                ports[trackerPort].write(modeValueBuffer, (err) => {
+                    if (err) {
+                        console.error(`${trackerName} - Error writing data to serial port ${trackerPort}: ${err.message}`);
+                    } else {
+                        trackerSettings.set(trackerName, hexValue);
+                        log(`${trackerName} - Data written to serial port ${trackerPort}: ${modeValueBuffer.toString()}`);
+                    }
+                });
+            } catch (error) {
+                console.error(`Error sending tracker settings: ${error.message}`);
+                return false;
+            }
         }
 
         this.emit("settings", trackerName, sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
@@ -262,43 +274,53 @@ export default class HaritoraXWireless extends EventEmitter {
     **/
 
     setAllTrackerSettings(fpsMode, sensorMode, sensorAutoCorrection, ankleMotionDetection) {
-        try {
-            const sensorModeBit = sensorMode === 1 ? "1" : "0";
-            const postureDataRateBit = fpsMode === 100 ? "1" : "0";
-            let sensorAutoCorrectionBit = 0;
-            if (sensorAutoCorrection.includes("accel")) sensorAutoCorrectionBit |= 0x01;
-            if (sensorAutoCorrection.includes("gyro")) sensorAutoCorrectionBit |= 0x02;
-            if (sensorAutoCorrection.includes("mag")) sensorAutoCorrectionBit |= 0x04;
-            const ankleMotionDetectionBit = ankleMotionDetection ? "1" : "0";
-
-            const hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
-            const modeValueBuffer = Buffer.from("o0:" + hexValue + "\r\n" + "o1:" + hexValue + "\r\n", "utf-8");
-
-            log("Setting the following settings onto all trackers:");
-            log(`FPS mode: ${fpsMode}`);
-            log(`Sensor mode: ${sensorMode}`);
-            log(`Sensor auto correction: ${sensorAutoCorrection}`);
-            log(`Ankle motion detection: ${ankleMotionDetection}`);
-            log(`Raw hex data calculated to be sent: ${hexValue}`);
-
-            let ports = gx6.getActivePorts();
-            for (let trackerName of trackerSettings.keys()) {
-                let trackerInfo = gx6.getTrackerInfo(trackerName);
-                let trackerPort = trackerInfo[1];
-
-                ports[trackerPort].write(modeValueBuffer, (err) => {
-                    if (err) {
-                        console.error(`${trackerName} - Error writing data to serial port ${trackerPort}: ${err.message}`);
-                    } else {
-                        trackerSettings.set(trackerName, hexValue);
-                        log(`${trackerName} - Data written to serial port ${trackerPort}: ${modeValueBuffer.toString()}`);
-                    }
-                });
+        if (bluetoothEnabled) {
+            // Bluetooth
+            log("Setting all tracker settings (BT)...");
+        } else if (gx6Enabled) {
+            log("Setting all tracker settings...");
+            try {
+                const sensorModeBit = sensorMode === 1 ? "1" : "0";
+                const postureDataRateBit = fpsMode === 100 ? "1" : "0";
+                let sensorAutoCorrectionBit = 0;
+                if (sensorAutoCorrection.includes("accel")) sensorAutoCorrectionBit |= 0x01;
+                if (sensorAutoCorrection.includes("gyro")) sensorAutoCorrectionBit |= 0x02;
+                if (sensorAutoCorrection.includes("mag")) sensorAutoCorrectionBit |= 0x04;
+                const ankleMotionDetectionBit = ankleMotionDetection ? "1" : "0";
+    
+                const hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
+                const modeValueBuffer = Buffer.from("o0:" + hexValue + "\r\n" + "o1:" + hexValue + "\r\n", "utf-8");
+    
+                log("Setting the following settings onto all trackers:");
+                log(`FPS mode: ${fpsMode}`);
+                log(`Sensor mode: ${sensorMode}`);
+                log(`Sensor auto correction: ${sensorAutoCorrection}`);
+                log(`Ankle motion detection: ${ankleMotionDetection}`);
+                log(`Raw hex data calculated to be sent: ${hexValue}`);
+    
+                let ports = gx6.getActivePorts();
+                for (let trackerName of trackerSettings.keys()) {
+                    let trackerInfo = gx6.getTrackerInfo(trackerName);
+                    let trackerPort = trackerInfo[1];
+    
+                    ports[trackerPort].write(modeValueBuffer, (err) => {
+                        if (err) {
+                            console.error(`${trackerName} - Error writing data to serial port ${trackerPort}: ${err.message}`);
+                        } else {
+                            trackerSettings.set(trackerName, hexValue);
+                            log(`${trackerName} - Data written to serial port ${trackerPort}: ${modeValueBuffer.toString()}`);
+                        }
+                    });
+                }
+            } catch (error) {
+                console.error("Error sending tracker settings:\n", error);
+                return false;
             }
-        } catch (error) {
-            console.error("Error sending tracker settings:\n", error);
+        } else {
+            log("No connection mode is enabled");
             return false;
         }
+        
 
         for (let trackerName of trackerSettings.keys()) {
             this.emit("settings", trackerName, sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
@@ -343,18 +365,23 @@ gx6.on("data", (port, data) => {
 });
 
 bluetooth.on("data", (localName, service, characteristic, data) => {
+    // TODO: add more checks like magnetometer, and also make sure they work. Some data may need to be manually read such as battery, info, and settings data.
     if (characteristic === "Sensor") {
         processIMUData(data, localName);
     } else if (characteristic === "MainButton" || characteristic === "SecondaryButton") {
         // TODO - Process button data
+        processButtonData(data, localName);
     } else if (characteristic === "Battery") {
         // TODO - Process battery data
+        processBatteryData(data, localName);
     } else if (characteristic === "Settings") {
         // TODO - Process settings data
+        processTrackerSettings(data, localName);
     } else if (characteristic === "Info") {
         // TODO - Process info data
+        processInfoData(data, localName);
     } else {
-        log(`Unknown data: ${data} from ${localName} - ${service} - ${characteristic}`);
+        log(`Unknown data from ${localName}: ${data} - ${characteristic} - ${service} `);
     }
 });
 
@@ -475,19 +502,29 @@ function processTrackerData(data, trackerName) {
 **/
 
 function processButtonData(data, trackerName) {
-    // Character 1 turns 0 when the tracker is turning off/is off (1 when turning on/is on)
-    // Characters 8, 9, 11, and 12 also indicate if tracker is being turned off/is off (all f's)
-    let mainButton = parseInt(data[6], 16); // 7th character (0-indexed)
-    let subButton = parseInt(data[9], 16); // 10th character (0-indexed)
-    trackerButtons.set(trackerName, [mainButton, subButton]);
-    log(`Tracker ${trackerName} main button: ${mainButton}`);
-    log(`Tracker ${trackerName} sub button: ${subButton}`);
+    let mainButton;
+    let subButton;
 
-    if (data[0] === "0" || data[7] === "f" || data[8] === "f" || data[10] === "f" || data[11] === "f") {
-        log(`Tracker ${trackerName} is off/turning off...`);
-        // last argument - false = turning off/is off
-        haritora.emit("button", trackerName, mainButton, subButton, false);
-        return;
+    if (bluetoothEnabled) {
+        // Bluetooth
+        log(`Tracker ${trackerName} button data: ${data.toString("hex")}`);
+        return false;
+    } else {
+        // Dongle
+        // Character 1 turns 0 when the tracker is turning off/is off (1 when turning on/is on)
+        // Characters 8, 9, 11, and 12 also indicate if tracker is being turned off/is off (all f's)
+        mainButton = parseInt(data[6], 16); // 7th character (0-indexed)
+        subButton = parseInt(data[9], 16); // 10th character (0-indexed)
+        trackerButtons.set(trackerName, [mainButton, subButton]);
+        log(`Tracker ${trackerName} main button: ${mainButton}`);
+        log(`Tracker ${trackerName} sub button: ${subButton}`);
+
+        if (data[0] === "0" || data[7] === "f" || data[8] === "f" || data[10] === "f" || data[11] === "f") {
+            log(`Tracker ${trackerName} is off/turning off...`);
+            // last argument - false = turning off/is off
+            haritora.emit("button", trackerName, mainButton, subButton, false);
+            return;
+        }
     }
 
     // last argument - true = turning on/is on
@@ -510,17 +547,25 @@ function processBatteryData(data, trackerName) {
     let batteryVoltage;
     let chargeStatus;
 
-    try {
-        const batteryInfo = JSON.parse(data);
-        log(`Tracker ${trackerName} remaining: ${batteryInfo["battery remaining"]}%`);
-        log(`Tracker ${trackerName} voltage: ${batteryInfo["battery voltage"]}`);
-        log(`Tracker ${trackerName} Status: ${batteryInfo["charge status"]}`);
-        batteryRemaining = batteryInfo["battery remaining"];
-        batteryVoltage = batteryInfo["battery voltage"];
-        chargeStatus = batteryInfo["charge status"];
-    } catch (err) {
-        log(`Error processing battery data: ${err}`);
+    if (bluetoothEnabled) {
+        // Bluetooth
+        log(`Tracker ${trackerName} battery data: ${data.toString("utf8")}`);
+        return false;
+    } else {
+        // Dongle
+        try {
+            const batteryInfo = JSON.parse(data);
+            log(`Tracker ${trackerName} remaining: ${batteryInfo["battery remaining"]}%`);
+            log(`Tracker ${trackerName} voltage: ${batteryInfo["battery voltage"]}`);
+            log(`Tracker ${trackerName} Status: ${batteryInfo["charge status"]}`);
+            batteryRemaining = batteryInfo["battery remaining"];
+            batteryVoltage = batteryInfo["battery voltage"];
+            chargeStatus = batteryInfo["charge status"];
+        } catch (err) {
+            log(`Error processing battery data: ${err}`);
+        }
     }
+    
 
     haritora.emit("battery", trackerName, batteryRemaining, batteryVoltage, chargeStatus);
 }
@@ -589,33 +634,39 @@ function processInfoData(data, trackerName) {
     let model;
     let serial;
 
-    if (trackerName === "(DONGLE)") {
-        type = "dongle";
-        try {
-            const dongleInfo = JSON.parse(data);
-            log(`Dongle version: ${dongleInfo["version"]}`);
-            log(`Dongle model: ${dongleInfo["model"]}`);
-            log(`Dongle serial: ${dongleInfo["serial no"]}`);
-
-            version = dongleInfo["version"];
-            model = dongleInfo["model"];
-            serial = dongleInfo["serial no"];
-        } catch (err) {
-            log(`Error processing dongle info data: ${err}`);
-        }
-    } else {
-        type = "tracker";
-        try {
-            const trackerInfo = JSON.parse(data);
-            log(`Tracker ${trackerName} version: ${trackerInfo["version"]}`);
-            log(`Tracker ${trackerName} model: ${trackerInfo["model"]}`);
-            log(`Tracker ${trackerName} serial: ${trackerInfo["serial no"]}`);
-
-            version = trackerInfo["version"];
-            model = trackerInfo["model"];
-            serial = trackerInfo["serial no"];
-        } catch (err) {
-            log(`Error processing tracker info data: ${err}`);
+    if (bluetoothEnabled) {
+        // Bluetooth
+        log(`Tracker ${trackerName} info: ${data}`);
+        return false;
+    } else if (gx6Enabled) {
+        if (trackerName === "(DONGLE)") {
+            type = "dongle";
+            try {
+                const dongleInfo = JSON.parse(data);
+                log(`Dongle version: ${dongleInfo["version"]}`);
+                log(`Dongle model: ${dongleInfo["model"]}`);
+                log(`Dongle serial: ${dongleInfo["serial no"]}`);
+    
+                version = dongleInfo["version"];
+                model = dongleInfo["model"];
+                serial = dongleInfo["serial no"];
+            } catch (err) {
+                log(`Error processing dongle info data: ${err}`);
+            }
+        } else {
+            type = "tracker";
+            try {
+                const trackerInfo = JSON.parse(data);
+                log(`Tracker ${trackerName} version: ${trackerInfo["version"]}`);
+                log(`Tracker ${trackerName} model: ${trackerInfo["model"]}`);
+                log(`Tracker ${trackerName} serial: ${trackerInfo["serial no"]}`);
+    
+                version = trackerInfo["version"];
+                model = trackerInfo["model"];
+                serial = trackerInfo["serial no"];
+            } catch (err) {
+                log(`Error processing tracker info data: ${err}`);
+            }
         }
     }
 
