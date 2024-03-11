@@ -367,10 +367,10 @@ gx6.on("data", (port, data) => {
 bluetooth.on("data", (localName, service, characteristic, data) => {
     // TODO: add more checks like magnetometer, and also make sure they work. Some data may need to be manually read such as battery, info, and settings data.
     if (characteristic === "Sensor") {
-        processIMUData(data, localName);
+        //processIMUData(data, localName);
     } else if (characteristic === "MainButton" || characteristic === "SecondaryButton") {
         // TODO - Process button data
-        processButtonData(data, localName);
+        processButtonData(data, localName, characteristic);
     } else if (characteristic === "Battery") {
         // TODO - Process battery data
         processBatteryData(data, localName);
@@ -501,34 +501,44 @@ function processTrackerData(data, trackerName) {
  * @fires haritora#button
 **/
 
-function processButtonData(data, trackerName) {
+function processButtonData(data, trackerName, characteristic) {
     let mainButton;
     let subButton;
 
     if (bluetoothEnabled) {
-        // Bluetooth
-        log(`Tracker ${trackerName} button data: ${data.toString("hex")}`);
-        return false;
-    } else {
-        // Dongle
+        let currentButtons = trackerButtons.get(trackerName) || [0, 0];
+
+        if (characteristic === "MainButton") {
+            currentButtons[0] += 1;
+        } else if (characteristic === "SecondaryButton") {
+            currentButtons[1] += 1;
+        }
+
+        mainButton = currentButtons[0];
+        subButton = currentButtons[1];
+        trackerButtons.set(trackerName, currentButtons);
+        haritora.emit("button", trackerName, mainButton, subButton, null);
+    } else if (gx6Enabled) {
         // Character 1 turns 0 when the tracker is turning off/is off (1 when turning on/is on)
         // Characters 8, 9, 11, and 12 also indicate if tracker is being turned off/is off (all f's)
         mainButton = parseInt(data[6], 16); // 7th character (0-indexed)
         subButton = parseInt(data[9], 16); // 10th character (0-indexed)
-        trackerButtons.set(trackerName, [mainButton, subButton]);
-        log(`Tracker ${trackerName} main button: ${mainButton}`);
-        log(`Tracker ${trackerName} sub button: ${subButton}`);
 
         if (data[0] === "0" || data[7] === "f" || data[8] === "f" || data[10] === "f" || data[11] === "f") {
             log(`Tracker ${trackerName} is off/turning off...`);
             // last argument - false = turning off/is off
             haritora.emit("button", trackerName, mainButton, subButton, false);
-            return;
+            return true;
         }
+
+        // last argument - true = turning on/is on
+        haritora.emit("button", trackerName, mainButton, subButton, true);
     }
 
-    // last argument - true = turning on/is on
-    haritora.emit("button", trackerName, mainButton, subButton, true);
+    trackerButtons.set(trackerName, [mainButton, subButton]);
+    log(`Tracker ${trackerName} main button: ${mainButton}`);
+    log(`Tracker ${trackerName} sub button: ${subButton}`);
+    return true;
 }
 
 
@@ -548,11 +558,9 @@ function processBatteryData(data, trackerName) {
     let chargeStatus;
 
     if (bluetoothEnabled) {
-        // Bluetooth
         log(`Tracker ${trackerName} battery data: ${data.toString("utf8")}`);
         return false;
-    } else {
-        // Dongle
+    } else if (gx6Enabled) {
         try {
             const batteryInfo = JSON.parse(data);
             log(`Tracker ${trackerName} remaining: ${batteryInfo["battery remaining"]}%`);

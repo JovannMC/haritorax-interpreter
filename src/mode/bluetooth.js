@@ -46,7 +46,8 @@ export default class Bluetooth extends EventEmitter {
         const { advertisement: { localName } } = peripheral;
         if (localName && localName.startsWith("HaritoraXW-") && !activeDevices.includes(peripheral)) {
             console.log(`Found device: ${localName}`);
-    
+            activeDevices.push(peripheral);
+
             peripheral.connect(error => {
                 if (error) {
                     console.error(`Error connecting to ${localName}:`, error);
@@ -54,8 +55,7 @@ export default class Bluetooth extends EventEmitter {
                 }
                 console.log(`Connected to ${localName}`);
                 this.emit("connected", peripheral);
-                activeDevices.push(peripheral);
-    
+                
                 peripheral.discoverServices(null, (error, services) => {
                     if (error) {
                         console.error("Error discovering services:", error);
