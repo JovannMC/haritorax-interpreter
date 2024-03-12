@@ -9,7 +9,7 @@ const services = new Map([
     ["180a", "Device Information"],
     ["180f", "Battery Service"],
     ["00dbec3a90aa11eda1eb0242ac120002", "Tracker Service"],
-    ["ef84369a90a911eda1eb0242ac120002", "Setting Service"]
+    ["ef84369a90a911eda1eb0242ac120002", "Setting Service"],
 ]);
 
 const characteristics = new Map([
@@ -23,7 +23,9 @@ const characteristics = new Map([
     ["ef8443f690a911eda1eb0242ac120002", "TofSetting"],
     ["ef8445c290a911eda1eb0242ac120002", "SensorModeSetting"],
     ["ef84c30090a911eda1eb0242ac120002", "WirelessModeSetting"],
-    ["ef84c30590a911eda1eb0242ac120002", "AutoCalibrationSetting"]
+    ["ef84c30590a911eda1eb0242ac120002", "AutoCalibrationSetting"],
+    //["ef843b5490a911eda1eb0242ac120002", "Something"], unsure what this is, reports randomly like battery level
+    ["2a19", "BatteryLevel"],
 ]);
 
 let activeDevices = [];
@@ -122,7 +124,6 @@ export default class Bluetooth extends EventEmitter {
 }
 
 function emitData(classInstance, localName, service, characteristic, data) {
-    //console.log(`Data from ${services.get(service)} - ${characteristics.get(characteristic)}:`, data);
     classInstance.emit("data", localName, services.get(service), characteristics.get(characteristic), data);
 }
 

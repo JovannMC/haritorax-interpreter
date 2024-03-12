@@ -382,6 +382,9 @@ bluetooth.on("data", (localName, service, characteristic, data) => {
         processInfoData(data, localName);
     } else {
         log(`Unknown data from ${localName}: ${data} - ${characteristic} - ${service} `);
+        log(`Data in hex: ${Buffer.from(data, "base64").toString("hex")}`);
+        log(`Data in utf-8: ${Buffer.from(data, "base64").toString("utf-8")}`);
+        log(`Data in base64: ${Buffer.from(data, "base64").toString("base64")}`);
     }
 });
 
@@ -502,8 +505,8 @@ function processTrackerData(data, trackerName) {
 **/
 
 function processButtonData(data, trackerName, characteristic) {
-    let mainButton;
-    let subButton;
+    let mainButton = null;
+    let subButton = null;
 
     if (bluetoothEnabled) {
         let currentButtons = trackerButtons.get(trackerName) || [0, 0];
@@ -553,13 +556,20 @@ function processButtonData(data, trackerName, characteristic) {
 **/
 
 function processBatteryData(data, trackerName) {
-    let batteryRemaining;
-    let batteryVoltage;
-    let chargeStatus;
+    let batteryRemaining = null;
+    let batteryVoltage = null;
+    let chargeStatus = null;
 
     if (bluetoothEnabled) {
-        log(`Tracker ${trackerName} battery data: ${data.toString("utf8")}`);
-        return false;
+        // Can only get battery percentage from BT data (need to do more testing)
+        // Also seems to like to jump up and down.. for some reason? Every (x) value seems to be correct, while the rest are off by 1-2%
+        try {
+            batteryRemaining = parseInt(data, 16);
+            log(`Tracker ${trackerName} remaining: ${batteryRemaining}%`);
+        } catch {
+            log(`Error processing battery data for ${trackerName}: ${data}`);
+        }
+        log(`Tracker ${trackerName} remaining: ${batteryRemaining}%`);
     } else if (gx6Enabled) {
         try {
             const batteryInfo = JSON.parse(data);
@@ -570,10 +580,9 @@ function processBatteryData(data, trackerName) {
             batteryVoltage = batteryInfo["battery voltage"];
             chargeStatus = batteryInfo["charge status"];
         } catch (err) {
-            log(`Error processing battery data: ${err}`);
+            log(`Error processing battery data for ${trackerName}: ${err}`);
         }
     }
-    
 
     haritora.emit("battery", trackerName, batteryRemaining, batteryVoltage, chargeStatus);
 }
@@ -637,10 +646,10 @@ function processTrackerSettings(data, trackerName) {
 **/
 
 function processInfoData(data, trackerName) {
-    let type;
-    let version;
-    let model;
-    let serial;
+    let type = null;
+    let version = null;
+    let model = null;
+    let serial = null;
 
     if (bluetoothEnabled) {
         // Bluetooth
