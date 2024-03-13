@@ -341,11 +341,16 @@ export default class HaritoraXWireless extends EventEmitter {
      * Support: Bluetooth 
      * 
      * @function getDeviceInfo
+     * @fires this#info
     **/
 
     async getDeviceInfo(trackerName) {
         if (!bluetoothEnabled) return null;
         let trackerObject = bluetooth.getActiveDevices().find(device => device.advertisement.localName === trackerName);
+        if (!trackerObject) {
+            log(`Tracker ${trackerName} not found`);
+            return null;
+        }
 
         let serial = null;
         let model = null;
@@ -385,10 +390,39 @@ export default class HaritoraXWireless extends EventEmitter {
         try {
             await Promise.all(readPromises);
             log(`Tracker ${trackerName} info: ${version}, ${model}, ${serial}`);
+            this.emit("info", "tracker", version, model, serial);
             return { version, model, serial };
         } catch (error) {
             console.error(error);
         }
+    }
+
+    /**
+     * Get battery info from the bluetooth trackers.
+     * Support: Bluetooth
+     * 
+     * @function getBatteryInfo
+     * @fires this#battery
+    **/
+
+    async getBatteryInfo(trackerName) {
+        if (!bluetoothEnabled) return null;
+        let trackerObject = bluetooth.getActiveDevices().find(device => device.advertisement.localName === trackerName);
+        if (!trackerObject) {
+            log(`Tracker ${trackerName} not found`);
+            return null;
+        }
+        let batteryCharacteristic = trackerObject.services.find(service => service.uuid === "180f").characteristics.find(characteristic => characteristic.uuid === "2a19");
+
+        batteryCharacteristic.read((err, data) => {
+            if (err) {
+                console.error(`Error reading battery characteristic for ${trackerName}: ${err}`);
+            } else {
+                let batteryRemaining = data[0];
+                log(`Tracker ${trackerName} battery remaining: ${batteryRemaining}%`);
+                this.emit("battery", trackerName, batteryRemaining, null, null);
+            }
+        });
     }
 }
 
@@ -427,24 +461,23 @@ gx6.on("data", (port, data) => {
     }
 });
 
+// TODO: magnetometer, add settings
 bluetooth.on("data", (localName, service, characteristic, data) => {
     if (service == "Device Information") return;
-    // TODO: add more checks like magnetometer, and also make sure they work. Some data may need to be manually read such as battery, info, and settings data.
     if (characteristic === "Sensor") {
         //processIMUData(data, localName);
     } else if (characteristic === "MainButton" || characteristic === "SecondaryButton") {
-        // TODO - Process button data
         processButtonData(data, localName, characteristic);
-    } else if (characteristic === "Battery") {
-        // TODO - Process battery data
+    } else if (characteristic === "BatteryLevel") {
         processBatteryData(data, localName);
     } else if (characteristic === "Settings") {
-        // TODO - Process settings data
-        processTrackerSettings(data, localName);
+        // TODO - Process settings data, probably will need to be manually read and set
+        //processTrackerSettings(data, localName);
+        return;
     } else {
         log(`Unknown data from ${localName}: ${data} - ${characteristic} - ${service}`);
-        log(`Data in hex: ${Buffer.from(data, "base64").toString("hex")}`);
         log(`Data in utf-8: ${Buffer.from(data, "base64").toString("utf-8")}`);
+        log(`Data in hex: ${Buffer.from(data, "base64").toString("hex")}`);
         log(`Data in base64: ${Buffer.from(data, "base64").toString("base64")}`);
     }
 });
@@ -628,12 +661,12 @@ function processBatteryData(data, trackerName) {
         // Can only get battery percentage from BT data (need to do more testing)
         // Also seems to like to jump up and down.. for some reason? Every (x) value seems to be correct, while the rest are off by 1-2%
         try {
-            batteryRemaining = parseInt(data, 16);
-            log(`Tracker ${trackerName} remaining: ${batteryRemaining}%`);
+            let batteryRemainingHex = Buffer.from(data, "base64").toString("hex");
+            batteryRemaining = parseInt(batteryRemainingHex, 16);
+            log(`Tracker ${trackerName} battery remaining: ${batteryRemaining}%`);
         } catch {
             console.error(`Error processing battery data for ${trackerName}: ${data}`);
         }
-        log(`Tracker ${trackerName} remaining: ${batteryRemaining}%`);
     } else if (gx6Enabled) {
         try {
             const batteryInfo = JSON.parse(data);

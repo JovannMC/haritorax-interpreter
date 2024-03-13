@@ -6,6 +6,7 @@ device.startConnection("bluetooth");
 setTimeout(() => {
     // put in name of device
     device.getDeviceInfo("");
+    device.getBatteryInfo("");
 }, 3000);
 
 /*setTimeout(() => {

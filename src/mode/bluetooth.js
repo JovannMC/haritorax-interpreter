@@ -96,6 +96,11 @@ export default class Bluetooth extends EventEmitter {
                                 characteristic.on("data", (data) => {
                                     emitData(this, localName, service.uuid, characteristic.uuid, data);
                                 });
+                                characteristic.subscribe(error => {
+                                    if (error) {
+                                        console.error(`Error subscribing to characteristic ${characteristic.uuid} of service ${service.uuid}:`, error);
+                                    }
+                                });
                             });
                         });
                     });
