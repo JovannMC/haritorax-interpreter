@@ -13,24 +13,36 @@ const services = new Map([
 ]);
 
 const characteristics = new Map([
+    // Battery Service
+    ["2a19", "BatteryLevel"],
+    // BT device info
+    ["2a25", "SerialNumber"],
+    ["2a29", "Manufacturer"],
+    ["2a27", "HardwareRevision"],
+    ["2a26", "FirmwareRevision"],
+    ["2a28", "SoftwareRevision"],
+    ["2a24", "ModelNumber"],
+    // Sensor Service
     ["00002a1900001000800000805f9b34fb", "Battery"],
     ["00002a2800001000800000805f9b34fb", "SoftwareRevision"],
     ["00dbf1c690aa11eda1eb0242ac120002", "Sensor"],
     ["00dbf30690aa11eda1eb0242ac120002", "Magnetometer"],
     ["00dbf45090aa11eda1eb0242ac120002", "MainButton"],
     ["00dbf58690aa11eda1eb0242ac120002", "SecondaryButton"],
+    // Setting Service
     ["ef84420290a911eda1eb0242ac120002", "FpsSetting"],
     ["ef8443f690a911eda1eb0242ac120002", "TofSetting"],
     ["ef8445c290a911eda1eb0242ac120002", "SensorModeSetting"],
     ["ef84c30090a911eda1eb0242ac120002", "WirelessModeSetting"],
     ["ef84c30590a911eda1eb0242ac120002", "AutoCalibrationSetting"],
     //["ef843b5490a911eda1eb0242ac120002", "Something"], unsure what this is, reports randomly like battery level
-    ["2a19", "BatteryLevel"],
 ]);
 
 let activeDevices = [];
+let activeServices = [];
+let activeCharacteristics = [];
 
-// TODO - multiple trackers
+let allowReconnect = true;
 
 export default class Bluetooth extends EventEmitter {
     constructor() {
@@ -41,7 +53,12 @@ export default class Bluetooth extends EventEmitter {
     startConnection() {
         console.log("Connected to bluetooth");
         this.emit("connected");
-        noble.startScanning([], true);
+
+        try {
+            noble.startScanning([], true);
+        } catch (error) {
+            console.error(`Error starting scanning:\n${error}`);
+        }
     }
 
     onDiscover(peripheral) {
@@ -66,7 +83,8 @@ export default class Bluetooth extends EventEmitter {
                     //console.log("Discovered services:", services);
                 
                     services.forEach(service => {
-                        service.discoverCharacteristics(null, (error, characteristics) => {
+                        activeServices.push(service);
+                        service.discoverCharacteristics([], (error, characteristics) => {
                             if (error) {
                                 console.error(`Error discovering characteristics of service ${service.uuid}:`, error);
                                 return;
@@ -74,13 +92,9 @@ export default class Bluetooth extends EventEmitter {
                             //console.log(`Discovered characteristics of service ${service.uuid}:`, characteristics);
                 
                             characteristics.forEach(characteristic => {
+                                activeCharacteristics.push(characteristic);
                                 characteristic.on("data", (data) => {
                                     emitData(this, localName, service.uuid, characteristic.uuid, data);
-                                });
-                                characteristic.subscribe(error => {
-                                    if (error) {
-                                        console.error(`Error subscribing to characteristic ${characteristic.uuid}:`, error);
-                                    }
                                 });
                             });
                         });
@@ -90,6 +104,7 @@ export default class Bluetooth extends EventEmitter {
             });
 
             peripheral.on("disconnect", () => {
+                if (!allowReconnect) return;
                 console.log(`Disconnected from ${localName}`);
                 const index = activeDevices.indexOf(peripheral);
                 if (index !== -1) {
@@ -110,6 +125,8 @@ export default class Bluetooth extends EventEmitter {
         for (let device of activeDevices) {
             device.disconnect();
         }
+        activeDevices = [];
+        allowReconnect = false;
         
         this.emit("disconnected");
     }
@@ -120,6 +137,31 @@ export default class Bluetooth extends EventEmitter {
 
     getCharacteristics() {
         return characteristics;
+    }
+
+    getActiveDevices() {
+        return activeDevices;
+    }
+
+    getActiveServices() {
+        return activeServices;
+    }
+
+    getActiveCharacteristics() {
+        return activeCharacteristics;
+    }
+
+    getAllowReconnect() {
+        return allowReconnect;
+    }
+
+    getDeviceInfo(localName) {
+        for (let device of activeDevices) {
+            if (device.advertisement.localName === localName) {
+                return device;
+            }
+        }
+        return null;
     }
 }
 

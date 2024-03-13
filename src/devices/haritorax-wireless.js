@@ -37,6 +37,7 @@ const trackerSettings = new Map([
 
 /**
  * The "imu" event which provides info about the tracker's IMU data.
+ * Support: GX6, Bluetooth
  * 
  * @event this#imu
  * @type {object}
@@ -55,6 +56,7 @@ const trackerSettings = new Map([
 
 /** 
  * The "tracker" event which provides info about the tracker's other data.
+ * Support: GX6
  * 
  * @event this#tracker
  * @type {object}
@@ -64,6 +66,7 @@ const trackerSettings = new Map([
 
 /** 
  * The "settings" event which provides info about the tracker settings.
+ * Support: GX6, Bluetooth (untested)
  * 
  * @event this#settings
  * @type {object}
@@ -76,6 +79,7 @@ const trackerSettings = new Map([
 
 /**
  * The "button" event which provides info about the tracker's button data.
+ * Support: GX6, Bluetooth
  * 
  * @event this#button
  * @type {object}
@@ -87,6 +91,7 @@ const trackerSettings = new Map([
 
 /**
  * The "battery" event which provides info about the tracker's battery data.
+ * Support: GX6, Bluetooth (partial)
  * 
  * @event this#battery
  * @type {object}
@@ -98,6 +103,7 @@ const trackerSettings = new Map([
 
 /**
  * The "info" event which provides info about the tracker or dongle.
+ * Support: GX6, Bluetooth (partial)
  *
  * @event this#info
  * @type {object}
@@ -167,6 +173,7 @@ export default class HaritoraXWireless extends EventEmitter {
 
     /**
      * Sets the tracker settings for a specific tracker.
+     * Support: GX6
      * 
      * @param {string} trackerName - The name of the tracker to apply settings to (rightKnee, rightAnkle, hip, chest, leftKnee, leftAnkle).
      * @param {number} fpsMode - The posture data transfer rate/FPS (50 or 100).
@@ -249,7 +256,7 @@ export default class HaritoraXWireless extends EventEmitter {
                     }
                 });
             } catch (error) {
-                console.error(`Error sending tracker settings: ${error.message}`);
+                console.error(`Error sending tracker settings:\n${error.message}`);
                 return false;
             }
         }
@@ -261,6 +268,7 @@ export default class HaritoraXWireless extends EventEmitter {
     
     /**
      * Sets the tracker settings for all connected trackers
+     * Support: GX6
      *
      * @param {number} fpsMode - The posture data transfer rate/FPS (50 or 100).
      * @param {number} sensorMode - The sensor mode, which controls whether magnetometer is used (1 or 2).
@@ -313,7 +321,7 @@ export default class HaritoraXWireless extends EventEmitter {
                     });
                 }
             } catch (error) {
-                console.error("Error sending tracker settings:\n", error);
+                console.error(`Error sending tracker settings:\n ${error}`);
                 return false;
             }
         } else {
@@ -326,6 +334,61 @@ export default class HaritoraXWireless extends EventEmitter {
             this.emit("settings", trackerName, sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
         }
         return true;
+    }
+
+    /**
+     * Returns the device info from the bluetooth trackers.
+     * Support: Bluetooth 
+     * 
+     * @function getDeviceInfo
+    **/
+
+    async getDeviceInfo(trackerName) {
+        if (!bluetoothEnabled) return null;
+        let trackerObject = bluetooth.getActiveDevices().find(device => device.advertisement.localName === trackerName);
+
+        let serial = null;
+        let model = null;
+        let version = null;
+
+        const readPromises = [];
+
+        for (let service of trackerObject.services) {
+            if (service.uuid !== "180a") continue;
+            for (let characteristic of service.characteristics) {
+                const promise = new Promise((resolve, reject) => {
+                    characteristic.read((err, data) => {
+                        if (err) {
+                            reject(`Error reading characteristic for ${trackerName}: ${err}`);
+                        } else {
+                            switch (characteristic.uuid) {
+                            case "2a25":
+                                serial = data;
+                                break;
+                            case "2a24":
+                                model = data;
+                                break;
+                            case "2a28":
+                                version = data;
+                                break;
+                            }
+                            resolve();
+                        }
+                    });
+                
+                    setTimeout(() => reject(`Read operation for ${trackerName} timed out`), 5000);
+                });
+                readPromises.push(promise);
+            }
+        }
+
+        try {
+            await Promise.all(readPromises);
+            log(`Tracker ${trackerName} info: ${version}, ${model}, ${serial}`);
+            return { version, model, serial };
+        } catch (error) {
+            console.error(error);
+        }
     }
 }
 
@@ -365,6 +428,7 @@ gx6.on("data", (port, data) => {
 });
 
 bluetooth.on("data", (localName, service, characteristic, data) => {
+    if (service == "Device Information") return;
     // TODO: add more checks like magnetometer, and also make sure they work. Some data may need to be manually read such as battery, info, and settings data.
     if (characteristic === "Sensor") {
         //processIMUData(data, localName);
@@ -377,11 +441,8 @@ bluetooth.on("data", (localName, service, characteristic, data) => {
     } else if (characteristic === "Settings") {
         // TODO - Process settings data
         processTrackerSettings(data, localName);
-    } else if (characteristic === "Info") {
-        // TODO - Process info data
-        processInfoData(data, localName);
     } else {
-        log(`Unknown data from ${localName}: ${data} - ${characteristic} - ${service} `);
+        log(`Unknown data from ${localName}: ${data} - ${characteristic} - ${service}`);
         log(`Data in hex: ${Buffer.from(data, "base64").toString("hex")}`);
         log(`Data in utf-8: ${Buffer.from(data, "base64").toString("utf-8")}`);
         log(`Data in base64: ${Buffer.from(data, "base64").toString("base64")}`);
@@ -391,6 +452,7 @@ bluetooth.on("data", (localName, service, characteristic, data) => {
 /**
  * Processes the IMU data received from the tracker by the dongle.
  * The data contains the information about the rotation, gravity, and ankle motion (if enabled) of the tracker.
+ * Support: GX6, Bluetooth
  *
  * @function processIMUData
  * 
@@ -416,7 +478,7 @@ function processIMUData(data, trackerName) {
 
         haritora.emit("imu", trackerName, rotation, gravity, ankle);
     } catch (err) {
-        log(`Error decoding tracker ${trackerName} IMU packet data: ${err.message}`);
+        console.error(`Error decoding tracker ${trackerName} IMU packet data: ${err.message}`);
     }
 }
 
@@ -470,8 +532,9 @@ function decodeIMUPacket(data) {
 /**
  * Processes other tracker data received from the tracker by the dongle.
  * Read function comments for more information.
+ * Support: GX6
  * 
- * @function processButtonData
+ * @function processTrackerData
  * @param {string} data - The data to process.
  * @param {string} trackerName - The name of the tracker.
  * @fires haritora#tracker
@@ -497,6 +560,7 @@ function processTrackerData(data, trackerName) {
 /**
  * Processes the button data received from the tracker by the dongle.
  * The data contains the information about the main and sub buttons on the tracker.
+ * Support: GX6, Bluetooth
  * 
  * @function processButtonData
  * @param {string} data - The data to process.
@@ -567,7 +631,7 @@ function processBatteryData(data, trackerName) {
             batteryRemaining = parseInt(data, 16);
             log(`Tracker ${trackerName} remaining: ${batteryRemaining}%`);
         } catch {
-            log(`Error processing battery data for ${trackerName}: ${data}`);
+            console.error(`Error processing battery data for ${trackerName}: ${data}`);
         }
         log(`Tracker ${trackerName} remaining: ${batteryRemaining}%`);
     } else if (gx6Enabled) {
@@ -580,7 +644,7 @@ function processBatteryData(data, trackerName) {
             batteryVoltage = batteryInfo["battery voltage"];
             chargeStatus = batteryInfo["charge status"];
         } catch (err) {
-            log(`Error processing battery data for ${trackerName}: ${err}`);
+            console.error(`Error processing battery data for ${trackerName}: ${err}`);
         }
     }
 
@@ -590,6 +654,7 @@ function processBatteryData(data, trackerName) {
 
 /**
  * Processes the tracker settings data received from the dongle by the tracker.
+ * Support: GX6, Bluetooth (untested)
  * 
  * @function processTrackerSettings
  * @param {string} data - The data to process.
@@ -638,6 +703,7 @@ function processTrackerSettings(data, trackerName) {
 
 /**
  * Processes the info data received from the tracker or dongle.
+ * Support: GX6 (for bluetooth, see getDeviceInfo())
  * 
  * @function processInfoData
  * @param {string} data - The data to process.
@@ -646,47 +712,42 @@ function processTrackerSettings(data, trackerName) {
 **/
 
 function processInfoData(data, trackerName) {
+    if (!gx6Enabled) return false;
+
     let type = null;
     let version = null;
     let model = null;
     let serial = null;
 
-    if (bluetoothEnabled) {
-        // Bluetooth
-        log(`Tracker ${trackerName} info: ${data}`);
-        return false;
-    } else if (gx6Enabled) {
-        if (trackerName === "(DONGLE)") {
-            type = "dongle";
-            try {
-                const dongleInfo = JSON.parse(data);
-                log(`Dongle version: ${dongleInfo["version"]}`);
-                log(`Dongle model: ${dongleInfo["model"]}`);
-                log(`Dongle serial: ${dongleInfo["serial no"]}`);
-    
-                version = dongleInfo["version"];
-                model = dongleInfo["model"];
-                serial = dongleInfo["serial no"];
-            } catch (err) {
-                log(`Error processing dongle info data: ${err}`);
-            }
-        } else {
-            type = "tracker";
-            try {
-                const trackerInfo = JSON.parse(data);
-                log(`Tracker ${trackerName} version: ${trackerInfo["version"]}`);
-                log(`Tracker ${trackerName} model: ${trackerInfo["model"]}`);
-                log(`Tracker ${trackerName} serial: ${trackerInfo["serial no"]}`);
-    
-                version = trackerInfo["version"];
-                model = trackerInfo["model"];
-                serial = trackerInfo["serial no"];
-            } catch (err) {
-                log(`Error processing tracker info data: ${err}`);
-            }
+    if (trackerName === "(DONGLE)") {
+        type = "dongle";
+        try {
+            const dongleInfo = JSON.parse(data);
+            log(`Dongle version: ${dongleInfo["version"]}`);
+            log(`Dongle model: ${dongleInfo["model"]}`);
+            log(`Dongle serial: ${dongleInfo["serial no"]}`);
+
+            version = dongleInfo["version"];
+            model = dongleInfo["model"];
+            serial = dongleInfo["serial no"];
+        } catch (err) {
+            console.error(`Error processing dongle info data:\n${err}`);
+        }
+    } else {
+        type = "tracker";
+        try {
+            const trackerInfo = JSON.parse(data);
+            log(`Tracker ${trackerName} version: ${trackerInfo["version"]}`);
+            log(`Tracker ${trackerName} model: ${trackerInfo["model"]}`);
+            log(`Tracker ${trackerName} serial: ${trackerInfo["serial no"]}`);
+
+            version = trackerInfo["version"];
+            model = trackerInfo["model"];
+            serial = trackerInfo["serial no"];
+        } catch (err) {
+            console.error(`Error processing tracker info data:\n${err}`);
         }
     }
-
     haritora.emit("info", type, version, model, serial);
 }
 
