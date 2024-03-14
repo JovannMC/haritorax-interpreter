@@ -79,7 +79,7 @@ const trackerSettings = new Map([
 
 /**
  * The "button" event which provides info about the tracker's button data.
- * Support: GX6, Bluetooth
+ * Support: GX6, Bluetooth (partial)
  * 
  * @event this#button
  * @type {object}
@@ -103,7 +103,7 @@ const trackerSettings = new Map([
 
 /**
  * The "info" event which provides info about the tracker or dongle.
- * Support: GX6, Bluetooth (partial)
+ * Support: GX6, Bluetooth
  *
  * @event this#info
  * @type {object}
@@ -475,11 +475,10 @@ bluetooth.on("data", (localName, service, characteristic, data) => {
         processButtonData(data, localName, characteristic);
     } else if (characteristic === "BatteryLevel") {
         processBatteryData(data, localName);
-    } else if (characteristic === "Settings") {
+    }/* else if (characteristic === "Settings") {
         // TODO - Process settings data, probably will need to be manually read and set
         //processTrackerSettings(data, localName);
-        return;
-    } else {
+    }*/ else {
         log(`Unknown data from ${localName}: ${data} - ${characteristic} - ${service}`);
         log(`Data in utf-8: ${Buffer.from(data, "base64").toString("utf-8")}`);
         log(`Data in hex: ${Buffer.from(data, "base64").toString("hex")}`);
@@ -603,6 +602,7 @@ function processTrackerData(data, trackerName) {
  * @function processButtonData
  * @param {string} data - The data to process.
  * @param {string} trackerName - The name of the tracker.
+ * @param {string} characteristic - The characteristic of the data, if bluetooth trackers. (MainButton, SecondaryButton)
  * @fires haritora#button
 **/
 
@@ -650,6 +650,7 @@ function processButtonData(data, trackerName, characteristic) {
 /**
  * Processes the battery data received from the tracker by the dongle.
  * It contains the information about the battery percentage, voltage, and charge status of the tracker.
+ * Support: GX6, Bluetooth (partial)
  * 
  * @function processBatteryData
  * @param {string} data - The data to process.
@@ -692,7 +693,7 @@ function processBatteryData(data, trackerName) {
 
 /**
  * Processes the tracker settings data received from the dongle by the tracker.
- * Support: GX6, Bluetooth (untested)
+ * Support: GX6
  * 
  * @function processTrackerSettings
  * @param {string} data - The data to process.

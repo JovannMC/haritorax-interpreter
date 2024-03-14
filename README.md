@@ -6,7 +6,7 @@ Check out the Haritora-GX6 proof-of-concept repository here: https://github.com/
 
 ## Installation
 
-`npm install haritorax-interpreter` (publishing soon)
+`npm install haritorax-interpreter`
 
 ## Documentation
 
@@ -24,7 +24,7 @@ Will write actual documentation at some point, for now refer to the source code,
 
 | Communication mode        | Supported |
 |---------------------------|-----------|
-| Bluetooth                 |     X     |
+| Bluetooth                 |     /     |
 | GX6 Communication Dongle  |     Y     |
 | GX2 Communication Dongle  |     X     |
 
