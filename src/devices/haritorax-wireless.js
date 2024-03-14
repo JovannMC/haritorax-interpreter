@@ -189,8 +189,7 @@ export default class HaritoraXWireless extends EventEmitter {
 
     setTrackerSettings(trackerName, fpsMode, sensorMode, sensorAutoCorrection, ankleMotionDetection) {
         if (bluetoothEnabled) {
-            // Bluetooth
-            log(`Setting tracker settings for ${trackerName} (BT)...`);
+            log("Setting tracker settings for bluetooth is not supported yet.");
             return false;
         } else {
             log(`Setting tracker settings for ${trackerName}...`);
@@ -283,8 +282,8 @@ export default class HaritoraXWireless extends EventEmitter {
 
     setAllTrackerSettings(fpsMode, sensorMode, sensorAutoCorrection, ankleMotionDetection) {
         if (bluetoothEnabled) {
-            // Bluetooth
-            log("Setting all tracker settings (BT)...");
+            log("Setting all tracker settings for bluetooth is not supported yet.");
+            return false;
         } else if (gx6Enabled) {
             log("Setting all tracker settings...");
             try {
@@ -345,7 +344,10 @@ export default class HaritoraXWireless extends EventEmitter {
     **/
 
     async getDeviceInfo(trackerName) {
-        if (!bluetoothEnabled) return null;
+        if (!bluetoothEnabled) {
+            log("This function is only supported for bluetooth trackers.");
+            return null;
+        }
         let trackerObject = bluetooth.getActiveDevices().find(device => device.advertisement.localName === trackerName);
         if (!trackerObject) {
             log(`Tracker ${trackerName} not found`);
@@ -406,7 +408,10 @@ export default class HaritoraXWireless extends EventEmitter {
     **/
 
     async getBatteryInfo(trackerName) {
-        if (!bluetoothEnabled) return null;
+        if (!bluetoothEnabled) {
+            log("This function is only supported for bluetooth trackers.");
+            return null;
+        }
         let trackerObject = bluetooth.getActiveDevices().find(device => device.advertisement.localName === trackerName);
         if (!trackerObject) {
             log(`Tracker ${trackerName} not found`);
