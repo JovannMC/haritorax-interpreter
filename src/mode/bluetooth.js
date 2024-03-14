@@ -136,6 +136,55 @@ export default class Bluetooth extends EventEmitter {
         this.emit("disconnected");
     }
 
+    readData(localName, serviceId, characteristicId) {
+        return new Promise((resolve, reject) => {
+            const device = this.getDeviceInfo(localName);
+            if (device) {
+                console.log("Device found");
+                for (let service of activeServices) {
+                    if (service.uuid === serviceId) {
+                        for (let characteristic of service.characteristics) {
+                            if (characteristic.uuid === characteristicId) {
+                                console.log(`Reading characteristic ${characteristic.uuid} of service ${service.uuid}...`);
+                                characteristic.read((error, data) => {
+                                    if (error) {
+                                        console.error(`Error reading characteristic ${characteristic.uuid} of service ${service.uuid}:`, error);
+                                        reject(error);
+                                    } else {
+                                        console.log(`Read characteristic ${characteristic.uuid} of service ${service.uuid}:`, data);
+                                        resolve(data);
+                                    }
+                                });
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+            reject(new Error("Device not found"));
+        });
+    }
+
+    // TODO make sure this actually works (github copilot written lol)
+    writeData(localName, service, characteristic, data) {
+        const device = this.getDeviceInfo(localName);
+        if (device) {
+            for (let service of activeServices) {
+                if (service.uuid === service) {
+                    for (let characteristic of service.characteristics) {
+                        if (characteristic.uuid === characteristic) {
+                            characteristic.write(data, true, (error) => {
+                                if (error) {
+                                    console.error(`Error writing characteristic ${characteristic.uuid} of service ${service.uuid}:`, error);
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     getServices() {
         return services;
     }

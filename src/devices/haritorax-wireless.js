@@ -352,49 +352,18 @@ export default class HaritoraXWireless extends EventEmitter {
             return null;
         }
 
-        let serial = null;
-        let model = null;
-        let version = null;
+        let serialBuffer = await bluetooth.readData(trackerName, "180a", "2a25");
+        let modelBuffer = await bluetooth.readData(trackerName, "180a", "2a24");
+        let versionBuffer = await bluetooth.readData(trackerName, "180a", "2a28");
 
-        const readPromises = [];
+        let serial = Buffer.from(serialBuffer, "base64").toString("utf-8");
+        let model = Buffer.from(modelBuffer, "base64").toString("utf-8");
+        let version = Buffer.from(versionBuffer, "base64").toString("utf-8");
 
-        for (let service of trackerObject.services) {
-            if (service.uuid !== "180a") continue;
-            for (let characteristic of service.characteristics) {
-                const promise = new Promise((resolve, reject) => {
-                    characteristic.read((err, data) => {
-                        if (err) {
-                            reject(`Error reading characteristic for ${trackerName}: ${err}`);
-                        } else {
-                            switch (characteristic.uuid) {
-                            case "2a25":
-                                serial = data;
-                                break;
-                            case "2a24":
-                                model = data;
-                                break;
-                            case "2a28":
-                                version = data;
-                                break;
-                            }
-                            resolve();
-                        }
-                    });
-                
-                    setTimeout(() => reject(`Read operation for ${trackerName} timed out`), 5000);
-                });
-                readPromises.push(promise);
-            }
-        }
-
-        try {
-            await Promise.all(readPromises);
-            log(`Tracker ${trackerName} info: ${version}, ${model}, ${serial}`);
-            this.emit("info", "tracker", version, model, serial);
-            return { version, model, serial };
-        } catch (error) {
-            console.error(error);
-        }
+        
+        log(`Tracker ${trackerName} info: ${version}, ${model}, ${serial}`);
+        this.emit("info", "tracker", version, model, serial);
+        return { version, model, serial };
     }
 
     /**
