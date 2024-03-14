@@ -175,7 +175,7 @@ export default class HaritoraXWireless extends EventEmitter {
      * Sets the tracker settings for a specific tracker.
      * Support: GX6
      * 
-     * @param {string} trackerName - The name of the tracker to apply settings to (rightKnee, rightAnkle, hip, chest, leftKnee, leftAnkle).
+     * @param {string} trackerName - The name of the tracker to apply settings to (rightKnee, rightAnkle, hip, chest, leftKnee, leftAnkle OR HaritoraXW-SERIAL).
      * @param {number} fpsMode - The posture data transfer rate/FPS (50 or 100).
      * @param {number} sensorMode - The sensor mode, which controls whether magnetometer is used (1 or 2).
      * @param {string} sensorAutoCorrection - The sensor auto correction mode, multiple or none can be used (accel, gyro, mag).
@@ -188,20 +188,35 @@ export default class HaritoraXWireless extends EventEmitter {
     **/ 
 
     setTrackerSettings(trackerName, fpsMode, sensorMode, sensorAutoCorrection, ankleMotionDetection) {
+        const sensorModeBit = sensorMode === 1 ? "1" : "0"; // If a value other than 1, default to mode 2
+        const postureDataRateBit = fpsMode === 50 ? "0" : "1"; // If a value other than 1, default to 100FPS
+        const ankleMotionDetectionBit = ankleMotionDetection ? "1" : "0"; // If a value other than 1, default to disabled
+        let sensorAutoCorrectionBit = 0;
+        if (sensorAutoCorrection.includes("accel")) sensorAutoCorrectionBit |= 0x01;
+        if (sensorAutoCorrection.includes("gyro")) sensorAutoCorrectionBit |= 0x02;
+        if (sensorAutoCorrection.includes("mag")) sensorAutoCorrectionBit |= 0x04;
+
         if (bluetoothEnabled) {
             // Bluetooth
             log(`Setting tracker settings for ${trackerName} (BT)...`);
-            return false;
+
+            let fpsValue = Buffer.from([fpsMode === 100 ? 1 : 0]); // need to check if 100 is 1 or 0
+            let sensorModeValue = Buffer.from([sensorMode === 1 ? 5 : 8]);
+            let sensorAutoCorrectionValue = Buffer.from([sensorAutoCorrectionBit]);
+            let ankleValue = Buffer.from([ankleMotionDetectionBit ? 1 : 0]);
+
+            bluetooth.writeData(fpsValue, trackerName, "ef84369a90a911eda1eb0242ac120002", "ef84420290a911eda1eb0242ac120002");
+            bluetooth.writeData(sensorModeValue, trackerName, "ef84369a90a911eda1eb0242ac120002", "ef8445c290a911eda1eb0242ac120002");
+            bluetooth.writeData(sensorAutoCorrectionValue, trackerName, "ef84369a90a911eda1eb0242ac120002", "ef84c30590a911eda1eb0242ac120002");
+            bluetooth.writeData(ankleValue, trackerName, "ef84369a90a911eda1eb0242ac120002", "ef8443f690a911eda1eb0242ac120002");
+
+            log(`Sent tracker settings to ${trackerName} (BT):`);
+            log(`FPS mode: ${fpsMode}`);
+            log(`Sensor mode: ${sensorMode}`);
+            log(`Sensor auto correction: ${sensorAutoCorrection}`);
+            log(`Ankle motion detection: ${ankleMotionDetection}`);
         } else {
             log(`Setting tracker settings for ${trackerName}...`);
-            const sensorModeBit = sensorMode === 1 ? "1" : "0"; // If a value other than 1, default to mode 2
-            const postureDataRateBit = fpsMode === 50 ? "0" : "1"; // If a value other than 1, default to 100FPS
-            const ankleMotionDetectionBit = ankleMotionDetection ? "1" : "0"; // If a value other than 1, default to disabled
-            let sensorAutoCorrectionBit = 0;
-            if (sensorAutoCorrection.includes("accel")) sensorAutoCorrectionBit |= 0x01;
-            if (sensorAutoCorrection.includes("gyro")) sensorAutoCorrectionBit |= 0x02;
-            if (sensorAutoCorrection.includes("mag")) sensorAutoCorrectionBit |= 0x04;
-
             let hexValue = null;
             let modeValueBuffer = null;
             
@@ -337,6 +352,55 @@ export default class HaritoraXWireless extends EventEmitter {
     }
 
     /**
+     * Returns the device settings from the bluetooth trackers.
+     * Support: Bluetooth 
+     * 
+     * @function getDeviceSettings
+     * @fires this#info
+    **/
+
+    async getDeviceSettings(trackerName) {
+        if (!bluetoothEnabled) return null;
+        let trackerObject = bluetooth.getActiveDevices().find(device => device.advertisement.localName === trackerName);
+        if (!trackerObject) {
+            log(`Tracker ${trackerName} not found`);
+            return null;
+        }
+
+        let sensorModeBuffer = await bluetooth.readData(trackerName, "ef84369a90a911eda1eb0242ac120002", "ef8445c290a911eda1eb0242ac120002");
+        let fpsModeBuffer = await bluetooth.readData(trackerName, "ef84369a90a911eda1eb0242ac120002", "ef84420290a911eda1eb0242ac120002");
+        let sensorAutoCorrectionBuffer = await bluetooth.readData(trackerName, "ef84369a90a911eda1eb0242ac120002", "ef84c30590a911eda1eb0242ac120002"); // unknown if this is actually the auto correction
+        let ankleMotionBuffer = await bluetooth.readData(trackerName, "ef84369a90a911eda1eb0242ac120002", "ef8443f690a911eda1eb0242ac120002");
+        let wirelessModeBuffer = await bluetooth.readData(trackerName, "ef84369a90a911eda1eb0242ac120002", "ef84c30090a911eda1eb0242ac120002");
+
+        let sensorMode = Buffer.from(sensorModeBuffer, "base64").toString("utf-8");
+        let fpsMode = Buffer.from(fpsModeBuffer, "base64").toString("utf-8");
+        let sensorAutoCorrection = Buffer.from(sensorAutoCorrectionBuffer, "base64").toString("utf-8");
+        let ankleMotion = Buffer.from(ankleMotionBuffer, "base64").toString("utf-8");
+        let wirelessMode = Buffer.from(wirelessModeBuffer, "base64").toString("utf-8");
+
+        // create new variables from buffer to store as hex instead
+        let sensorModeHex = Buffer.from(sensorModeBuffer, "base64").toString("hex");
+        let fpsModeHex = Buffer.from(fpsModeBuffer, "base64").toString("hex");
+        let sensorAutoCorrectionHex = Buffer.from(sensorAutoCorrectionBuffer, "base64").toString("hex");
+        let ankleMotionHex = Buffer.from(ankleMotionBuffer, "base64").toString("hex");
+        let wirelessModeHex = Buffer.from(wirelessModeBuffer, "base64").toString("hex");
+
+        /* create new variables from buffer to store as base64 instead
+        let sensorModeBase64 = Buffer.from(sensorModeBuffer, "base64").toString("base64");
+        let fpsModeBase64 = Buffer.from(fpsModeBuffer, "base64").toString("base64");
+        let sensorAutoCorrectionBase64 = Buffer.from(sensorAutoCorrectionBuffer, "base64").toString("base64");
+        let ankleMotionBase64 = Buffer.from(ankleMotionBuffer, "base64").toString("base64");
+        let wirelessModeBase64 = Buffer.from(wirelessModeBuffer, "base64").toString("base64");*/
+
+        log(`Tracker ${trackerName} settings: ${sensorMode}, ${fpsMode}, ${sensorAutoCorrection}, ${ankleMotion}, ${wirelessMode}`);
+        log(`Tracker ${trackerName} settings in hex: ${sensorModeHex}, ${fpsModeHex}, ${sensorAutoCorrectionHex}, ${ankleMotionHex}, ${wirelessModeHex}`);
+        //log(`Tracker ${trackerName} settings in base64: ${sensorModeBase64}, ${fpsModeBase64}, ${sensorAutoCorrectionBase64}, ${ankleMotionBase64}, ${wirelessModeBase64}`);
+        this.emit("settings", trackerName, sensorMode, fpsMode, sensorAutoCorrection, ankleMotion);
+        return { sensorMode, fpsMode, sensorAutoCorrection, ankleMotion, wirelessMode };
+    }
+
+    /**
      * Returns the device info from the bluetooth trackers.
      * Support: Bluetooth 
      * 
@@ -430,7 +494,7 @@ gx6.on("data", (port, data) => {
     }
 });
 
-// TODO: magnetometer, add settings
+// TODO: magnetometer
 bluetooth.on("data", (localName, service, characteristic, data) => {
     if (service == "Device Information") return;
     if (characteristic === "Sensor") {
@@ -570,6 +634,7 @@ function processTrackerData(data, trackerName) {
  * @fires haritora#button
 **/
 
+// TODO - match BT button handling with GX6
 function processButtonData(data, trackerName, characteristic) {
     let mainButton = null;
     let subButton = null;
@@ -586,7 +651,7 @@ function processButtonData(data, trackerName, characteristic) {
         mainButton = currentButtons[0];
         subButton = currentButtons[1];
         trackerButtons.set(trackerName, currentButtons);
-        haritora.emit("button", trackerName, mainButton, subButton, null);
+        haritora.emit("button", trackerName, mainButton, subButton, true);
     } else if (gx6Enabled) {
         // Character 1 turns 0 when the tracker is turning off/is off (1 when turning on/is on)
         // Characters 8, 9, 11, and 12 also indicate if tracker is being turned off/is off (all f's)

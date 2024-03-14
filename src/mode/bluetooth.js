@@ -145,13 +145,11 @@ export default class Bluetooth extends EventEmitter {
                     if (service.uuid === serviceId) {
                         for (let characteristic of service.characteristics) {
                             if (characteristic.uuid === characteristicId) {
-                                console.log(`Reading characteristic ${characteristic.uuid} of service ${service.uuid}...`);
                                 characteristic.read((error, data) => {
                                     if (error) {
                                         console.error(`Error reading characteristic ${characteristic.uuid} of service ${service.uuid}:`, error);
                                         reject(error);
                                     } else {
-                                        console.log(`Read characteristic ${characteristic.uuid} of service ${service.uuid}:`, data);
                                         resolve(data);
                                     }
                                 });
@@ -165,24 +163,33 @@ export default class Bluetooth extends EventEmitter {
         });
     }
 
-    // TODO make sure this actually works (github copilot written lol)
-    writeData(localName, service, characteristic, data) {
-        const device = this.getDeviceInfo(localName);
-        if (device) {
-            for (let service of activeServices) {
-                if (service.uuid === service) {
-                    for (let characteristic of service.characteristics) {
-                        if (characteristic.uuid === characteristic) {
-                            characteristic.write(data, true, (error) => {
-                                if (error) {
-                                    console.error(`Error writing characteristic ${characteristic.uuid} of service ${service.uuid}:`, error);
-                                }
-                            });
+    writeData(data, localName, serviceId, characteristicId, writeWithoutResponse = true) {
+        return new Promise((resolve, reject) => {
+            const device = this.getDeviceInfo(localName);
+            if (device) {
+                console.log("Device found");
+                for (let service of activeServices) {
+                    if (service.uuid === serviceId) {
+                        for (let characteristic of service.characteristics) {
+                            if (characteristic.uuid === characteristicId) {
+                                characteristic.write(data, writeWithoutResponse, (error) => {
+                                    if (error) {
+                                        console.error(`Error writing characteristic ${characteristic.uuid} of service ${service.uuid}:`, error);
+                                    } else {
+                                        console.log(`Wrote characteristic ${characteristic.uuid} of service ${service.uuid}:`, data);
+                                        console.log(`Data in hex: ${data.toString("hex")}`);
+                                        console.log(`Data in string: ${data.toString()}`);
+                                        resolve();
+                                    }
+                                });
+                                return;
+                            }
                         }
                     }
                 }
             }
-        }
+            reject(new Error("Device not found"));
+        });
     }
 
     getServices() {
