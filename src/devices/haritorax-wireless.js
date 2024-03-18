@@ -5,13 +5,13 @@ import { EventEmitter } from "events";
 import GX6 from "../mode/gx6.js";
 import Bluetooth from "../mode/bluetooth.js";
 
+let debug = false;
+
 const gx6 = new GX6();
 const bluetooth = new Bluetooth();
 let gx6Enabled = false;
 let bluetoothEnabled = false;
 let haritora;
-
-let debug = false;
 
 const trackerButtons = new Map([
     // trackerName, [mainButton, subButton]
@@ -32,6 +32,8 @@ const trackerSettings = new Map([
     ["leftKnee", ""],
     ["leftAnkle", ""]
 ]);
+
+let activeDevices = [];
 
 // JSDoc comments for events
 
@@ -169,7 +171,6 @@ export default class HaritoraXWireless extends EventEmitter {
             bluetoothEnabled = false;
         }
     }
-
 
     /**
      * Sets the tracker settings for a specific tracker.
@@ -429,6 +430,16 @@ export default class HaritoraXWireless extends EventEmitter {
             }
         });
     }
+
+    getActiveTrackers() {
+        if (gx6Enabled) {
+            return activeDevices;
+        } else if (bluetoothEnabled) {
+            return bluetooth.getActiveTrackers();
+        } else {
+            return null;
+        }
+    }
 }
 
 gx6.on("data", (port, data) => {
@@ -437,22 +448,24 @@ gx6.on("data", (port, data) => {
     const value = splitData[1];
 
     // Check if the identifier contains a number, if not, it's the dongle
-    const trackerIdMatch = identifier.match(/\d/);
-    const trackerId = trackerIdMatch ? trackerIdMatch[0] : "(DONGLE)";
+    const trackerId = identifier.match(/\d/) ? identifier.match(/\d/)[0] : "(DONGLE)";
 
     // Check what body part the tracker is assigned to
     let trackerName = gx6.getPartFromInfo(trackerId, port);
+
+    // If the tracker is not in the list of active devices, add it
+    if (!activeDevices.includes(trackerName) && trackerName !== "(DONGLE)") activeDevices.push(trackerName);
     
-    if (identifier.toLowerCase().includes("x")) {
+    if (identifier.toLowerCase().includes("x") && trackerName !== "(DONGLE)") {
         // IMU data
         processIMUData(value, trackerName);
-    } else if (identifier.toLowerCase().includes("a")) {
+    } else if (identifier.toLowerCase().includes("a") && trackerName !== "(DONGLE)") {
         // Tracker data
         processTrackerData(value, trackerName);
     } else if (identifier.toLowerCase().includes("r") && trackerName !== "(DONGLE)") {
         // Tracker button info
         processButtonData(value, trackerName);
-    } else if (identifier.toLowerCase().includes("v")) {
+    } else if (identifier.toLowerCase().includes("v") && trackerName !== "(DONGLE)") {
         // Tracker battery info
         processBatteryData(value, trackerName);
     } else if (identifier.toLowerCase().includes("o") && trackerName !== "(DONGLE)") {
@@ -462,7 +475,7 @@ gx6.on("data", (port, data) => {
         // Tracker info
         processInfoData(value, trackerName);
     } else {
-        log(`${port} - Unknown data: ${data}`);
+        log(`${port} - Unknown data from ${trackerName}: ${data}`);
     }
 });
 
@@ -585,6 +598,7 @@ function processTrackerData(data, trackerName) {
     
     if (data === "7f7f7f7f7f7f") {
         log(`Searching for tracker ${trackerName}...`);
+        if (activeDevices.includes(trackerName)) activeDevices.splice(activeDevices.indexOf(trackerName), 1);
     } else {
         log(`Tracker ${trackerName} other data processed: ${data}`);
     }
@@ -712,15 +726,9 @@ function processTrackerSettings(data, trackerName) {
     const ankleMotionDetectionText = ankleMotionDetection === 0 ? "false" : "true";
 
     const sensorAutoCorrectionComponents = [];
-    if (sensorAutoCorrection & 1) {
-        sensorAutoCorrectionComponents.push("Accel");
-    }
-    if (sensorAutoCorrection & 2) {
-        sensorAutoCorrectionComponents.push("Gyro");
-    }
-    if (sensorAutoCorrection & 4) {
-        sensorAutoCorrectionComponents.push("Mag");
-    }
+    if (sensorAutoCorrection & 1) sensorAutoCorrectionComponents.push("Accel");
+    if (sensorAutoCorrection & 2) sensorAutoCorrectionComponents.push("Gyro");
+    if (sensorAutoCorrection & 4) sensorAutoCorrectionComponents.push("Mag");
 
     const sensorAutoCorrectionText = sensorAutoCorrectionComponents.join(", ");
 
@@ -731,9 +739,7 @@ function processTrackerSettings(data, trackerName) {
     log(`Ankle Motion Detection: ${ankleMotionDetectionText}`);
     log(`Raw data: ${data}`);
 
-    if (trackerSettings.has(trackerName) && trackerSettings.get(trackerName) !== data) {
-        trackerSettings.set(trackerName, data);
-    }
+    if (trackerSettings.has(trackerName) && trackerSettings.get(trackerName) !== data) trackerSettings.set(trackerName, data);
 
     
     haritora.emit("settings", trackerName, sensorModeText, postureDataRateText, sensorAutoCorrectionComponents, ankleMotionDetectionText);
@@ -793,9 +799,7 @@ function processInfoData(data, trackerName) {
 
 
 function log(message) {
-    if (debug) {
-        console.log(message);
-    }
+    if (debug) console.log(message);
 }
 
 

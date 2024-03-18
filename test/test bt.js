@@ -7,6 +7,7 @@ setTimeout(() => {
     // put in name of device
     device.getDeviceInfo("");
     device.getBatteryInfo("");
+    console.log("Active trackers for BT:", device.getActiveTrackers());
 }, 3000);
 
 /*setTimeout(() => {

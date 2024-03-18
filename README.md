@@ -24,9 +24,11 @@ Will write actual documentation at some point, for now refer to the source code,
 
 | Communication mode        | Supported |
 |---------------------------|-----------|
-| Bluetooth                 |     /     |
+| Bluetooth                 |     *     |
 | GX6 Communication Dongle  |     Y     |
 | GX2 Communication Dongle  |     X     |
+
+**\* partial support**
 
 ## Example
 

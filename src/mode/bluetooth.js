@@ -160,6 +160,10 @@ export default class Bluetooth extends EventEmitter {
         return allowReconnect;
     }
 
+    getActiveTrackers() {
+        return activeDevices.map(device => device.advertisement.localName);
+    }
+
     getDeviceInfo(localName) {
         for (let device of activeDevices) {
             if (device.advertisement.localName === localName) {
