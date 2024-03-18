@@ -13,6 +13,10 @@ let gx6Enabled = false;
 let bluetoothEnabled = false;
 let haritora;
 
+const deviceInformation = new Map([
+    // deviceName, [version, model, serial] (in JSON)
+]);
+
 const trackerButtons = new Map([
     // trackerName, [mainButton, subButton]
     ["rightKnee", [0, 0]],
@@ -337,67 +341,78 @@ export default class HaritoraXWireless extends EventEmitter {
     }
 
     /**
-     * Returns the device info from the bluetooth trackers.
-     * Support: Bluetooth 
+     * Returns device info for the specified tracker or dongle.
+     * Support: GX6, Bluetooth
      * 
      * @function getDeviceInfo
      * @fires this#info
     **/
 
     async getDeviceInfo(trackerName) {
-        if (!bluetoothEnabled) {
-            log("This function is only supported for bluetooth trackers.");
-            return null;
-        }
-        let trackerObject = bluetooth.getActiveDevices().find(device => device.advertisement.localName === trackerName);
-        if (!trackerObject) {
-            log(`Tracker ${trackerName} not found`);
-            return null;
-        }
-
         let serial = null;
         let model = null;
         let version = null;
+        
+        if (trackerName === "(DONGLE)" || gx6Enabled) {
+            const device = trackerName === "(DONGLE)" ? "dongle" : "tracker";
+            const deviceInfo = gx6.getTrackerInfo(trackerName);
+            if (deviceInfo) {
+                version = deviceInfo[0];
+                model = deviceInfo[2];
+                serial = deviceInfo[3];
+            }
 
-        const readPromises = [];
+            log(`${device} info: ${version}, ${model}, ${serial}`);
+            this.emit("info", device, version, model, serial);
+        } else if (bluetoothEnabled) {
+            let trackerObject = bluetooth.getActiveDevices().find(device => device.advertisement.localName === trackerName);
+            if (!trackerObject) {
+                log(`Tracker ${trackerName} not found`);
+                return null;
+            }
 
-        for (let service of trackerObject.services) {
-            if (service.uuid !== "180a") continue;
-            for (let characteristic of service.characteristics) {
-                const promise = new Promise((resolve, reject) => {
-                    characteristic.read((err, data) => {
-                        if (err) {
-                            reject(`Error reading characteristic for ${trackerName}: ${err}`);
-                        } else {
-                            switch (characteristic.uuid) {
-                            case "2a25":
-                                serial = data;
-                                break;
-                            case "2a24":
-                                model = data;
-                                break;
-                            case "2a28":
-                                version = data;
-                                break;
+            const readPromises = [];
+
+            for (let service of trackerObject.services) {
+                if (service.uuid !== "180a") continue;
+                for (let characteristic of service.characteristics) {
+                    const promise = new Promise((resolve, reject) => {
+                        characteristic.read((err, data) => {
+                            if (err) {
+                                reject(`Error reading characteristic for ${trackerName}: ${err}`);
+                            } else {
+                                switch (characteristic.uuid) {
+                                case "2a28":
+                                    version = data;
+                                    break;
+                                case "2a24":
+                                    model = data;
+                                    break;
+                                case "2a25":
+                                    serial = data;
+                                    break;
+                                }
+                                resolve();
                             }
-                            resolve();
-                        }
+                        });
+                    
+                        setTimeout(() => reject(`Read operation for ${trackerName} timed out`), 5000);
                     });
-                
-                    setTimeout(() => reject(`Read operation for ${trackerName} timed out`), 5000);
-                });
-                readPromises.push(promise);
+                    readPromises.push(promise);
+                }
+            }
+
+            try {
+                await Promise.all(readPromises);
+                log(`Tracker ${trackerName} info: ${version}, ${model}, ${serial}`);
+                this.emit("info", "tracker", version, model, serial);
+            } catch (error) {
+                console.error(error);
             }
         }
 
-        try {
-            await Promise.all(readPromises);
-            log(`Tracker ${trackerName} info: ${version}, ${model}, ${serial}`);
-            this.emit("info", "tracker", version, model, serial);
-            return { version, model, serial };
-        } catch (error) {
-            console.error(error);
-        }
+        deviceInformation.set(trackerName, [version, model, serial]);
+        return { version, model, serial };
     }
 
     /**
@@ -775,6 +790,7 @@ function processInfoData(data, trackerName) {
             version = dongleInfo["version"];
             model = dongleInfo["model"];
             serial = dongleInfo["serial no"];
+            
         } catch (err) {
             console.error(`Error processing dongle info data:\n${err}`);
         }
@@ -789,6 +805,8 @@ function processInfoData(data, trackerName) {
             version = trackerInfo["version"];
             model = trackerInfo["model"];
             serial = trackerInfo["serial no"];
+
+            trackerInfo.set(trackerName, trackerInfo);
         } catch (err) {
             console.error(`Error processing tracker info data:\n${err}`);
         }
