@@ -13,6 +13,10 @@ setInterval(async () => {
     console.log("Device battery:", await device.getBatteryInfo("rightAnkle"));
 }, 2000);
 
+setTimeout(() => {
+    device.setTrackerSettings("rightAnkle", 50, 2, [''], false);
+}, 5000);
+
 /*setTimeout(() => {
     console.log("Stopping connection");
     device.stopConnection("gx6");

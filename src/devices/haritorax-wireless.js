@@ -197,6 +197,9 @@ export default class HaritoraXWireless extends EventEmitter {
     **/ 
 
     setTrackerSettings(trackerName, fpsMode, sensorMode, sensorAutoCorrection, ankleMotionDetection) {
+        const TRACKERS_GROUP_ONE = ["rightKnee", "hip", "leftKnee"];
+        const TRACKERS_GROUP_TWO = ["rightAnkle", "chest", "leftAnkle"];
+
         if (bluetoothEnabled) {
             log("Setting tracker settings for bluetooth is not supported yet.");
             return false;
@@ -210,33 +213,13 @@ export default class HaritoraXWireless extends EventEmitter {
             if (sensorAutoCorrection.includes("gyro")) sensorAutoCorrectionBit |= 0x02;
             if (sensorAutoCorrection.includes("mag")) sensorAutoCorrectionBit |= 0x04;
 
-            let hexValue = null;
-            let modeValueBuffer = null;
-            
-            if (trackerName === "rightKnee" || trackerName === "hip" || trackerName === "leftKnee") {
-                const entries = Array.from(trackerSettings.entries());
-                const currentIndex = entries.findIndex(([key]) => key === trackerName);
+            let hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
+            let trackerSettingsBuffer = null;
 
-                hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
-                if (currentIndex !== -1 && currentIndex < entries.length - 1) {
-                    const nextKey = entries[currentIndex + 1][0];
-                    let nextValue = trackerSettings.get(nextKey);
-                    modeValueBuffer = Buffer.from("o0:" + hexValue + "\r\n" + "o1:" + nextValue + "\r\n", "utf-8");
-                }
-                
-                log(`${trackerName} - Calculated hex value: ${hexValue}`);
-            } else if (trackerName === "rightAnkle" || trackerName === "chest" || trackerName === "leftAnkle") {
-                const entries = Array.from(trackerSettings.entries());
-                const currentIndex = entries.findIndex(([key]) => key === trackerName);
-
-                hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
-                if (currentIndex !== -1 && currentIndex > 0) {
-                    const previousKey = entries[currentIndex - 1][0];
-                    let previousValue = trackerSettings.get(previousKey);
-                    modeValueBuffer = Buffer.from("o0:" + previousValue + "\r\n" + "o1:" + hexValue + "\r\n", "utf-8");
-                }
-
-                log(`${trackerName} - Calculated hex value: ${hexValue}`);
+            if (TRACKERS_GROUP_ONE.includes(trackerName)) {
+                trackerSettingsBuffer = this.getTrackerSettingsBuffer(trackerName, hexValue, 1);
+            } else if (TRACKERS_GROUP_TWO.includes(trackerName)) {
+                trackerSettingsBuffer = this.getTrackerSettingsBuffer(trackerName, hexValue, -1);
             } else {
                 log(`Invalid tracker name: ${trackerName}`);
                 return;
@@ -250,17 +233,17 @@ export default class HaritoraXWireless extends EventEmitter {
             log(`Raw hex data calculated to be sent: ${hexValue}`);
 
             try {
-                log(`Sending tracker settings to ${trackerName}: ${modeValueBuffer.toString()}`);
+                log(`Sending tracker settings to ${trackerName}: ${trackerSettingsBuffer.toString()}`);
                 let ports = gx6.getActivePorts();
                 let trackerInfo = gx6.getTrackerInfo(trackerName);
                 let trackerPort = trackerInfo[1];
 
-                ports[trackerPort].write(modeValueBuffer, (err) => {
+                ports[trackerPort].write(trackerSettingsBuffer, (err) => {
                     if (err) {
                         console.error(`${trackerName} - Error writing data to serial port ${trackerPort}: ${err.message}`);
                     } else {
                         trackerSettings.set(trackerName, hexValue);
-                        log(`${trackerName} - Data written to serial port ${trackerPort}: ${modeValueBuffer.toString()}`);
+                        log(`${trackerName} - Data written to serial port ${trackerPort}: ${trackerSettingsBuffer.toString()}`);
                     }
                 });
             } catch (error) {
@@ -271,6 +254,20 @@ export default class HaritoraXWireless extends EventEmitter {
 
         this.emit("settings", trackerName, sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
         return true;
+    }
+
+    getTrackerSettingsBuffer(trackerName, hexValue, direction) {
+        const entries = Array.from(trackerSettings.entries());
+        const currentIndex = entries.findIndex(([key]) => key === trackerName);
+    
+        if (currentIndex !== -1 && currentIndex + direction >= 0 && currentIndex + direction < entries.length) {
+            const adjacentKey = entries[currentIndex + direction][0];
+            let adjacentValue = trackerSettings.get(adjacentKey);
+            return Buffer.from(`o0:${direction === 1 ? hexValue : adjacentValue}\r\no1:${direction === 1 ? adjacentValue : hexValue}\r\n`, "utf-8");
+        }
+    
+        log(`${trackerName} - Calculated hex value: ${hexValue}`);
+        return null;
     }
 
     
@@ -294,7 +291,6 @@ export default class HaritoraXWireless extends EventEmitter {
             log("Setting all tracker settings for bluetooth is not supported yet.");
             return false;
         } else if (gx6Enabled) {
-            log("Setting all tracker settings...");
             try {
                 const sensorModeBit = sensorMode === 1 ? "1" : "0";
                 const postureDataRateBit = fpsMode === 100 ? "1" : "0";
@@ -305,9 +301,10 @@ export default class HaritoraXWireless extends EventEmitter {
                 const ankleMotionDetectionBit = ankleMotionDetection ? "1" : "0";
     
                 const hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
-                const modeValueBuffer = Buffer.from("o0:" + hexValue + "\r\n" + "o1:" + hexValue + "\r\n", "utf-8");
+                const trackerSettingsBuffer = Buffer.from("o0:" + hexValue + "\r\n" + "o1:" + hexValue + "\r\n", "utf-8");
     
-                log("Setting the following settings onto all trackers:");
+                log("Setting the following settings onto all connected trackers:");
+                log(`Connected trackers: ${activeDevices}`);
                 log(`FPS mode: ${fpsMode}`);
                 log(`Sensor mode: ${sensorMode}`);
                 log(`Sensor auto correction: ${sensorAutoCorrection}`);
@@ -319,12 +316,12 @@ export default class HaritoraXWireless extends EventEmitter {
                     let trackerInfo = gx6.getTrackerInfo(trackerName);
                     let trackerPort = trackerInfo[1];
     
-                    ports[trackerPort].write(modeValueBuffer, (err) => {
+                    ports[trackerPort].write(trackerSettingsBuffer, (err) => {
                         if (err) {
                             console.error(`${trackerName} - Error writing data to serial port ${trackerPort}: ${err.message}`);
                         } else {
                             trackerSettings.set(trackerName, hexValue);
-                            log(`${trackerName} - Data written to serial port ${trackerPort}: ${modeValueBuffer.toString()}`);
+                            log(`${trackerName} - Data written to serial port ${trackerPort}: ${trackerSettingsBuffer.toString()}`);
                         }
                     });
                 }
@@ -354,6 +351,12 @@ export default class HaritoraXWireless extends EventEmitter {
     **/
 
     async getDeviceInfo(trackerName) {
+        const SERVICE_UUID = "180a";
+        const VERSION_UUID = "2a28";
+        const MODEL_UUID = "2a24";
+        const SERIAL_UUID = "2a25";
+        const TIMEOUT = 3000;
+
         let serial = null;
         let model = null;
         let version = null;
@@ -381,7 +384,7 @@ export default class HaritoraXWireless extends EventEmitter {
             const readPromises = [];
 
             for (let service of trackerObject.services) {
-                if (service.uuid !== "180a") continue;
+                if (service.uuid !== SERVICE_UUID) continue;
                 for (let characteristic of service.characteristics) {
                     const promise = new Promise((resolve, reject) => {
                         characteristic.read((err, data) => {
@@ -389,13 +392,13 @@ export default class HaritoraXWireless extends EventEmitter {
                                 reject(`Error reading characteristic for ${trackerName}: ${err}`);
                             } else {
                                 switch (characteristic.uuid) {
-                                case "2a28":
+                                case VERSION_UUID:
                                     version = data.toString("utf-8");
                                     break;
-                                case "2a24":
+                                case MODEL_UUID:
                                     model = data.toString("utf-8");
                                     break;
-                                case "2a25":
+                                case SERIAL_UUID:
                                     serial = data.toString("utf-8");
                                     break;
                                 }
@@ -403,7 +406,7 @@ export default class HaritoraXWireless extends EventEmitter {
                             }
                         });
                     
-                        setTimeout(() => reject(`Read operation for ${trackerName} timed out`), 5000);
+                        setTimeout(() => reject(`Read operation for ${trackerName} timed out`), TIMEOUT);
                     });
                     readPromises.push(promise);
                 }
@@ -502,6 +505,7 @@ gx6.on("data", (port, data) => {
     
     if (identifier.toLowerCase().includes("x") && trackerName !== "(DONGLE)") {
         // IMU data
+        //processIMUData(value, trackerName);
     } else if (identifier.toLowerCase().includes("a") && trackerName !== "(DONGLE)") {
         // Tracker data
         processTrackerData(value, trackerName);
@@ -640,6 +644,7 @@ function processTrackerData(data, trackerName) {
     */
     
     if (data === "7f7f7f7f7f7f") {
+        //log(`Searching for tracker ${trackerName}...`);
         if (activeDevices.includes(trackerName)) activeDevices.splice(activeDevices.indexOf(trackerName), 1);
     } else {
         log(`Tracker ${trackerName} other data processed: ${data}`);
