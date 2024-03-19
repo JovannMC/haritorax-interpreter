@@ -13,10 +13,6 @@ let gx6Enabled = false;
 let bluetoothEnabled = false;
 let haritora;
 
-const deviceInformation = new Map([
-    // deviceName, [version, model, serial] (in JSON)
-]);
-
 const trackerButtons = new Map([
     // trackerName, [mainButton, subButton]
     ["rightKnee", [0, 0]],
@@ -35,6 +31,14 @@ const trackerSettings = new Map([
     ["chest", ""],
     ["leftKnee", ""],
     ["leftAnkle", ""]
+]);
+
+const trackerBattery = new Map([
+    // trackerName, [batteryRemaining, batteryVoltage, chargeStatus]
+]);
+
+const deviceInformation = new Map([
+    // deviceName, [version, model, serial] (in JSON)
 ]);
 
 let activeDevices = [];
@@ -345,6 +349,7 @@ export default class HaritoraXWireless extends EventEmitter {
      * Support: GX6, Bluetooth
      * 
      * @function getDeviceInfo
+     * @returns {object} - The device info (version, model, serial)
      * @fires this#info
     **/
 
@@ -355,14 +360,16 @@ export default class HaritoraXWireless extends EventEmitter {
         
         if (trackerName === "(DONGLE)" || gx6Enabled) {
             const device = trackerName === "(DONGLE)" ? "dongle" : "tracker";
-            const deviceInfo = gx6.getTrackerInfo(trackerName);
-            if (deviceInfo) {
-                version = deviceInfo[0];
-                model = deviceInfo[2];
-                serial = deviceInfo[3];
+            log(`Getting ${device} info for ${trackerName}...`);
+            if (deviceInformation.has(trackerName)) {
+                let deviceInfo = deviceInformation.get(trackerName);
+                version = deviceInfo["version"];
+                model = deviceInfo["model"];
+                serial = deviceInfo["serial no"];
+            } else {
+                log(`No information found for tracker ${trackerName}`);
             }
-
-            log(`${device} info: ${version}, ${model}, ${serial}`);
+            
             this.emit("info", device, version, model, serial);
         } else if (bluetoothEnabled) {
             let trackerObject = bluetooth.getActiveDevices().find(device => device.advertisement.localName === trackerName);
@@ -383,13 +390,13 @@ export default class HaritoraXWireless extends EventEmitter {
                             } else {
                                 switch (characteristic.uuid) {
                                 case "2a28":
-                                    version = data;
+                                    version = data.toString("utf-8");
                                     break;
                                 case "2a24":
-                                    model = data;
+                                    model = data.toString("utf-8");
                                     break;
                                 case "2a25":
-                                    serial = data;
+                                    serial = data.toString("utf-8");
                                     break;
                                 }
                                 resolve();
@@ -411,40 +418,62 @@ export default class HaritoraXWireless extends EventEmitter {
             }
         }
 
+        log(`Tracker ${trackerName} info: ${version}, ${model}, ${serial}`);
         deviceInformation.set(trackerName, [version, model, serial]);
         return { version, model, serial };
     }
 
     /**
-     * Get battery info from the bluetooth trackers.
-     * Support: Bluetooth
+     * Get battery info from the trackers.
+     * Support: GX6, Bluetooth
      * 
      * @function getBatteryInfo
+     * @returns {object} - The battery info (batteryRemaining, batteryVoltage, chargeStatus)
      * @fires this#battery
     **/
 
     async getBatteryInfo(trackerName) {
-        if (!bluetoothEnabled) {
-            log("This function is only supported for bluetooth trackers.");
-            return null;
-        }
-        let trackerObject = bluetooth.getActiveDevices().find(device => device.advertisement.localName === trackerName);
-        if (!trackerObject) {
-            log(`Tracker ${trackerName} not found`);
-            return null;
-        }
-        let batteryCharacteristic = trackerObject.services.find(service => service.uuid === "180f").characteristics.find(characteristic => characteristic.uuid === "2a19");
+        if (trackerBattery.has(trackerName)) {
+            let batteryRemaining = trackerBattery.get(trackerName)[0];
+            let batteryVoltage = trackerBattery.get(trackerName)[1];
+            let chargeStatus = trackerBattery.get(trackerName)[2];
+            log(`Tracker ${trackerName} battery remaining: ${batteryRemaining}%`);
+            log(`Tracker ${trackerName} battery voltage: ${batteryVoltage}`);
+            log(`Tracker ${trackerName} charge status: ${chargeStatus}`);
+            this.emit("battery", trackerName, batteryRemaining, batteryVoltage, chargeStatus);
+            return { batteryRemaining, batteryVoltage, chargeStatus };
+        } else {
+            if (gx6Enabled) {
+                log(`Tracker ${trackerName} battery info not found`);
+                return null;
+            } else if (bluetoothEnabled) {
+                let trackerObject = bluetooth.getActiveDevices().find(device => device.advertisement.localName === trackerName);
+                if (!trackerObject) {
+                    log(`Tracker ${trackerName} not found`);
+                    return null;
+                }
+                let batteryCharacteristic = trackerObject.services.find(service => service.uuid === "180f").characteristics.find(characteristic => characteristic.uuid === "2a19");
 
-        batteryCharacteristic.read((err, data) => {
-            if (err) {
-                console.error(`Error reading battery characteristic for ${trackerName}: ${err}`);
-            } else {
-                let batteryRemaining = data[0];
-                log(`Tracker ${trackerName} battery remaining: ${batteryRemaining}%`);
-                this.emit("battery", trackerName, batteryRemaining, null, null);
+                batteryCharacteristic.read((err, data) => {
+                    if (err) {
+                        console.error(`Error reading battery characteristic for ${trackerName}: ${err}`);
+                    } else {
+                        let batteryRemaining = data[0];
+                        log(`Tracker ${trackerName} battery remaining: ${batteryRemaining}%`);
+                        this.emit("battery", trackerName, batteryRemaining, null, null);
+                    }
+                });
             }
-        });
+        }
     }
+
+    /**
+     * Get the active trackers.
+     * Support: GX6, Bluetooth
+     * 
+     * @function getActiveTrackers
+     * @returns {array} - The active trackers.
+    **/
 
     getActiveTrackers() {
         if (gx6Enabled) {
@@ -473,7 +502,6 @@ gx6.on("data", (port, data) => {
     
     if (identifier.toLowerCase().includes("x") && trackerName !== "(DONGLE)") {
         // IMU data
-        processIMUData(value, trackerName);
     } else if (identifier.toLowerCase().includes("a") && trackerName !== "(DONGLE)") {
         // Tracker data
         processTrackerData(value, trackerName);
@@ -612,7 +640,6 @@ function processTrackerData(data, trackerName) {
     */
     
     if (data === "7f7f7f7f7f7f") {
-        log(`Searching for tracker ${trackerName}...`);
         if (activeDevices.includes(trackerName)) activeDevices.splice(activeDevices.indexOf(trackerName), 1);
     } else {
         log(`Tracker ${trackerName} other data processed: ${data}`);
@@ -716,6 +743,7 @@ function processBatteryData(data, trackerName) {
         }
     }
 
+    trackerBattery.set(trackerName, [batteryRemaining, batteryVoltage, chargeStatus]);
     haritora.emit("battery", trackerName, batteryRemaining, batteryVoltage, chargeStatus);
 }
 
@@ -806,7 +834,7 @@ function processInfoData(data, trackerName) {
             model = trackerInfo["model"];
             serial = trackerInfo["serial no"];
 
-            trackerInfo.set(trackerName, trackerInfo);
+            deviceInformation.set(trackerName, trackerInfo);
         } catch (err) {
             console.error(`Error processing tracker info data:\n${err}`);
         }

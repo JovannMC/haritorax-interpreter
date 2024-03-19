@@ -7,8 +7,10 @@ device.on("imu", (tracker, rotation, gravity, ankle) => {
     //console.log(`IMU event fired, tracker: ${tracker}, rotation: ${rotation}, gravity: ${gravity}, ankle: ${ankle}`);
 });
 
-setInterval(() => {
+setInterval(async () => {
     console.log("Active trackers for GX6:", device.getActiveTrackers());
+    console.log("Device info:", await device.getDeviceInfo("rightAnkle"));
+    console.log("Device battery:", await device.getBatteryInfo("rightAnkle"));
 }, 2000);
 
 /*setTimeout(() => {

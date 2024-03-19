@@ -3,11 +3,15 @@ import { HaritoraXWireless } from "../src/index.js";
 let device = new HaritoraXWireless(true);
 device.startConnection("bluetooth");
 
-setTimeout(() => {
-    // put in name of device
-    device.getDeviceInfo("");
-    device.getBatteryInfo("");
+setInterval(() => {
     console.log("Active trackers for BT:", device.getActiveTrackers());
+}, 5000);
+
+setInterval(async () => {
+    // put in name of device
+    console.log("Active trackers for BT:", device.getActiveTrackers());
+    console.log("Device info:", await device.getDeviceInfo("HaritoraXW-"));
+    console.log("Device battery:", await device.getBatteryInfo("HaritoraXW-"));
 }, 3000);
 
 /*setTimeout(() => {
