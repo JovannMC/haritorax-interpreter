@@ -8,10 +8,14 @@ device.on("imu", (tracker, rotation, gravity, ankle) => {
 });
 
 setInterval(async () => {
-    console.log("Active trackers for GX6:", device.getActiveTrackers());
-    console.log("Device info:", await device.getDeviceInfo("rightAnkle"));
-    console.log("Device battery:", await device.getBatteryInfo("rightAnkle"));
-}, 2000);
+    try {
+        console.log("Active trackers for GX6:", device.getActiveTrackers());
+        console.log("Device info:", await device.getDeviceInfo("rightAnkle"));
+        console.log("Device battery:", await device.getBatteryInfo("rightAnkle"));
+    } catch (error) {
+        console.error("Error getting device data:", error);
+    }
+}, 3000);
 
 setTimeout(() => {
     device.setTrackerSettings("rightAnkle", 50, 2, [''], false);

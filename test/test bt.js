@@ -8,10 +8,13 @@ setInterval(() => {
 }, 5000);
 
 setInterval(async () => {
-    // put in name of device
-    console.log("Active trackers for BT:", device.getActiveTrackers());
-    console.log("Device info:", await device.getDeviceInfo("HaritoraXW-"));
-    console.log("Device battery:", await device.getBatteryInfo("HaritoraXW-"));
+    try {
+        console.log("Active trackers for BT:", device.getActiveTrackers());
+        console.log("Device info:", await device.getDeviceInfo("HaritoraXW-"));
+        console.log("Device battery:", await device.getBatteryInfo("HaritoraXW-"));
+    } catch (error) {
+        console.error("Error getting device data:", error);
+    }
 }, 3000);
 
 /*setTimeout(() => {
