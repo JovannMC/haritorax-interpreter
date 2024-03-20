@@ -231,11 +231,11 @@ export default class HaritoraXWireless extends EventEmitter {
             }
 
             log(`Setting the following settings onto tracker ${trackerName}:
-                FPS mode: ${fpsMode}
-                Sensor mode: ${sensorMode}
-                Sensor auto correction: ${sensorAutoCorrection}
-                Ankle motion detection: ${ankleMotionDetection}
-                Raw hex data calculated to be sent: ${hexValue}`);
+FPS mode: ${fpsMode}
+Sensor mode: ${sensorMode}
+Sensor auto correction: ${sensorAutoCorrection}
+Ankle motion detection: ${ankleMotionDetection}
+Raw hex data calculated to be sent: ${hexValue}`);
             
             try {
                 log(`Sending tracker settings to ${trackerName}: ${trackerSettingsBuffer.toString()}`);
@@ -309,12 +309,12 @@ export default class HaritoraXWireless extends EventEmitter {
                 const trackerSettingsBuffer = Buffer.from("o0:" + hexValue + "\r\n" + "o1:" + hexValue + "\r\n", "utf-8");
 
                 log(`Setting the following settings onto all connected trackers:
-                    Connected trackers: ${activeDevices}
-                    FPS mode: ${fpsMode}
-                    Sensor mode: ${sensorMode}
-                    Sensor auto correction: ${sensorAutoCorrection}
-                    Ankle motion detection: ${ankleMotionDetection}
-                    Raw hex data calculated to be sent: ${hexValue}`);
+Connected trackers: ${activeDevices}
+FPS mode: ${fpsMode}
+Sensor mode: ${sensorMode}
+Sensor auto correction: ${sensorAutoCorrection}
+Ankle motion detection: ${ankleMotionDetection}
+Raw hex data calculated to be sent: ${hexValue}`);
 
                 let ports = gx6.getActivePorts();
                 for (let trackerName of trackerSettings.keys()) {
@@ -546,7 +546,7 @@ bluetooth.on("data", (localName, service, characteristic, data) => {
 
     switch (characteristic) {
     case "Sensor":
-        //processIMUData(data, localName);
+        processIMUData(data, localName);
         break;
     case "MainButton":
     case "SecondaryButton":
@@ -710,8 +710,10 @@ function processButtonData(data, trackerName, characteristic) {
 
             if (data[0] === "0" || data[7] === "f" || data[8] === "f" || data[10] === "f" || data[11] === "f") {
                 log(`Tracker ${trackerName} is off/turning off...`);
+                log(`Raw data: ${data}`);
                 buttonState = TRACKER_OFF;
             } else {
+                log(`Tracker ${trackerName} is on/turning on...`);
                 buttonState = TRACKER_ON;
             }
         }

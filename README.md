@@ -1,6 +1,8 @@
 # HaritoraX Interpreter
 
-A node.js package that allows you to communicate and interact with the HaritoraX FBT trackers. No HaritoraConfigurator software needed!
+![Showcase of the package output with debug logs on, showing the data such as tracker settings, info, and interpreted IMU data via the GX6 dongle](showcase.png)
+
+A node.js package that allows you to communicate and interact with the HaritoraX FBT trackers to interpret the data how you want it. No HaritoraConfigurator software needed!
 
 Check out the Haritora-GX6 proof-of-concept repository here: https://github.com/JovannMC/haritora-gx6-poc
 
@@ -10,7 +12,7 @@ Check out the Haritora-GX6 proof-of-concept repository here: https://github.com/
 
 ## Documentation
 
-Will write actual documentation at some point, for now refer to the source code, examples, and JSDoc comments.
+Will write actual documentation at some point, for now refer to the source code, JSDoc comments, and example below.
 
 ## Supported devices
 
