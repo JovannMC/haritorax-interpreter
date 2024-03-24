@@ -5,7 +5,7 @@ import { EventEmitter } from "events";
 import GX6 from "../mode/gx6.js";
 import Bluetooth from "../mode/bluetooth.js";
 
-let debug = false;
+let debug = 0;
 
 const gx6 = new GX6();
 const bluetooth = new Bluetooth();
@@ -28,8 +28,8 @@ const trackerButtons = new Map([
     ["leftAnkle", [0, 0]]
 ]);
 
-const trackerSettings = new Map([
-    // trackerName, settings
+const trackerSettingsRaw = new Map([
+    // trackerName, raw hex value
     ["rightKnee", ""],
     ["rightAnkle", ""],
     ["hip", ""],
@@ -38,12 +38,35 @@ const trackerSettings = new Map([
     ["leftAnkle", ""]
 ]);
 
+const trackerSettings = new Map([
+    // trackerName, [fpsMode, sensorMode, sensorAutoCorrection, ankleMotionDetection]
+    ["rightKnee", [0, 0, [], false]],
+    ["rightAnkle", [0, 0, [], false]],
+    ["hip", [0, 0, [], false]],
+    ["chest", [0, 0, [], false]],
+    ["leftKnee", [0, 0, [], false]],
+    ["leftAnkle", [0, 0, [], false]]
+]);
+
 const trackerBattery = new Map([
     // trackerName, [batteryRemaining, batteryVoltage, chargeStatus]
+    ["rightKnee", [0, 0, ""]],
+    ["rightAnkle", [0, 0, ""]],
+    ["hip", [0, 0, ""]],
+    ["chest", [0, 0, ""]],
+    ["leftKnee", [0, 0, ""]],
+    ["leftAnkle", [0, 0, ""]]
 ]);
 
 const deviceInformation = new Map([
-    // deviceName, [version, model, serial] (in JSON)
+    // deviceName, [version, model, serial]
+    ["(DONGLE)", null],
+    ["rightKnee", ["", "", ""]],
+    ["rightAnkle", ["", "", ""]],
+    ["hip", ["", "", ""]],
+    ["chest", ["", "", ""]],
+    ["leftKnee", ["", "", ""]],
+    ["leftAnkle", ["", "", ""]]
 ]);
 
 let activeDevices = [];
@@ -122,7 +145,7 @@ let activeDevices = [];
  *
  * @event this#info
  * @type {object}
- * @property {string} type - The type of the device. (tracker or dongle)
+ * @property {string} name - The name of the device.
  * @property {string} version - The version of the device.
  * @property {string} model - The model of the device.
  * @property {string} serial - The serial number of the device.
@@ -136,13 +159,13 @@ let activeDevices = [];
  * This class represents a HaritoraX wireless device. It provides methods to start/stop a connection,
  * set settings for all/individual trackers, and emits events for: IMU data, tracker data, button data, battery data, and settings data.
  * 
- * @param {boolean} debugMode - Enable logging of debug messages. (true or false)
+ * @param {boolean} debugMode - Enable logging of debug messages depending on verbosity. (0 = none, 1 = debug, 2 = debug w/ function info)
  * 
  * @example
  * let device = new HaritoraXWireless(true);
 **/
 export default class HaritoraXWireless extends EventEmitter {
-    constructor(debugMode = false) {
+    constructor(debugMode = 0) {
         super();
         debug = debugMode;
         haritora = this;
@@ -184,6 +207,8 @@ export default class HaritoraXWireless extends EventEmitter {
             bluetoothEnabled = false;
         }
     }
+
+    // TODO: set tracker settings for bluetooth
 
     /**
      * Sets the tracker settings for a specific tracker.
@@ -236,6 +261,8 @@ Sensor mode: ${sensorMode}
 Sensor auto correction: ${sensorAutoCorrection}
 Ankle motion detection: ${ankleMotionDetection}
 Raw hex data calculated to be sent: ${hexValue}`);
+
+            trackerSettings.set(trackerName, [fpsMode, sensorMode, sensorAutoCorrection, ankleMotionDetection]);
             
             try {
                 log(`Sending tracker settings to ${trackerName}: ${trackerSettingsBuffer.toString()}`);
@@ -247,7 +274,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
                     if (err) {
                         console.error(`${trackerName} - Error writing data to serial port ${trackerPort}: ${err.message}`);
                     } else {
-                        trackerSettings.set(trackerName, hexValue);
+                        trackerSettingsRaw.set(trackerName, hexValue);
                         log(`${trackerName} - Data written to serial port ${trackerPort}: ${trackerSettingsBuffer.toString()}`);
                     }
                 });
@@ -262,12 +289,12 @@ Raw hex data calculated to be sent: ${hexValue}`);
     }
 
     getTrackerSettingsBuffer(trackerName, hexValue, direction) {
-        const entries = Array.from(trackerSettings.entries());
+        const entries = Array.from(trackerSettingsRaw.entries());
         const currentIndex = entries.findIndex(([key]) => key === trackerName);
     
         if (currentIndex !== -1 && currentIndex + direction >= 0 && currentIndex + direction < entries.length) {
             const adjacentKey = entries[currentIndex + direction][0];
-            let adjacentValue = trackerSettings.get(adjacentKey);
+            let adjacentValue = trackerSettingsRaw.get(adjacentKey);
             return Buffer.from(`o0:${direction === 1 ? hexValue : adjacentValue}\r\no1:${direction === 1 ? adjacentValue : hexValue}\r\n`, "utf-8");
         }
     
@@ -317,7 +344,7 @@ Ankle motion detection: ${ankleMotionDetection}
 Raw hex data calculated to be sent: ${hexValue}`);
 
                 let ports = gx6.getActivePorts();
-                for (let trackerName of trackerSettings.keys()) {
+                for (let trackerName of trackerSettingsRaw.keys()) {
                     let trackerInfo = gx6.getTrackerInfo(trackerName);
                     let trackerPort = trackerInfo[1];
 
@@ -325,7 +352,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
                         if (err) {
                             console.error(`${trackerName} - Error writing data to serial port ${trackerPort}: ${err.message}`);
                         } else {
-                            trackerSettings.set(trackerName, hexValue);
+                            trackerSettingsRaw.set(trackerName, hexValue);
                             log(`${trackerName} - Data written to serial port ${trackerPort}: ${trackerSettingsBuffer.toString()}`);
                         }
                     });
@@ -339,8 +366,9 @@ Raw hex data calculated to be sent: ${hexValue}`);
             return false;
         }
 
-        for (let trackerName of trackerSettings.keys()) {
+        for (let trackerName of trackerSettingsRaw.keys()) {
             this.emit("settings", trackerName, sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
+            trackerSettings.set(trackerName, [fpsMode, sensorMode, sensorAutoCorrection, ankleMotionDetection]);
         }
         return true;
     }
@@ -355,12 +383,19 @@ Raw hex data calculated to be sent: ${hexValue}`);
     **/
 
     async getDeviceInfo(trackerName) {
+        // GX6
+        const VERSION_INDEX = 0;
+        const MODEL_INDEX = 1;
+        const SERIAL_INDEX = 2;
+
+        // Bluetooth
         const SERVICE_UUID = "180a";
         const VERSION_UUID = "2a28";
         const MODEL_UUID = "2a24";
         const SERIAL_UUID = "2a25";
         const TIMEOUT = 3000;
 
+        // Global
         let serial = null;
         let model = null;
         let version = null;
@@ -370,14 +405,12 @@ Raw hex data calculated to be sent: ${hexValue}`);
             log(`Getting ${device} info for ${trackerName}...`);
             if (deviceInformation.has(trackerName)) {
                 let deviceInfo = deviceInformation.get(trackerName);
-                version = deviceInfo["version"];
-                model = deviceInfo["model"];
-                serial = deviceInfo["serial no"];
+                version = deviceInfo[VERSION_INDEX];
+                model = deviceInfo[MODEL_INDEX];
+                serial = deviceInfo[SERIAL_INDEX];
             } else {
                 log(`No information found for tracker ${trackerName}`);
             }
-            
-            this.emit("info", device, version, model, serial);
         } else if (bluetoothEnabled) {
             let trackerObject = bluetooth.getActiveDevices().find(device => device.advertisement.localName === trackerName);
             if (!trackerObject) {
@@ -418,15 +451,14 @@ Raw hex data calculated to be sent: ${hexValue}`);
 
             try {
                 await Promise.all(readPromises);
-                log(`Tracker ${trackerName} info: ${version}, ${model}, ${serial}`);
-                this.emit("info", "tracker", version, model, serial);
             } catch (error) {
                 console.error(error);
             }
         }
 
         log(`Tracker ${trackerName} info: ${version}, ${model}, ${serial}`);
-        deviceInformation.set(trackerName, { version: version, model: model, "serial no": serial });
+        this.emit("info", trackerName, version, model, serial);
+        deviceInformation.set(trackerName, [version, model, serial]);
         return { version, model, serial };
     }
 
@@ -493,6 +525,106 @@ Raw hex data calculated to be sent: ${hexValue}`);
             return null;
         }
     }
+
+    /**
+     * Get the tracker's settings.
+     * Support: GX6
+     * 
+     * @param {string} trackerName 
+     * @returns {Object} - The tracker settings (fpsMode, sensorMode, sensorAutoCorrection, ankleMotionDetection)
+    **/
+    getTrackerSettings(trackerName) {
+        try {
+            if (trackerSettings.has(trackerName)) {
+                let [fpsMode, sensorMode, sensorAutoCorrection, ankleMotionDetection] = trackerSettings.get(trackerName);
+                log(`Tracker ${trackerName} settings:
+FPS mode: ${fpsMode}
+Sensor mode: ${sensorMode}
+Sensor auto correction: ${sensorAutoCorrection}
+Ankle motion detection: ${ankleMotionDetection}`);
+                return { fpsMode, sensorMode, sensorAutoCorrection, ankleMotionDetection };
+            } else {
+                log(`Tracker ${trackerName} settings not found`);
+                return null;
+            }
+        } catch (error) {
+            console.error(`Error getting tracker settings for ${trackerName}:`, error);
+            return null;
+        }
+    } 
+    
+
+    /**
+     * Get the tracker's (raw hex) settings
+     * Support: GX6
+     * 
+     * @param {string} trackerName 
+     * @returns {Map} - The tracker settings map
+    **/
+    getTrackerSettingsRaw(trackerName) {
+        try {
+            if (trackerSettingsRaw.has(trackerName)) {
+                let hexValue = trackerSettingsRaw.get(trackerName);
+                log(`Tracker ${trackerName} raw hex settings: ${hexValue}`);
+                return hexValue;
+            } else {
+                log(`Tracker ${trackerName} raw hex settings not found`);
+                return null;
+            }
+        } catch (error) {
+            console.error(`Error getting tracker settings for ${trackerName}:`, error);
+            return null;
+        }
+    }
+
+    /**
+    * Get the tracker's battery info.
+    * Support: GX6
+    * 
+    * @param {string} trackerName 
+    * @returns {Map} - The tracker settings map
+    **/
+    getTrackerBattery(trackerName) {
+        try {
+            if (trackerBattery.has(trackerName)) {
+                let [batteryRemaining, batteryVoltage, chargeStatus] = trackerBattery.get(trackerName);
+                log(`Tracker ${trackerName} battery remaining: ${batteryRemaining}%`);
+                log(`Tracker ${trackerName} battery voltage: ${batteryVoltage}`);
+                log(`Tracker ${trackerName} charge status: ${chargeStatus}`);
+                return { batteryRemaining, batteryVoltage, chargeStatus };
+            } else {
+                log(`Tracker ${trackerName} battery info not found`);
+                return null;
+            }
+        } catch (error) {
+            console.error(`Error getting battery info for ${trackerName}:`, error);
+            return null;
+        }
+    }
+
+    /**
+     * Get the tracker's buttons.
+     * Support: GX6, Bluetooth
+     * 
+     * @param {string} trackerName 
+     * @returns {Map} - The tracker button map
+    **/
+    getTrackerButtons(trackerName) {
+        try {
+            if (trackerButtons.has(trackerName)) {
+                let [mainButton, subButton] = trackerButtons.get(trackerName);
+                log(`Tracker ${trackerName} main button: ${mainButton}`);
+                log(`Tracker ${trackerName} sub button: ${subButton}`);
+                return { mainButton, subButton };
+            } else {
+                log(`Tracker ${trackerName} buttons not found`);
+                return null;
+            }
+        } catch (error) {
+            console.error(`Error getting tracker buttons for ${trackerName}:`, error);
+            return null;
+        }
+    }
 }
 
 gx6.on("data", (port, data) => {
@@ -507,7 +639,10 @@ gx6.on("data", (port, data) => {
     let trackerName = gx6.getPartFromInfo(trackerId, port);
 
     // If the tracker is not in the list of active devices, add it
-    if (!activeDevices.includes(trackerName) && trackerName !== "(DONGLE)") activeDevices.push(trackerName);
+    if (!activeDevices.includes(trackerName) && trackerName !== "(DONGLE)") {
+        activeDevices.push(trackerName);
+        haritora.emit("connect", trackerName);
+    }
 
     if (trackerName === "(DONGLE)") {
         if (identifier.includes("i")) {
@@ -518,7 +653,7 @@ gx6.on("data", (port, data) => {
 
     switch (identifier[0]) {
     case "x":
-        processIMUData(value, trackerName);
+        //processIMUData(value, trackerName);
         break;
     case "a":
         processTrackerData(value, trackerName);
@@ -566,6 +701,19 @@ bluetooth.on("data", (localName, service, characteristic, data) => {
         log(`Data in base64: ${Buffer.from(data, "base64").toString("base64")}`);
     }
 });
+
+bluetooth.on("connect", peripheral => {
+    haritora.emit("connect", peripheral.advertisement.localName);
+    console.log(`Connected to ${peripheral.advertisement.localName}`);
+});
+
+bluetooth.on("disconnect", peripheral => {
+    haritora.emit("disconnect", peripheral.advertisement.localName);
+    console.log(`Disconnected from ${peripheral.advertisement.localName}`);
+});
+
+
+
 /**
  * Processes the IMU data received from the tracker by the dongle.
  * The data contains the information about the rotation, gravity, and ankle motion (if enabled) of the tracker.
@@ -666,11 +814,12 @@ function processTrackerData(data, trackerName) {
     if (data === "7f7f7f7f7f7f") {
         //log(`Searching for tracker ${trackerName}...`);
         if (activeDevices.includes(trackerName)) activeDevices.splice(activeDevices.indexOf(trackerName), 1);
+        haritora.emit("disconnect", trackerName);
     } else {
         log(`Tracker ${trackerName} other data processed: ${data}`);
     }
 
-    // TODO - Find out what the other data represents, then add to emitter
+    // TODO - Find out what the other data represents, then add to emitted event
     haritora.emit("tracker", trackerName, data);
 }
 
@@ -814,8 +963,9 @@ function processTrackerSettings(data, trackerName) {
         log(`Ankle Motion Detection: ${ankleMotionDetectionText}`);
         log(`Raw data: ${data}`);
 
-        if (!trackerSettings.has(trackerName) || trackerSettings.get(trackerName) !== data) {
-            trackerSettings.set(trackerName, data);
+        if (!trackerSettingsRaw.has(trackerName) || trackerSettingsRaw.get(trackerName) !== data) {
+            trackerSettingsRaw.set(trackerName, data);
+            trackerSettings.set(trackerName, [sensorModeText, postureDataRateText, sensorAutoCorrectionComponents, ankleMotionDetectionText]);
             haritora.emit("settings", trackerName, sensorModeText, postureDataRateText, sensorAutoCorrectionComponents, ankleMotionDetectionText);
         }
     } catch (error) {
@@ -860,17 +1010,26 @@ function processInfoData(data, trackerName) {
         log(`${prefix} model: ${model}`);
         log(`${prefix} serial: ${serial}`);
         
-        deviceInformation.set(trackerName, info);
+        deviceInformation.set(trackerName, [version, model, serial]);
     } catch (err) {
         console.error(`Error processing info data:\n${err}`);
     }
 
-    haritora.emit("info", type, version, model, serial);
+    haritora.emit("info", trackerName, version, model, serial);
 }
 
 
 function log(message) {
-    if (debug) console.log(message);
+    if (debug === 1) {
+        console.log(message);
+    } 
+    else if (debug === 2) {
+        const stack = new Error().stack;
+        const callerLine = stack.split("\n")[2];
+        const callerName = callerLine.match(/at (\S+)/)[1];
+        const lineNumber = callerLine.match(/:(\d+):/)[1];
+        console.log(`${callerName} (line ${lineNumber}) || ${message}`);
+    }
 }
 
 

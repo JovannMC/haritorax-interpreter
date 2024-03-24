@@ -1,6 +1,6 @@
 import { HaritoraXWireless } from "../src/index.js";
 
-let device = new HaritoraXWireless(true);
+let device = new HaritoraXWireless(2);
 device.startConnection("gx6");
 
 device.on("imu", (tracker, rotation, gravity, ankle) => {
@@ -18,7 +18,11 @@ setInterval(async () => {
 }, 3000);
 
 setTimeout(() => {
-    device.setTrackerSettings("rightAnkle", 50, 2, [''], false);
+    //device.setTrackerSettings("rightAnkle", 50, 2, [''], false);
+    console.log(`Tracker settings map:`, device.getTrackerSettings("rightAnkle"));
+    console.log(`Tracker raw hex settings map:`, device.getTrackerSettingsRaw("rightAnkle"));
+    console.log(`Tracker buttons map:`, device.getTrackerButtons("rightAnkle"));
+    console.log(`Tracker battery map:`, device.getTrackerBattery("rightAnkle"));
 }, 5000);
 
 /*setTimeout(() => {

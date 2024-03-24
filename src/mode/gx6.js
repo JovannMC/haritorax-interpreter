@@ -39,6 +39,10 @@ export default class GX6 extends EventEmitter {
             parser.on("data", data => {
                 this.emit("data", port, data);
             });
+
+            serial.on("close", () => {
+                this.emit("disconnected", port);
+            });
         });
     }
 

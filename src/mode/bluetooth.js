@@ -73,7 +73,7 @@ export default class Bluetooth extends EventEmitter {
                     return;
                 }
                 console.log(`Connected to ${localName}`);
-                this.emit("connected", peripheral);
+                this.emit("connect", peripheral);
                 
                 peripheral.discoverServices(null, (error, services) => {
                     if (error) {
@@ -111,6 +111,7 @@ export default class Bluetooth extends EventEmitter {
             peripheral.on("disconnect", () => {
                 if (!allowReconnect) return;
                 console.log(`Disconnected from ${localName}`);
+                this.emit("disconnect", peripheral);
                 const index = activeDevices.indexOf(peripheral);
                 if (index !== -1) {
                     activeDevices.splice(index, 1);
