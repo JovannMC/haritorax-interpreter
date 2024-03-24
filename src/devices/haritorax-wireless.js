@@ -653,7 +653,7 @@ gx6.on("data", (port, data) => {
 
     switch (identifier[0]) {
     case "x":
-        //processIMUData(value, trackerName);
+        processIMUData(value, trackerName);
         break;
     case "a":
         processTrackerData(value, trackerName);
