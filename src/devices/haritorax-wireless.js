@@ -39,13 +39,13 @@ const trackerSettingsRaw = new Map([
 ]);
 
 const trackerSettings = new Map([
-    // trackerName, [fpsMode, sensorMode, sensorAutoCorrection, ankleMotionDetection]
-    ["rightKnee", [0, 0, [], false]],
-    ["rightAnkle", [0, 0, [], false]],
-    ["hip", [0, 0, [], false]],
-    ["chest", [0, 0, [], false]],
-    ["leftKnee", [0, 0, [], false]],
-    ["leftAnkle", [0, 0, [], false]]
+    // trackerName, [sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection]
+    ["rightKnee", [2, "50", [], false]],
+    ["rightAnkle", [2, "50", [], false]],
+    ["hip", [2, "50", [], false]],
+    ["chest", [2, "50", [], false]],
+    ["leftKnee", [2, "50", [], false]],
+    ["leftAnkle", [2, "50", [], false]]
 ]);
 
 const trackerBattery = new Map([
@@ -137,7 +137,7 @@ let activeDevices = [];
  * @property {number} batteryRemaining - The remaining battery percentage of the tracker.
  * @property {number} batteryVoltage - The voltage of the tracker's battery.
  * @property {string} chargeStatus - The charge status of the tracker. (discharging, charging(?), charged(?))
- */
+**/
 
 /**
  * The "info" event which provides info about the tracker or dongle.
@@ -215,8 +215,8 @@ export default class HaritoraXWireless extends EventEmitter {
      * Support: GX6
      * 
      * @param {string} trackerName - The name of the tracker to apply settings to (rightKnee, rightAnkle, hip, chest, leftKnee, leftAnkle).
-     * @param {number} fpsMode - The posture data transfer rate/FPS (50 or 100).
      * @param {number} sensorMode - The sensor mode, which controls whether magnetometer is used (1 or 2).
+     * @param {number} fpsMode - The posture data transfer rate/FPS (50 or 100).
      * @param {string} sensorAutoCorrection - The sensor auto correction mode, multiple or none can be used (accel, gyro, mag).
      * @param {boolean} ankleMotionDetection - Whether ankle motion detection is enabled. (true or false)
      * @returns {boolean} - Whether the settings were successfully sent to the tracker.
@@ -226,7 +226,7 @@ export default class HaritoraXWireless extends EventEmitter {
      * trackers.setTrackerSettings("rightAnkle", 100, 1, ['accel', 'gyro'], true);
     **/ 
 
-    setTrackerSettings(trackerName, fpsMode, sensorMode, sensorAutoCorrection, ankleMotionDetection) {
+    setTrackerSettings(trackerName, sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection) {
         const TRACKERS_GROUP_ONE = ["rightKnee", "hip", "leftKnee"];
         const TRACKERS_GROUP_TWO = ["rightAnkle", "chest", "leftAnkle"];
 
@@ -256,13 +256,13 @@ export default class HaritoraXWireless extends EventEmitter {
             }
 
             log(`Setting the following settings onto tracker ${trackerName}:
-FPS mode: ${fpsMode}
 Sensor mode: ${sensorMode}
+FPS mode: ${fpsMode}
 Sensor auto correction: ${sensorAutoCorrection}
 Ankle motion detection: ${ankleMotionDetection}
 Raw hex data calculated to be sent: ${hexValue}`);
 
-            trackerSettings.set(trackerName, [fpsMode, sensorMode, sensorAutoCorrection, ankleMotionDetection]);
+            trackerSettings.set(trackerName, [sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection]);
             
             try {
                 log(`Sending tracker settings to ${trackerName}: ${trackerSettingsBuffer.toString()}`);
@@ -318,7 +318,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
      * trackers.setAllTrackerSettings(50, 2, ['mag'], false);
     **/
 
-    setAllTrackerSettings(fpsMode, sensorMode, sensorAutoCorrection, ankleMotionDetection) {
+    setAllTrackerSettings(sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection) {
         if (bluetoothEnabled) {
             log("Setting all tracker settings for bluetooth is not supported yet.");
             return false;
@@ -337,8 +337,8 @@ Raw hex data calculated to be sent: ${hexValue}`);
 
                 log(`Setting the following settings onto all connected trackers:
 Connected trackers: ${activeDevices}
-FPS mode: ${fpsMode}
 Sensor mode: ${sensorMode}
+FPS mode: ${fpsMode}
 Sensor auto correction: ${sensorAutoCorrection}
 Ankle motion detection: ${ankleMotionDetection}
 Raw hex data calculated to be sent: ${hexValue}`);
@@ -368,7 +368,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
 
         for (let trackerName of trackerSettingsRaw.keys()) {
             this.emit("settings", trackerName, sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
-            trackerSettings.set(trackerName, [fpsMode, sensorMode, sensorAutoCorrection, ankleMotionDetection]);
+            trackerSettings.set(trackerName, [sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection]);
         }
         return true;
     }
@@ -531,18 +531,18 @@ Raw hex data calculated to be sent: ${hexValue}`);
      * Support: GX6
      * 
      * @param {string} trackerName 
-     * @returns {Object} - The tracker settings (fpsMode, sensorMode, sensorAutoCorrection, ankleMotionDetection)
+     * @returns {Object} - The tracker settings (sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection)
     **/
     getTrackerSettings(trackerName) {
         try {
             if (trackerSettings.has(trackerName)) {
-                let [fpsMode, sensorMode, sensorAutoCorrection, ankleMotionDetection] = trackerSettings.get(trackerName);
+                let [sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection] = trackerSettings.get(trackerName);
                 log(`Tracker ${trackerName} settings:
-FPS mode: ${fpsMode}
 Sensor mode: ${sensorMode}
+FPS mode: ${fpsMode}
 Sensor auto correction: ${sensorAutoCorrection}
 Ankle motion detection: ${ankleMotionDetection}`);
-                return { fpsMode, sensorMode, sensorAutoCorrection, ankleMotionDetection };
+                return { sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection };
             } else {
                 log(`Tracker ${trackerName} settings not found`);
                 return null;

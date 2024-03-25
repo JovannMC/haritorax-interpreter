@@ -31,9 +31,9 @@ setTimeout(() => {
 }, 5000);
 
 setTimeout(() => {
-    device.setAllTrackerSettings(50, 2, [''], false);
+    device.setAllTrackerSettings(2, 50, [''], false);
 }, 2000)
 
 setTimeout(() => {
-    device.setTrackerSettings("rightAnkle", 100, 1, ['accel', 'gyro'], true);
+    device.setTrackerSettings("rightAnkle", 1, 100, ['accel', 'gyro'], true);
 }, 8000);*/
