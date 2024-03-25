@@ -33,11 +33,10 @@ Will write actual documentation at some point, for now refer to the source code,
 **\* partial support**
 
 ## Example
-
 ```js
 import { HaritoraXWireless } from "haritorax-interpreter";
 
-let device = new HaritoraXWireless(true);
+let device = new HaritoraXWireless(2); // enable debug mode w/ function info
 device.startConnection("gx6");
 
 device.on("imu", (trackerName, rotation, gravity, ankle) => {
@@ -46,11 +45,11 @@ device.on("imu", (trackerName, rotation, gravity, ankle) => {
 
 setTimeout(() => {
     // apply the following settings to the rightAnkle tracker:
-    // posture data transfer rate: 100FPS
     // sensor mode: 1 (magnetometer enabled)
+    // posture data transfer rate: 100FPS
     // sensor auto correction mode: accelerometer and gyroscope
     // ankle motion detection: enabled
-    device.setTrackerSettings("rightAnkle", 100, 1, ['accel', 'gyro'], true);
+    device.setTrackerSettings("rightAnkle", 1, 100, ['accel', 'gyro'], true);
 }, 2000)
 
 setTimeout(() => {
