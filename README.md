@@ -37,7 +37,7 @@ Will write actual documentation at some point, for now refer to the source code,
 import { HaritoraXWireless } from "haritorax-interpreter";
 
 let device = new HaritoraXWireless(2); // enable debug mode w/ function info
-device.startConnection("gx6");
+device.startConnection("gx6", ["COM4", "COM5", "COM6"]); // start connecting to dongles via GX6, with the ports COM4, COM5, and COM6
 
 device.on("imu", (trackerName, rotation, gravity, ankle) => {
     // IMU data received, do stuff
@@ -56,6 +56,12 @@ setTimeout(() => {
     device.stopConnection("gx6");
 }, 10000)
 ```
+
+## Projects using package
+
+- [SlimeTora](https://github.com/OCSYT/SlimeTora) - A program that connects the HaritoraX Wireless trackers to the SlimeVR server, supporting Bluetooth and the GX6 communication dongle
+
+Let me know if you want to be featured here, if you are using this package in any project!
 
 ## License
 
