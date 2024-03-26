@@ -174,14 +174,15 @@ export default class HaritoraXWireless extends EventEmitter {
     /**
      * Starts the connection to the trackers with the specified mode.
      * 
-     * @param {string} connectionMode - Connect to the trackers with the specified mode (gx6 or bluetooth).
+     * @param {string} connectionMode - Connect to the trackers with the specified mode (GX6 or bluetooth).
+     * @param {array} portNames - The port names to connect to. (GX6 only)
      * 
      * @example
      * device.startConnection("gx6");
     **/
-    startConnection(connectionMode) {
+    startConnection(connectionMode, portNames) {
         if (connectionMode === "gx6") {
-            gx6.startConnection();
+            gx6.startConnection(portNames);
             gx6Enabled = true;
         } else if (connectionMode === "bluetooth") {
             bluetooth.startConnection();
@@ -530,6 +531,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
      * Get the tracker's settings.
      * Support: GX6
      * 
+     * @function getTrackerSettings
      * @param {string} trackerName 
      * @returns {Object} - The tracker settings (sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection)
     **/
@@ -558,6 +560,7 @@ Ankle motion detection: ${ankleMotionDetection}`);
      * Get the tracker's (raw hex) settings
      * Support: GX6
      * 
+     * @function getTrackerSettingsRaw
      * @param {string} trackerName 
      * @returns {Map} - The tracker settings map
     **/
@@ -581,6 +584,7 @@ Ankle motion detection: ${ankleMotionDetection}`);
     * Get the tracker's battery info.
     * Support: GX6
     * 
+    * @function getTrackerBattery
     * @param {string} trackerName 
     * @returns {Map} - The tracker settings map
     **/
@@ -606,6 +610,7 @@ Ankle motion detection: ${ankleMotionDetection}`);
      * Get the tracker's buttons.
      * Support: GX6, Bluetooth
      * 
+     * @function getTrackerButtons
      * @param {string} trackerName 
      * @returns {Map} - The tracker button map
     **/
@@ -625,6 +630,24 @@ Ankle motion detection: ${ankleMotionDetection}`);
             return null;
         }
     }
+
+    /**
+     * Check whether the connection mode is active or not.
+     * Support: GX6, Bluetooth
+     * 
+     * @function getConnectionModeActive
+     * @param {string} connectionMode 
+     * @returns {boolean} - Whether the connection mode is active or not
+    **/
+    getConnectionModeActive(connectionMode) {
+        if (connectionMode === "gx6") {
+            return gx6Enabled;
+        } else if (connectionMode === "bluetooth") {
+            return bluetoothEnabled;
+        } else {
+            return null;
+        }
+    }
 }
 
 gx6.on("data", (port, data) => {
@@ -639,7 +662,7 @@ gx6.on("data", (port, data) => {
     let trackerName = gx6.getPartFromInfo(trackerId, port);
 
     // If the tracker is not in the list of active devices, add it
-    if (!activeDevices.includes(trackerName) && trackerName !== "(DONGLE)") {
+    if (!activeDevices.includes(trackerName) && trackerName !== "(DONGLE)" && !data.includes("7f7f7f7f7f7f")) {
         activeDevices.push(trackerName);
         haritora.emit("connect", trackerName);
     }

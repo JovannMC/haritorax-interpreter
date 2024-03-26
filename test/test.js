@@ -1,10 +1,15 @@
 import { HaritoraXWireless } from "../src/index.js";
 
 let device = new HaritoraXWireless(2);
-device.startConnection("gx6");
+device.startConnection("gx6", ["COM4", "COM5", "COM6"]);
 
 device.on("imu", (tracker, rotation, gravity, ankle) => {
     //console.log(`IMU event fired, tracker: ${tracker}, rotation: ${rotation}, gravity: ${gravity}, ankle: ${ankle}`);
+});
+
+device.on("connect", (trackerName) => {
+    console.log(`Connected to tracker ${trackerName}`);
+    console.log(`Active trackers for GX6:`, device.getActiveTrackers());
 });
 
 setInterval(async () => {
