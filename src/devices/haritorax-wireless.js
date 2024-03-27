@@ -257,8 +257,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
             try {
                 log(`Sending tracker settings to ${trackerName}: ${trackerSettingsBuffer.toString()}`);
                 let ports = gx6.getActivePorts();
-                let trackerInfo = gx6.getTrackerInfo(trackerName);
-                let trackerPort = trackerInfo[1];
+                let trackerPort = gx6.getTrackerPort(trackerName);
 
                 ports[trackerPort].write(trackerSettingsBuffer, (err) => {
                     if (err) {
@@ -333,10 +332,9 @@ Sensor auto correction: ${sensorAutoCorrection}
 Ankle motion detection: ${ankleMotionDetection}
 Raw hex data calculated to be sent: ${hexValue}`);
 
-                let ports = gx6.getActivePorts();
                 for (let trackerName of trackerSettingsRaw.keys()) {
-                    let trackerInfo = gx6.getTrackerInfo(trackerName);
-                    let trackerPort = trackerInfo[1];
+                    let ports = gx6.getActivePorts();
+                    let trackerPort = gx6.getTrackerPort(trackerName);
 
                     ports[trackerPort].write(trackerSettingsBuffer, (err) => {
                         if (err) {
