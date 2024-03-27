@@ -58,17 +58,6 @@ const trackerBattery = new Map([
     ["leftAnkle", [0, 0, ""]]
 ]);
 
-const deviceInformation = new Map([
-    // deviceName, [version, model, serial]
-    ["(DONGLE)", null],
-    ["rightKnee", ["", "", ""]],
-    ["rightAnkle", ["", "", ""]],
-    ["hip", ["", "", ""]],
-    ["chest", ["", "", ""]],
-    ["leftKnee", ["", "", ""]],
-    ["leftAnkle", ["", "", ""]]
-]);
-
 let activeDevices = [];
 
 // JSDoc comments for events
@@ -402,16 +391,9 @@ Raw hex data calculated to be sent: ${hexValue}`);
         let version = null;
         
         if (trackerName === "(DONGLE)" || gx6Enabled) {
-            const device = trackerName === "(DONGLE)" ? "dongle" : "tracker";
-            log(`Getting ${device} info for ${trackerName}...`);
-            if (deviceInformation.has(trackerName)) {
-                let deviceInfo = deviceInformation.get(trackerName);
-                version = deviceInfo[VERSION_INDEX];
-                model = deviceInfo[MODEL_INDEX];
-                serial = deviceInfo[SERIAL_INDEX];
-            } else {
-                log(`No information found for tracker ${trackerName}`);
-            }
+            serial = gx6.getDeviceInformation(trackerName)[SERIAL_INDEX];
+            model = gx6.getDeviceInformation(trackerName)[MODEL_INDEX];
+            version = gx6.getDeviceInformation(trackerName)[VERSION_INDEX];
         } else if (bluetoothEnabled) {
             let trackerObject = bluetooth.getActiveDevices().find(device => device.advertisement.localName === trackerName);
             if (!trackerObject) {
@@ -459,7 +441,6 @@ Raw hex data calculated to be sent: ${hexValue}`);
 
         log(`Tracker ${trackerName} info: ${version}, ${model}, ${serial}`);
         this.emit("info", trackerName, version, model, serial);
-        deviceInformation.set(trackerName, [version, model, serial]);
         return { version, model, serial };
     }
 
@@ -650,51 +631,34 @@ Ankle motion detection: ${ankleMotionDetection}`);
     }
 }
 
-gx6.on("data", (port, data) => {
-    const splitData = data.toString().split(/:(.+)/);
-    const identifier = splitData[0].toLowerCase();
-    const value = splitData[1];
-
-    // Check if the identifier contains a number, if not, it's the dongle
-    const trackerId = identifier.match(/\d/) ? identifier.match(/\d/)[0] : "(DONGLE)";
-
-    // Check what body part the tracker is assigned to
-    let trackerName = gx6.getPartFromInfo(trackerId, port);
-
+gx6.on("data", (trackerName, port, portId, identifier, portData) => {
     // If the tracker is not in the list of active devices, add it
-    if (!activeDevices.includes(trackerName) && trackerName !== "(DONGLE)" && !data.includes("7f7f7f7f7f7f")) {
+    if (trackerName && !activeDevices.includes(trackerName) && !portData.includes("7f7f7f7f7f7f")) {
         activeDevices.push(trackerName);
         haritora.emit("connect", trackerName);
     }
 
-    if (trackerName === "(DONGLE)") {
-        if (identifier.includes("i")) {
-            processInfoData(value, trackerName);
-        }
-        return;
-    }
-
     switch (identifier[0]) {
     case "x":
-        processIMUData(value, trackerName);
+        //processIMUData(portData, trackerName);
         break;
     case "a":
-        processTrackerData(value, trackerName);
+        processTrackerData(portData, trackerName);
         break;
     case "r":
-        processButtonData(value, trackerName);
+        processButtonData(portData, trackerName);
         break;
     case "v":
-        processBatteryData(value, trackerName);
+        processBatteryData(portData, trackerName);
         break;
     case "o":
-        processTrackerSettings(value, trackerName);
+        processTrackerSettings(portData, trackerName);
         break;
     case "i":
-        processInfoData(value, trackerName);
+        // Handled by GX6 class
         break;
     default:
-        log(`${port} - Unknown data from ${trackerName}: ${data}`);
+        log(`${port} - Unknown data from ${trackerName}: ${portData}`);
     }
 });
 
@@ -886,6 +850,7 @@ function processButtonData(data, trackerName, characteristic) {
                 buttonState = TRACKER_OFF;
             } else {
                 log(`Tracker ${trackerName} is on/turning on...`);
+                log(`Raw data: ${data}`);
                 buttonState = TRACKER_ON;
             }
         }
@@ -994,51 +959,6 @@ function processTrackerSettings(data, trackerName) {
     } catch (error) {
         console.error(`Error processing tracker settings for ${trackerName}:`, error);
     }
-}
-
-
-/**
- * Processes the info data received from the tracker or dongle.
- * Support: GX6 (for bluetooth, see getDeviceInfo())
- * 
- * @function processInfoData
- * @param {string} data - The data to process.
- * @param {string} trackerName - The name of the tracker.
- * @fires haritora#info
-**/
-
-function processInfoData(data, trackerName) {
-    if (!gx6Enabled) return false;
-
-    let type = null;
-    let version = null;
-    let model = null;
-    let serial = null;
-
-    try {
-        log(`Processing info data for ${trackerName}...`);
-        const info = JSON.parse(data);
-        version = info["version"];
-        model = info["model"];
-        serial = info["serial no"];
-
-        if (trackerName === "(DONGLE)") {
-            type = "dongle";
-        } else {
-            type = "tracker";
-        }
-
-        let prefix = type === "dongle" ? "Dongle" : `Tracker ${trackerName}`;
-        log(`${prefix} version: ${version}`);
-        log(`${prefix} model: ${model}`);
-        log(`${prefix} serial: ${serial}`);
-        
-        deviceInformation.set(trackerName, [version, model, serial]);
-    } catch (err) {
-        console.error(`Error processing info data:\n${err}`);
-    }
-
-    haritora.emit("info", trackerName, version, model, serial);
 }
 
 

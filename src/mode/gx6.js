@@ -6,16 +6,30 @@ import { EventEmitter } from "events";
 const BAUD_RATE = 500000; // from the haritora_setting.json in the HaritoraConfigurator
 
 const trackerAssignment = new Map([
-    ["rightKnee", [0, ""]], // o0, right knee
-    ["rightAnkle", [1, ""]], // o1, right ankle
-    ["hip", [0, ""]], // o0, hip
-    ["chest", [1, ""]], // o1, chest
-    ["leftKnee", [0, ""]], // o0, left knee
-    ["leftAnkle", [1, ""]]  // o1, left ankle
+    // tracker part, [tracker id, port, port id]
+    ["DONGLE", [0, "", ""]],
+    ["hip", [6, "", ""]],
+    ["chest", [1, "", ""]],
+    ["rightKnee",  [4, "", ""]],
+    ["rightAnkle", [5, "", ""]],
+    ["leftKnee", [2, ""], ""],
+    ["leftAnkle", [3, ""], ""]
+]);
+
+const deviceInformation = new Map([
+    // deviceName, [version, model, serial]
+    ["DONGLE", ["", "", ""]],
+    ["rightKnee", ["", "", ""]],
+    ["rightAnkle", ["", "", ""]],
+    ["hip", ["", "", ""]],
+    ["chest", ["", "", ""]],
+    ["leftKnee", ["", "", ""]],
+    ["leftAnkle", ["", "", ""]]
 ]);
 
 // Stores the ports that are currently active as objects for access later
 let activePorts = {};
+let trackersAssigned = false;
 
 export default class GX6 extends EventEmitter {
     constructor() {
@@ -23,17 +37,6 @@ export default class GX6 extends EventEmitter {
     }
     
     startConnection(portNames) {
-        // Assign the trackers to the ports, assumes that the ports are in ascending order
-        let trackerNames = Array.from(trackerAssignment.keys());
-        for (let i = 0; i < trackerNames.length; i++) {
-            let trackerName = trackerNames[i];
-            let trackerInfo = trackerAssignment.get(trackerName);
-            trackerInfo[1] = portNames[Math.floor(i / 2)];
-            trackerAssignment.set(trackerName, trackerInfo);
-
-            console.log(`Tracker ${trackerName} assigned to port ${trackerInfo[1]}`);
-        }
-
         portNames.forEach(port => {
             const serial = new SerialPort({
                 path: port,
@@ -47,7 +50,46 @@ export default class GX6 extends EventEmitter {
             });
 
             parser.on("data", data => {
-                this.emit("data", port, data);
+                const splitData = data.toString().split(/:(.+)/);
+                const identifier = splitData[0].toLowerCase();
+                const portId = identifier.match(/\d/) ? identifier.match(/\d/)[0] : "DONGLE";
+                const portData = splitData[1];
+
+                if (!trackersAssigned) {
+                    for (let [key, value] of trackerAssignment.entries()) {
+                        if (value[1] === "") {
+                            if (identifier.startsWith("r")) {
+                                const trackerId = parseInt(portData.charAt(4));
+                                if (value[0] == trackerId) {
+                                    trackerAssignment.set(key, [trackerId, port, portId]);
+                                    console.log(`Setting ${key} to port ${port} with port ID ${portId}`);
+                                }
+                            } else if (identifier.startsWith("i")) {
+                                const info = JSON.parse(portData);
+                                const version = info["version"];
+                                const model = info["model"];
+                                const serial = info["serial no"];
+                                
+                                deviceInformation.set(key, [version, model, serial]);
+                            }
+                        }
+                    }
+
+                    if (Array.from(trackerAssignment.values()).every(value => value[1] !== "")) {
+                        trackersAssigned = true;
+                        console.log("All trackers have been assigned: ", Array.from(trackerAssignment.entries()));
+                    }
+                }
+
+                let trackerName = null;
+                for (let [key, value] of trackerAssignment.entries()) {
+                    if (value[1] === port && value[2] === portId) {
+                        trackerName = key;
+                        break;
+                    }
+                }
+
+                this.emit("data", trackerName, port, portId, identifier, portData);
             });
 
             serial.on("close", () => {
@@ -66,36 +108,57 @@ export default class GX6 extends EventEmitter {
         this.emit("disconnected");
     }
 
+    getTrackerAssignment() {
+        return Array.from(trackerAssignment.entries());
+    }
+
     getTrackers() {
         return Array.from(trackerAssignment.keys());
     }
 
-    getTrackersInPort(port) {
-        let trackers = [];
-        for (let tracker in trackerAssignment) {
-            if (trackerAssignment[tracker][1] === port) {
-                trackers.push(tracker);
-            }
+    getTrackerId(tracker) {
+        const port = trackerAssignment.get(tracker)[0];
+        if (port) {
+            return port;
         }
-        return trackers;
+        return null;
     }
-
-    getTrackerInfo(tracker) {
-        const port = trackerAssignment.get(tracker);
+    
+    getTrackerPort(tracker) {
+        const port = trackerAssignment.get(tracker)[1];
         if (port) {
             return port;
         }
         return null;
     }
 
-    getPartFromInfo(trackerId, port) {
-        if (trackerId === "(DONGLE)") return "(DONGLE)";
+    getTrackerPortId(tracker) {
+        const portId = trackerAssignment.get(tracker)[2];
+        if (portId) {
+            return portId;
+        }
+        return null;
+    }
+
+    getPartFromId(trackerId) {
         for (let [key, value] of trackerAssignment.entries()) {
-            if (value[0] == trackerId && value[1] == port) {
+            if (value[0] == trackerId) {
                 return key;
             }
         }
-        return null;
+    }
+
+    getPartFromInfo(port, portId) {
+        for (let [key, value] of trackerAssignment.entries()) {
+            if (value[1] == port && value[2] == portId) {
+                return key;
+            }
+        }
+    }
+
+    getDeviceInformation(deviceName) {
+        console.log(deviceInformation);
+        return deviceInformation.get(deviceName);
     }
 
     getActivePorts() {
