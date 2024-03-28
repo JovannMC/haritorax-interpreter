@@ -2,6 +2,7 @@
 
 import { Buffer } from "buffer";
 import { EventEmitter } from "events";
+import Quaternion from "quaternion";
 import GX6 from "../mode/gx6.js";
 import Bluetooth from "../mode/bluetooth.js";
 
@@ -261,7 +262,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
 
                 ports[trackerPort].write(trackerSettingsBuffer, (err) => {
                     if (err) {
-                        console.error(`${trackerName} - Error writing data to serial port ${trackerPort}: ${err.message}`);
+                        console.error(`${trackerName} - Error writing data to serial port ${trackerPort}:`, err);
                     } else {
                         trackerSettingsRaw.set(trackerName, hexValue);
                         log(`${trackerName} - Data written to serial port ${trackerPort}: ${trackerSettingsBuffer.toString()}`);
@@ -338,7 +339,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
 
                     ports[trackerPort].write(trackerSettingsBuffer, (err) => {
                         if (err) {
-                            console.error(`${trackerName} - Error writing data to serial port ${trackerPort}: ${err.message}`);
+                            console.error(`${trackerName} - Error writing data to serial port ${trackerPort}:`, err);
                         } else {
                             trackerSettingsRaw.set(trackerName, hexValue);
                             log(`${trackerName} - Data written to serial port ${trackerPort}: ${trackerSettingsBuffer.toString()}`);
@@ -689,12 +690,12 @@ bluetooth.on("data", (localName, service, characteristic, data) => {
 
 bluetooth.on("connect", peripheral => {
     haritora.emit("connect", peripheral.advertisement.localName);
-    console.log(`Connected to ${peripheral.advertisement.localName}`);
+    log(`Connected to ${peripheral.advertisement.localName}`);
 });
 
 bluetooth.on("disconnect", peripheral => {
     haritora.emit("disconnect", peripheral.advertisement.localName);
-    console.log(`Disconnected from ${peripheral.advertisement.localName}`);
+    log(`Disconnected from ${peripheral.advertisement.localName}`);
 });
 
 
@@ -720,7 +721,7 @@ function processIMUData(data, trackerName) {
 
     // Decode and log the data
     try {
-        const { rotation, gravity, ankle } = decodeIMUPacket(data);
+        const { rotation, gravity, ankle } = decodeIMUPacket(data, trackerName);
         
         log(`Tracker ${trackerName} rotation: (${rotation.x.toFixed(5)}, ${rotation.y.toFixed(5)}, ${rotation.z.toFixed(5)}, ${rotation.w.toFixed(5)})`);
         log(`Tracker ${trackerName} gravity: (${gravity.x.toFixed(5)}, ${gravity.y.toFixed(5)}, ${gravity.z.toFixed(5)})`);
@@ -728,7 +729,7 @@ function processIMUData(data, trackerName) {
 
         haritora.emit("imu", trackerName, rotation, gravity, ankle);
     } catch (err) {
-        console.error(`Error decoding tracker ${trackerName} IMU packet data: ${err.message}`);
+        console.error(`Error decoding tracker ${trackerName} IMU packet data:`, err);
     }
 }
 
@@ -739,20 +740,38 @@ function processIMUData(data, trackerName) {
  * @see {@link https://github.com/sim1222/haritorax-slimevr-bridge/}
 **/
 
-function decodeIMUPacket(data) {
+const DRIFT_INTERVAL = 15000;
+let initialRotations = {};
+let initialAccel = {};
+let startTimes = {};
+let calibrated = {};
+let driftValues = {};
+let trackerRotation = {};
+let trackerAccel = {};
+
+function decodeIMUPacket(data, trackerName) {
     try {
         if (data.length < 14) {
             throw new Error("Too few bytes to decode IMU packet");
         }
+
+        const elapsedTime = Date.now() - startTimes[trackerName];
 
         const buffer = Buffer.from(data, "base64");
         const rotationX = buffer.readInt16LE(0);
         const rotationY = buffer.readInt16LE(2);
         const rotationZ = buffer.readInt16LE(4);
         const rotationW = buffer.readInt16LE(6);
-        const gravityX = buffer.readInt16LE(8);
-        const gravityY = buffer.readInt16LE(10);
-        const gravityZ = buffer.readInt16LE(12);
+
+        const gravityRawX = buffer.readInt16LE(8);
+        const gravityRawY = buffer.readInt16LE(10);
+        const gravityRawZ = buffer.readInt16LE(12);
+
+        let ankle = null;
+        if (data.slice(-2) !== "==" && data.length > 14){
+            ankle = buffer.readInt16LE(14);
+        }
+        
 
         const rotation = {
             x: rotationX / 180.0 * 0.01,
@@ -760,22 +779,119 @@ function decodeIMUPacket(data) {
             z: rotationZ / 180.0 * 0.01 * -1.0,
             w: rotationW / 180.0 * 0.01 * -1.0
         };
+        trackerRotation[trackerName] = rotation;
+
+        const gravityRaw = {
+            x: gravityRawX / 256.0,
+            y: gravityRawY / 256.0,
+            z: gravityRawZ / 256.0
+        };
+        trackerAccel[trackerName] = gravityRaw;
+
+        const rc = [rotation.w, rotation.x, rotation.y, rotation.z];
+        const r = [rc[0], -rc[1], -rc[2], -rc[3]];
+        const p = [0.0, 0.0, 0.0, 9.8];
+
+        const hrp = [
+            r[0] * p[0] - r[1] * p[1] - r[2] * p[2] - r[3] * p[3],
+            r[0] * p[1] + r[1] * p[0] + r[2] * p[3] - r[3] * p[2],
+            r[0] * p[2] - r[1] * p[3] + r[2] * p[0] + r[3] * p[1],
+            r[0] * p[3] + r[1] * p[2] - r[2] * p[1] + r[3] * p[0],
+        ];
+
+        const hFinal = [
+            hrp[0] * rc[0] - hrp[1] * rc[1] - hrp[2] * rc[2] - hrp[3] * rc[3],
+            hrp[0] * rc[1] + hrp[1] * rc[0] + hrp[2] * rc[3] - hrp[3] * rc[2],
+            hrp[0] * rc[2] - hrp[1] * rc[3] + hrp[2] * rc[0] + hrp[3] * rc[1],
+            hrp[0] * rc[3] + hrp[1] * rc[2] - hrp[2] * rc[1] + hrp[3] * rc[0],
+        ];
 
         const gravity = {
-            x: gravityX / 256.0,
-            y: gravityY / 256.0,
-            z: gravityZ / 256.0
+            x: gravityRaw.x - hFinal[1] * -1.2,
+            y: gravityRaw.y - hFinal[2] * -1.2,
+            z: gravityRaw.z - hFinal[3] * 1.2,
         };
 
-        let ankle = null;
-        if (data.slice(-2) !== "==" && data.length > 14){
-            ankle = buffer.readInt16LE(14);
+        if (elapsedTime >= DRIFT_INTERVAL) {
+            if (!calibrated[trackerName]) {
+                calibrated[trackerName] = {
+                    pitch: driftValues[trackerName].pitch,
+                    roll: driftValues[trackerName].roll,
+                    yaw: driftValues[trackerName].yaw
+                };
+            }
+        }
+
+        if (elapsedTime < DRIFT_INTERVAL) {
+            if (!driftValues[trackerName]) {
+                driftValues[trackerName] = { pitch: 0, roll: 0, yaw: 0 };
+            }
+    
+            const rotationDifference = calculateRotationDifference(
+                new Quaternion(initialRotations[trackerName].w, initialRotations[trackerName].x, initialRotations[trackerName].y, initialRotations[trackerName].z).toEuler("XYZ"),
+                new Quaternion(rotation.w, rotation.x, rotation.y, rotation.z).toEuler("XYZ")
+            );
+    
+            const prevMagnitude = Math.sqrt(driftValues[trackerName].pitch ** 2 + driftValues[trackerName].roll ** 2 + driftValues[trackerName].yaw ** 2);
+            const currMagnitude = Math.sqrt(rotationDifference.pitch ** 2 + rotationDifference.roll ** 2 + rotationDifference.yaw ** 2);
+    
+            if (currMagnitude > prevMagnitude) {
+                driftValues[trackerName] = rotationDifference;
+                log(driftValues[trackerName]);
+            }
+        }
+    
+    
+        if (elapsedTime >= DRIFT_INTERVAL && calibrated) {
+            const driftCorrection = {
+                pitch: calibrated[trackerName].pitch * (elapsedTime / DRIFT_INTERVAL) % (2 * Math.PI),
+                roll: calibrated[trackerName].roll * (elapsedTime / DRIFT_INTERVAL) % (2 * Math.PI),
+                yaw: calibrated[trackerName].yaw * (elapsedTime / DRIFT_INTERVAL) % (2 * Math.PI),
+            };
+    
+            const rotQuat = new Quaternion([rotation.w, rotation.x, rotation.y, rotation.z]);
+    
+            const rotationDriftCorrected = RotateAround(rotQuat, trackerAccel[trackerName], driftCorrection.yaw);
+    
+            log("Applied fix");
+            log(rotation);
+            log(rotationDriftCorrected, driftCorrection.yaw);
+    
+            return [rotationDriftCorrected, gravity, ankle];
         }
 
         return { rotation, gravity, ankle };
     } catch (error) {
         throw new Error("Error decoding IMU packet: " + error.message);
     }
+}
+
+function RotateAround(quat, vector, angle) {
+    // Create a copy of the input quaternion
+    var initialQuaternion = new Quaternion(quat.w, quat.x, quat.y, quat.z);
+
+    // Create a rotation quaternion
+    var rotationQuaternion = Quaternion.fromAxisAngle([vector.x, vector.y, vector.z], angle);
+
+    // Apply the rotation to the copy of the input quaternion
+    initialQuaternion = initialQuaternion.mul(rotationQuaternion).normalize();
+
+    // Return the resulting quaternion as a dictionary
+    return {
+        x: initialQuaternion.x,
+        y: initialQuaternion.y,
+        z: initialQuaternion.z,
+        w: initialQuaternion.w
+    };
+}
+
+
+function calculateRotationDifference(prevRotation, currentRotation) {
+    const pitchDifferenceRad = currentRotation[0] - prevRotation[0];
+    const rollDifferenceRad = currentRotation[1] - prevRotation[1];
+    const yawDifferenceRad = currentRotation[2] - prevRotation[2];
+
+    return { pitch: pitchDifferenceRad, roll: rollDifferenceRad, yaw: yawDifferenceRad };
 }
 
 
@@ -962,7 +1078,7 @@ function processTrackerSettings(data, trackerName) {
 
 function log(message) {
     if (debug === 1) {
-        console.log(message);
+        log(message);
     } 
     else if (debug === 2) {
         const stack = new Error().stack;
