@@ -66,3 +66,9 @@ Let me know if you want to be featured here, if you are using this package in an
 ## License
 
 This package is licensed under the [MIT](https://opensource.org/license/mit/) License - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgements
+
+- [haritorax-slimevr-bridge](https://github.com/sim1222/haritorax-slimevr-bridge) - sim1222 - math for decoding the IMU packet data
+- [SlimeTora](https://github.com/OCSYT/SlimeTora/) - BracketProto - code for fixing drifting from incorrect acceleration (gravity) values
+- [ShiftAll Discord](https://discord.gg/vqXmAFy5RC) - ommunity - helping with testing the package
