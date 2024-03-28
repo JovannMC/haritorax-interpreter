@@ -736,13 +736,13 @@ function processIMUData(data, trackerName) {
 
 /**
  * The logic to decode the IMU packet received by the dongle. 
- * Thanks to sim1222's project for helping with the math :p
+ * Thanks to sim1222 and BracketProto's project for helping with the math and acceleration/drift code respectively :p
  * @see {@link https://github.com/sim1222/haritorax-slimevr-bridge/}
+ * @see {@link https://github.com/OCSYT/SlimeTora/}
 **/
 
 const DRIFT_INTERVAL = 15000;
 let initialRotations = {};
-let initialAccel = {};
 let startTimes = {};
 let calibrated = {};
 let driftValues = {};
