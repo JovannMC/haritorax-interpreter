@@ -101,7 +101,7 @@ let activeDevices = [];
  * @property {string} trackerName - The name of the tracker.
  * @property {number} sensorMode - The sensor mode, which controls whether magnetometer is used (1 or 2).
  * @property {number} fpsMode - The posture data transfer rate/FPS (50 or 100).
- * @property {string} sensorAutoCorrection - The sensor auto correction mode, multiple or none can be used (accel, gyro, mag).
+ * @property {Array<string>} sensorAutoCorrection - The sensor auto correction mode, multiple or none can be used (accel, gyro, mag).
  * @property {boolean} ankleMotionDetection - Whether ankle motion detection is enabled. (true or false)
 **/
 

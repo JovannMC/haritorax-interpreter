@@ -6,6 +6,8 @@ A node.js package that allows you to communicate and interact with the HaritoraX
 
 Check out the Haritora-GX6 proof-of-concept repository here: https://github.com/JovannMC/haritora-gx6-poc
 
+**This package is built with ESM. CommonJS and TypeScript support is in beta and may be buggy!**
+
 ## Installation
 
 `npm install haritorax-interpreter`
@@ -32,7 +34,7 @@ Will write actual documentation at some point, for now refer to the source code,
 
 **\* partial support**
 
-## Example
+## Example for ESM
 ```js
 import { HaritoraXWireless } from "haritorax-interpreter";
 
@@ -59,7 +61,7 @@ setTimeout(() => {
 
 ## Projects using package
 
-- [SlimeTora](https://github.com/OCSYT/SlimeTora) - A program that connects the HaritoraX Wireless trackers to the SlimeVR server, supporting Bluetooth and the GX6 communication dongle
+- [SlimeTora](https://github.com/OCSYT/SlimeTora) - A program that connects the HaritoraX Wireless trackers to the SlimeVR server, supporting Bluetooth and the GX6 communication dongle.
 
 Let me know if you want to be featured here, if you are using this package in any project!
 
