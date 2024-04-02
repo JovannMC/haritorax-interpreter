@@ -1,10 +1,349 @@
-"use strict";
+'use strict';
 
-import { Buffer } from "buffer";
-import { EventEmitter } from "events";
-import Quaternion from "quaternion";
-import GX6 from "../mode/gx6.js";
-import Bluetooth from "../mode/bluetooth.js";
+var buffer = require('buffer');
+var events = require('events');
+var Quaternion = require('quaternion');
+var serialport = require('serialport');
+var noble = require('@abandonware/noble');
+
+const BAUD_RATE = 500000; // from the haritora_setting.json in the HaritoraConfigurator
+
+const trackerAssignment = new Map([
+    // tracker part, [tracker id, port, port id]
+    ["DONGLE", [0, "", ""]],
+    ["hip", [6, "", ""]],
+    ["chest", [1, "", ""]],
+    ["rightKnee",  [4, "", ""]],
+    ["rightAnkle", [5, "", ""]],
+    ["leftKnee", [2, ""], ""],
+    ["leftAnkle", [3, ""], ""]
+]);
+
+const deviceInformation = new Map([
+    // deviceName, [version, model, serial]
+    ["DONGLE", ["", "", ""]],
+    ["rightKnee", ["", "", ""]],
+    ["rightAnkle", ["", "", ""]],
+    ["hip", ["", "", ""]],
+    ["chest", ["", "", ""]],
+    ["leftKnee", ["", "", ""]],
+    ["leftAnkle", ["", "", ""]]
+]);
+
+// Stores the ports that are currently active as objects for access later
+let activePorts = {};
+let trackersAssigned = false;
+
+class GX6 extends events.EventEmitter {
+    constructor() {
+        super();
+    }
+    
+    startConnection(portNames) {
+        portNames.forEach(port => {
+            const serial = new serialport.SerialPort({
+                path: port,
+                baudRate: BAUD_RATE
+            });
+            const parser = serial.pipe(new serialport.ReadlineParser({ delimiter: "\n" }));
+            activePorts[port] = serial;
+            
+            serial.on("open", () => {
+                this.emit("connected", port);
+            });
+
+            parser.on("data", data => {
+                const splitData = data.toString().split(/:(.+)/);
+                const identifier = splitData[0].toLowerCase();
+                const portId = identifier.match(/\d/) ? identifier.match(/\d/)[0] : "DONGLE";
+                const portData = splitData[1];
+
+                if (!trackersAssigned) {
+                    for (let [key, value] of trackerAssignment.entries()) {
+                        if (value[1] === "") {
+                            if (identifier.startsWith("r")) {
+                                const trackerId = parseInt(portData.charAt(4));
+                                if (value[0] == trackerId) {
+                                    trackerAssignment.set(key, [trackerId, port, portId]);
+                                    //console.log(`Setting ${key} to port ${port} with port ID ${portId}`);
+                                }
+                            } else if (identifier.startsWith("i")) {
+                                const info = JSON.parse(portData);
+                                const version = info["version"];
+                                const model = info["model"];
+                                const serial = info["serial no"];
+                                
+                                deviceInformation.set(key, [version, model, serial]);
+                            }
+                        }
+                    }
+
+                    if (Array.from(trackerAssignment.values()).every(value => value[1] !== "")) {
+                        trackersAssigned = true;
+                        //console.log("All trackers have been assigned: ", Array.from(trackerAssignment.entries()));
+                    }
+                }
+
+                let trackerName = null;
+                for (let [key, value] of trackerAssignment.entries()) {
+                    if (value[1] === port && value[2] === portId) {
+                        trackerName = key;
+                        break;
+                    }
+                }
+
+                this.emit("data", trackerName, port, portId, identifier, portData);
+            });
+
+            serial.on("close", () => {
+                this.emit("disconnected", port);
+            });
+        });
+    }
+
+    stopConnection() {
+        for (let port in activePorts) {
+            if (activePorts[port].isOpen) {
+                activePorts[port].close();
+                activePorts[port].destroy();
+            }
+        }
+        this.emit("disconnected");
+    }
+
+    getTrackerAssignment() {
+        return Array.from(trackerAssignment.entries());
+    }
+
+    getTrackers() {
+        return Array.from(trackerAssignment.keys());
+    }
+
+    getTrackerId(tracker) {
+        const port = trackerAssignment.get(tracker)[0];
+        if (port) {
+            return port;
+        }
+        return null;
+    }
+    
+    getTrackerPort(tracker) {
+        const port = trackerAssignment.get(tracker)[1];
+        if (port) {
+            return port;
+        }
+        return null;
+    }
+
+    getTrackerPortId(tracker) {
+        const portId = trackerAssignment.get(tracker)[2];
+        if (portId) {
+            return portId;
+        }
+        return null;
+    }
+
+    getPartFromId(trackerId) {
+        for (let [key, value] of trackerAssignment.entries()) {
+            if (value[0] == trackerId) {
+                return key;
+            }
+        }
+    }
+
+    getPartFromInfo(port, portId) {
+        for (let [key, value] of trackerAssignment.entries()) {
+            if (value[1] == port && value[2] == portId) {
+                return key;
+            }
+        }
+    }
+
+    getDeviceInformation(deviceName) {
+        //console.log(deviceInformation);
+        return deviceInformation.get(deviceName);
+    }
+
+    getActivePorts() {
+        return activePorts;
+    }
+}
+
+const services = new Map([
+    ["1800", "Generic Access"],
+    ["1801", "Generic Attribute"],
+    ["180a", "Device Information"],
+    ["180f", "Battery Service"],
+    ["00dbec3a90aa11eda1eb0242ac120002", "Tracker Service"],
+    ["ef84369a90a911eda1eb0242ac120002", "Setting Service"],
+]);
+
+const characteristics = new Map([
+    // Battery Service
+    ["2a19", "BatteryLevel"],
+    // BT device info
+    ["2a25", "SerialNumber"],
+    ["2a29", "Manufacturer"],
+    ["2a27", "HardwareRevision"],
+    ["2a26", "FirmwareRevision"],
+    ["2a28", "SoftwareRevision"],
+    ["2a24", "ModelNumber"],
+    // Sensor Service
+    ["00002a1900001000800000805f9b34fb", "Battery"],
+    ["00002a2800001000800000805f9b34fb", "SoftwareRevision"],
+    ["00dbf1c690aa11eda1eb0242ac120002", "Sensor"],
+    ["00dbf30690aa11eda1eb0242ac120002", "Magnetometer"],
+    ["00dbf45090aa11eda1eb0242ac120002", "MainButton"],
+    ["00dbf58690aa11eda1eb0242ac120002", "SecondaryButton"],
+    // Setting Service
+    ["ef84420290a911eda1eb0242ac120002", "FpsSetting"],
+    ["ef8443f690a911eda1eb0242ac120002", "TofSetting"],
+    ["ef8445c290a911eda1eb0242ac120002", "SensorModeSetting"],
+    ["ef84c30090a911eda1eb0242ac120002", "WirelessModeSetting"],
+    ["ef84c30590a911eda1eb0242ac120002", "AutoCalibrationSetting"],
+    //["ef843b5490a911eda1eb0242ac120002", "Something"], unsure what this is, reports randomly like battery level
+]);
+
+let activeDevices$1 = [];
+let activeServices = [];
+let activeCharacteristics = [];
+
+let allowReconnect = true;
+
+class Bluetooth extends events.EventEmitter {
+    constructor() {
+        super();
+        noble.on("discover", this.onDiscover.bind(this));
+    }
+    
+    startConnection() {
+        console.log("Connected to bluetooth");
+        this.emit("connected");
+
+        try {
+            noble.startScanning([], true);
+        } catch (error) {
+            console.error(`Error starting scanning:\n${error}`);
+        }
+    }
+
+    onDiscover(peripheral) {
+        const { advertisement: { localName } } = peripheral;
+        if (localName && localName.startsWith("HaritoraXW-") && !activeDevices$1.includes(peripheral)) {
+            console.log(`Found device: ${localName}`);
+            activeDevices$1.push(peripheral);
+
+            peripheral.connect(error => {
+                if (error) {
+                    console.error(`Error connecting to ${localName}:`, error);
+                    return;
+                }
+                console.log(`Connected to ${localName}`);
+                this.emit("connect", peripheral);
+                
+                peripheral.discoverServices(null, (error, services) => {
+                    if (error) {
+                        console.error("Error discovering services:", error);
+                        return;
+                    }
+                    //console.log("Discovered services:", services);
+                
+                    services.forEach(service => {
+                        activeServices.push(service);
+                        service.discoverCharacteristics([], (error, characteristics) => {
+                            if (error) {
+                                console.error(`Error discovering characteristics of service ${service.uuid}:`, error);
+                                return;
+                            }
+                            //console.log(`Discovered characteristics of service ${service.uuid}:`, characteristics);
+                
+                            characteristics.forEach(characteristic => {
+                                activeCharacteristics.push(characteristic);
+                                characteristic.on("data", (data) => {
+                                    emitData(this, localName, service.uuid, characteristic.uuid, data);
+                                });
+                                characteristic.subscribe(error => {
+                                    if (error) {
+                                        console.error(`Error subscribing to characteristic ${characteristic.uuid} of service ${service.uuid}:`, error);
+                                    }
+                                });
+                            });
+                        });
+                    });
+                });
+
+            });
+
+            peripheral.on("disconnect", () => {
+                if (!allowReconnect) return;
+                console.log(`Disconnected from ${localName}`);
+                this.emit("disconnect", peripheral);
+                const index = activeDevices$1.indexOf(peripheral);
+                if (index !== -1) {
+                    activeDevices$1.splice(index, 1);
+                }
+
+                // search again
+                setTimeout(() => {
+                    noble.startScanning([], true);
+                }, 3000);
+            });
+        }
+    }
+
+    stopConnection() {
+        console.log("Disconnected from bluetooth");
+        noble.stopScanning();
+        for (let device of activeDevices$1) {
+            device.disconnect();
+        }
+        activeDevices$1 = [];
+        allowReconnect = false;
+        
+        this.emit("disconnected");
+    }
+
+    getServices() {
+        return services;
+    }
+
+    getCharacteristics() {
+        return characteristics;
+    }
+
+    getActiveDevices() {
+        return activeDevices$1;
+    }
+
+    getActiveServices() {
+        return activeServices;
+    }
+
+    getActiveCharacteristics() {
+        return activeCharacteristics;
+    }
+
+    getAllowReconnect() {
+        return allowReconnect;
+    }
+
+    getActiveTrackers() {
+        return activeDevices$1.map(device => device.advertisement.localName);
+    }
+
+    getDeviceInfo(localName) {
+        for (let device of activeDevices$1) {
+            if (device.advertisement.localName === localName) {
+                return device;
+            }
+        }
+        return null;
+    }
+}
+
+function emitData(classInstance, localName, service, characteristic, data) {
+    classInstance.emit("data", localName, services.get(service), characteristics.get(characteristic), data);
+}
 
 let debug = 0;
 
@@ -141,24 +480,6 @@ let activeDevices = [];
  * @property {string} serial - The serial number of the device.
 **/
 
-/**
- * The "connect" event which provides the name of the tracker that has connected.
- * Support: GX6, Bluetooth
- *
- * @event this#connect
- * @type {string}
- * @property {string} trackerName - The name of the tracker.
-**/
-
-/**
- * The "disconnect" event which provides the name of the tracker that has disconnected.
- * Support: GX6, Bluetooth
- * 
- * @event this#disconnect
- * @type {string}
- * @property {string} trackerName - The name of the tracker.
-**/
-
 
 
 /**
@@ -172,7 +493,7 @@ let activeDevices = [];
  * @example
  * let device = new HaritoraXWireless(true);
 **/
-export default class HaritoraXWireless extends EventEmitter {
+class HaritoraXWireless extends events.EventEmitter {
     constructor(debugMode = 0) {
         super();
         debug = debugMode;
@@ -303,7 +624,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
         if (currentIndex !== -1 && currentIndex + direction >= 0 && currentIndex + direction < entries.length) {
             const adjacentKey = entries[currentIndex + direction][0];
             let adjacentValue = trackerSettingsRaw.get(adjacentKey);
-            return Buffer.from(`o0:${direction === 1 ? hexValue : adjacentValue}\r\no1:${direction === 1 ? adjacentValue : hexValue}\r\n`, "utf-8");
+            return buffer.Buffer.from(`o0:${direction === 1 ? hexValue : adjacentValue}\r\no1:${direction === 1 ? adjacentValue : hexValue}\r\n`, "utf-8");
         }
     
         log(`${trackerName} - Calculated hex value: ${hexValue}`);
@@ -341,7 +662,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
                 if (sensorAutoCorrection.includes("mag")) sensorAutoCorrectionBit |= 0x04;
 
                 const hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
-                const trackerSettingsBuffer = Buffer.from("o0:" + hexValue + "\r\n" + "o1:" + hexValue + "\r\n", "utf-8");
+                const trackerSettingsBuffer = buffer.Buffer.from("o0:" + hexValue + "\r\n" + "o1:" + hexValue + "\r\n", "utf-8");
 
                 log(`Setting the following settings onto all connected trackers:
 Connected trackers: ${activeDevices}
@@ -700,9 +1021,9 @@ bluetooth.on("data", (localName, service, characteristic, data) => {
         break;*/
     default:
         log(`Unknown data from ${localName}: ${data} - ${characteristic} - ${service}`);
-        log(`Data in utf-8: ${Buffer.from(data, "base64").toString("utf-8")}`);
-        log(`Data in hex: ${Buffer.from(data, "base64").toString("hex")}`);
-        log(`Data in base64: ${Buffer.from(data, "base64").toString("base64")}`);
+        log(`Data in utf-8: ${buffer.Buffer.from(data, "base64").toString("utf-8")}`);
+        log(`Data in hex: ${buffer.Buffer.from(data, "base64").toString("hex")}`);
+        log(`Data in base64: ${buffer.Buffer.from(data, "base64").toString("base64")}`);
     }
 });
 
@@ -775,19 +1096,19 @@ function decodeIMUPacket(data, trackerName) {
 
         const elapsedTime = Date.now() - startTimes[trackerName];
 
-        const buffer = Buffer.from(data, "base64");
-        const rotationX = buffer.readInt16LE(0);
-        const rotationY = buffer.readInt16LE(2);
-        const rotationZ = buffer.readInt16LE(4);
-        const rotationW = buffer.readInt16LE(6);
+        const buffer$1 = buffer.Buffer.from(data, "base64");
+        const rotationX = buffer$1.readInt16LE(0);
+        const rotationY = buffer$1.readInt16LE(2);
+        const rotationZ = buffer$1.readInt16LE(4);
+        const rotationW = buffer$1.readInt16LE(6);
 
-        const gravityRawX = buffer.readInt16LE(8);
-        const gravityRawY = buffer.readInt16LE(10);
-        const gravityRawZ = buffer.readInt16LE(12);
+        const gravityRawX = buffer$1.readInt16LE(8);
+        const gravityRawY = buffer$1.readInt16LE(10);
+        const gravityRawZ = buffer$1.readInt16LE(12);
 
         let ankle = null;
         if (data.slice(-2) !== "==" && data.length > 14){
-            ankle = buffer.readInt16LE(14);
+            ankle = buffer$1.readInt16LE(14);
         }
         
 
@@ -1019,7 +1340,7 @@ function processBatteryData(data, trackerName) {
 
     if (bluetoothEnabled) {
         try {
-            let batteryRemainingHex = Buffer.from(data, "base64").toString("hex");
+            let batteryRemainingHex = buffer.Buffer.from(data, "base64").toString("hex");
             batteryData[0] = parseInt(batteryRemainingHex, 16);
             log(`Tracker ${trackerName} battery remaining: ${batteryData[BATTERY_REMAINING_INDEX]}%`);
         } catch {
@@ -1107,6 +1428,4 @@ function log(message) {
     }
 }
 
-
-
-export { HaritoraXWireless };
+exports.HaritoraXWireless = HaritoraXWireless;
