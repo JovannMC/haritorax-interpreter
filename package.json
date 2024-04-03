@@ -1,7 +1,12 @@
 {
   "name": "haritorax-interpreter",
   "version": "1.4.4",
+  "homepage": "https://github.com/JovannMC/haritorax-interpreter",
   "repository": "https://github.com/JovannMC/haritorax-interpreter",
+  "bugs": {
+    "url": "https://github.com/JovannMC/haritorax-interpreter/issues",
+    "email": "contact@femboyfurry.net"
+  },
   "type": "module",
   "description": "Communicate with the HaritoraX trackers",
   "main": "./src/index.js",
@@ -10,13 +15,17 @@
     "require": "./src/index.cjs"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node ./test/test.js",
+    "build": "rollup -c"
   },
   "author": "JovannMC <jovannmc@femboyfurry.net> (https://femboyfurry.net)",
   "license": "MIT",
   "keywords": [
+    "haritora",
     "haritorax",
+    "shiftall",
     "gx6",
+    "bluetooth",
     "interpreter"
   ],
   "dependencies": {

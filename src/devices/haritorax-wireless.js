@@ -649,12 +649,6 @@ Ankle motion detection: ${ankleMotionDetection}`);
 }
 
 gx6.on("data", (trackerName, port, portId, identifier, portData) => {
-    // If the tracker is not in the list of active devices, add it
-    if (trackerName && !activeDevices.includes(trackerName) && !portData.includes("7f7f7f7f7f7f")) {
-        activeDevices.push(trackerName);
-        haritora.emit("connect", trackerName);
-    }
-
     switch (identifier[0]) {
     case "x":
         processIMUData(portData, trackerName);
@@ -731,6 +725,12 @@ bluetooth.on("disconnect", peripheral => {
 **/
 
 function processIMUData(data, trackerName) {
+    // If tracker isn't in activeDevices, add it and emit "connect" event
+    if (trackerName && !activeDevices.includes(trackerName)) {
+        activeDevices.push(trackerName);
+        haritora.emit("connect", trackerName);
+    }
+
     // Check if the data is valid
     if (!data || !data.length === 24) {
         log(`Invalid IMU packet for tracker ${trackerName}: ${data}`);
@@ -1097,8 +1097,7 @@ function processTrackerSettings(data, trackerName) {
 function log(message) {
     if (debug === 1) {
         console.log(message);
-    } 
-    else if (debug === 2) {
+    } else if (debug === 2) {
         const stack = new Error().stack;
         const callerLine = stack.split("\n")[2];
         const callerName = callerLine.match(/at (\S+)/)[1];
