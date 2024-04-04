@@ -62,7 +62,7 @@ export default class GX6 extends EventEmitter {
                                 const trackerId = parseInt(portData.charAt(4));
                                 if (value[0] == trackerId) {
                                     trackerAssignment.set(key, [trackerId, port, portId]);
-                                    //console.log(`Setting ${key} to port ${port} with port ID ${portId}`);
+                                    //console.log(`(haritorax-interpreter) - Setting ${key} to port ${port} with port ID ${portId}`);
                                 }
                             } else if (identifier.startsWith("i")) {
                                 const info = JSON.parse(portData);
@@ -77,7 +77,7 @@ export default class GX6 extends EventEmitter {
 
                     if (Array.from(trackerAssignment.values()).every(value => value[1] !== "")) {
                         trackersAssigned = true;
-                        //console.log("All trackers have been assigned: ", Array.from(trackerAssignment.entries()));
+                        //console.log("(haritorax-interpreter) - All trackers have been assigned: ", Array.from(trackerAssignment.entries()));
                     }
                 }
 
@@ -157,7 +157,7 @@ export default class GX6 extends EventEmitter {
     }
 
     getDeviceInformation(deviceName) {
-        //console.log(deviceInformation);
+        //console.log((haritorax-interpreter) - deviceInformation);
         return deviceInformation.get(deviceName);
     }
 
