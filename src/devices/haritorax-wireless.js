@@ -1069,9 +1069,9 @@ function processTrackerSettings(data, trackerName) {
         const ankleMotionDetectionText = ankleMotionDetection === 0 ? "false" : "true";
 
         const sensorAutoCorrectionComponents = [];
-        if (sensorAutoCorrection & 1) sensorAutoCorrectionComponents.push("Accel");
-        if (sensorAutoCorrection & 2) sensorAutoCorrectionComponents.push("Gyro");
-        if (sensorAutoCorrection & 4) sensorAutoCorrectionComponents.push("Mag");
+        if (sensorAutoCorrection & 1) sensorAutoCorrectionComponents.push("accel");
+        if (sensorAutoCorrection & 2) sensorAutoCorrectionComponents.push("gyro");
+        if (sensorAutoCorrection & 4) sensorAutoCorrectionComponents.push("mag");
 
         const sensorAutoCorrectionText = sensorAutoCorrectionComponents.join(", ");
 
