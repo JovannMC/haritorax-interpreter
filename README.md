@@ -20,7 +20,7 @@ Will write actual documentation at some point, for now refer to the source code,
 
 | Device             | Supported | Elbow/Hip support |
 |--------------------|-----------|-------------------|
-| HaritoraX Wireless |     Y     |         X         |
+| HaritoraX Wireless |     Y     |         *         |
 | HaritoraX 1.1B     |     X     |         X         |
 | HaritoraX 1.1      |     X     |         X         |
 | HaritoraX 1.0      |     X     |         X         |
