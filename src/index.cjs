@@ -65,7 +65,7 @@ class GX6 extends events.EventEmitter {
                                 const trackerId = parseInt(portData.charAt(4));
                                 if (value[0] == trackerId) {
                                     trackerAssignment.set(key, [trackerId, port, portId]);
-                                    //console.log(`Setting ${key} to port ${port} with port ID ${portId}`);
+                                    //console.log(`(haritorax-interpreter) - Setting ${key} to port ${port} with port ID ${portId}`);
                                 }
                             } else if (identifier.startsWith("i")) {
                                 const info = JSON.parse(portData);
@@ -80,7 +80,7 @@ class GX6 extends events.EventEmitter {
 
                     if (Array.from(trackerAssignment.values()).every(value => value[1] !== "")) {
                         trackersAssigned = true;
-                        //console.log("All trackers have been assigned: ", Array.from(trackerAssignment.entries()));
+                        //console.log("(haritorax-interpreter) - All trackers have been assigned: ", Array.from(trackerAssignment.entries()));
                     }
                 }
 
@@ -160,7 +160,7 @@ class GX6 extends events.EventEmitter {
     }
 
     getDeviceInformation(deviceName) {
-        //console.log(deviceInformation);
+        //console.log((haritorax-interpreter) - deviceInformation);
         return deviceInformation.get(deviceName);
     }
 
@@ -230,32 +230,32 @@ class Bluetooth extends events.EventEmitter {
     onDiscover(peripheral) {
         const { advertisement: { localName } } = peripheral;
         if (localName && localName.startsWith("HaritoraXW-") && !activeDevices$1.includes(peripheral)) {
-            console.log(`Found device: ${localName}`);
+            console.log(`(haritorax-interpreter) - Found device: ${localName}`);
             activeDevices$1.push(peripheral);
 
             peripheral.connect(error => {
                 if (error) {
-                    console.error(`Error connecting to ${localName}:`, error);
+                    console.error(`(haritorax-interpreter) - Error connecting to ${localName}:`, error);
                     return;
                 }
-                console.log(`Connected to ${localName}`);
+                console.log(`(haritorax-interpreter) - Connected to ${localName}`);
                 this.emit("connect", peripheral);
                 
                 peripheral.discoverServices(null, (error, services) => {
                     if (error) {
-                        console.error("Error discovering services:", error);
+                        console.error("(haritorax-interpreter) - Error discovering services:", error);
                         return;
                     }
-                    //console.log("Discovered services:", services);
+                    //console.log("(haritorax-interpreter) - Discovered services:", services);
                 
                     services.forEach(service => {
                         activeServices.push(service);
                         service.discoverCharacteristics([], (error, characteristics) => {
                             if (error) {
-                                console.error(`Error discovering characteristics of service ${service.uuid}:`, error);
+                                console.error(`(haritorax-interpreter) - Error discovering characteristics of service ${service.uuid}:`, error);
                                 return;
                             }
-                            //console.log(`Discovered characteristics of service ${service.uuid}:`, characteristics);
+                            //console.log(`(haritorax-interpreter) - Discovered characteristics of service ${service.uuid}:`, characteristics);
                 
                             characteristics.forEach(characteristic => {
                                 activeCharacteristics.push(characteristic);
@@ -264,7 +264,7 @@ class Bluetooth extends events.EventEmitter {
                                 });
                                 characteristic.subscribe(error => {
                                     if (error) {
-                                        console.error(`Error subscribing to characteristic ${characteristic.uuid} of service ${service.uuid}:`, error);
+                                        console.error(`(haritorax-interpreter) - Error subscribing to characteristic ${characteristic.uuid} of service ${service.uuid}:`, error);
                                     }
                                 });
                             });
@@ -276,7 +276,7 @@ class Bluetooth extends events.EventEmitter {
 
             peripheral.on("disconnect", () => {
                 if (!allowReconnect) return;
-                console.log(`Disconnected from ${localName}`);
+                console.log(`(haritorax-interpreter) - Disconnected from ${localName}`);
                 this.emit("disconnect", peripheral);
                 const index = activeDevices$1.indexOf(peripheral);
                 if (index !== -1) {
@@ -292,7 +292,7 @@ class Bluetooth extends events.EventEmitter {
     }
 
     stopConnection() {
-        console.log("Disconnected from bluetooth");
+        console.log("(haritorax-interpreter) - Disconnected from bluetooth");
         noble.stopScanning();
         for (let device of activeDevices$1) {
             device.disconnect();
@@ -578,7 +578,7 @@ class HaritoraXWireless extends events.EventEmitter {
         const TRACKERS_GROUP_ONE = ["rightKnee", "hip", "leftKnee"];
         const TRACKERS_GROUP_TWO = ["rightAnkle", "chest", "leftAnkle"];
 
-        if (bluetoothEnabled) {
+        if (trackerName.startsWith("HaritoraXW-")) {
             log("Setting tracker settings for bluetooth is not supported yet.");
             return false;
         } else {
@@ -666,10 +666,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
     **/
 
     setAllTrackerSettings(sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection) {
-        if (bluetoothEnabled) {
-            log("Setting all tracker settings for bluetooth is not supported yet.");
-            return false;
-        } else if (gx6Enabled) {
+        if (gx6Enabled) {
             try {
                 const sensorModeBit = sensorMode === 1 ? SENSOR_MODE_1 : SENSOR_MODE_2; // Default to mode 2
                 const postureDataRateBit = fpsMode === 100 ? FPS_MODE_100 : FPS_MODE_50; // Default to 50 FPS
@@ -750,7 +747,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
             serial = gx6.getDeviceInformation(trackerName)[SERIAL_INDEX];
             model = gx6.getDeviceInformation(trackerName)[MODEL_INDEX];
             version = gx6.getDeviceInformation(trackerName)[VERSION_INDEX];
-        } else if (bluetoothEnabled) {
+        } else if (trackerName.startsWith("HaritoraXW-")) {
             let trackerObject = bluetooth.getActiveDevices().find(device => device.advertisement.localName === trackerName);
             if (!trackerObject) {
                 log(`Tracker ${trackerName} not found`);
@@ -822,7 +819,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
                 if (gx6Enabled) {
                     log(`Tracker ${trackerName} battery info not found`);
                     return null;
-                } else if (bluetoothEnabled) {
+                } else if (trackerName.startsWith("HaritoraXW-")) {
                     let trackerObject = bluetooth.getActiveDevices().find(device => device.advertisement.localName === trackerName);
                     if (!trackerObject) {
                         log(`Tracker ${trackerName} not found`);
@@ -855,7 +852,9 @@ Raw hex data calculated to be sent: ${hexValue}`);
     **/
 
     getActiveTrackers() {
-        if (gx6Enabled) {
+        if (gx6Enabled && bluetoothEnabled) {
+            return activeDevices.concat(bluetooth.getActiveTrackers());
+        } else if (gx6Enabled) {
             return activeDevices;
         } else if (bluetoothEnabled) {
             return bluetooth.getActiveTrackers();
@@ -1304,7 +1303,7 @@ function processButtonData(data, trackerName, characteristic) {
     let buttonState = null;
 
     try {
-        if (bluetoothEnabled) {
+        if (trackerName.startsWith("HaritoraXW-")) {
             if (characteristic === "MainButton") {
                 currentButtons[MAIN_BUTTON_INDEX] += 1;
             } else if (characteristic === "SecondaryButton") {
@@ -1356,7 +1355,7 @@ function processBatteryData(data, trackerName) {
     const CHARGE_STATUS_INDEX = 2;
     let batteryData = [null, null, null];
 
-    if (bluetoothEnabled) {
+    if (trackerName.startsWith("HaritoraXW-")) {
         try {
             let batteryRemainingHex = buffer.Buffer.from(data, "base64").toString("hex");
             batteryData[0] = parseInt(batteryRemainingHex, 16);

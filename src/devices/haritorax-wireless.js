@@ -239,7 +239,7 @@ export default class HaritoraXWireless extends EventEmitter {
         const TRACKERS_GROUP_ONE = ["rightKnee", "hip", "leftKnee"];
         const TRACKERS_GROUP_TWO = ["rightAnkle", "chest", "leftAnkle"];
 
-        if (bluetoothEnabled) {
+        if (trackerName.startsWith("HaritoraXW-")) {
             log("Setting tracker settings for bluetooth is not supported yet.");
             return false;
         } else {
@@ -327,10 +327,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
     **/
 
     setAllTrackerSettings(sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection) {
-        if (bluetoothEnabled) {
-            log("Setting all tracker settings for bluetooth is not supported yet.");
-            return false;
-        } else if (gx6Enabled) {
+        if (gx6Enabled) {
             try {
                 const sensorModeBit = sensorMode === 1 ? SENSOR_MODE_1 : SENSOR_MODE_2; // Default to mode 2
                 const postureDataRateBit = fpsMode === 100 ? FPS_MODE_100 : FPS_MODE_50; // Default to 50 FPS
@@ -411,7 +408,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
             serial = gx6.getDeviceInformation(trackerName)[SERIAL_INDEX];
             model = gx6.getDeviceInformation(trackerName)[MODEL_INDEX];
             version = gx6.getDeviceInformation(trackerName)[VERSION_INDEX];
-        } else if (bluetoothEnabled) {
+        } else if (trackerName.startsWith("HaritoraXW-")) {
             let trackerObject = bluetooth.getActiveDevices().find(device => device.advertisement.localName === trackerName);
             if (!trackerObject) {
                 log(`Tracker ${trackerName} not found`);
@@ -483,7 +480,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
                 if (gx6Enabled) {
                     log(`Tracker ${trackerName} battery info not found`);
                     return null;
-                } else if (bluetoothEnabled) {
+                } else if (trackerName.startsWith("HaritoraXW-")) {
                     let trackerObject = bluetooth.getActiveDevices().find(device => device.advertisement.localName === trackerName);
                     if (!trackerObject) {
                         log(`Tracker ${trackerName} not found`);
@@ -516,7 +513,9 @@ Raw hex data calculated to be sent: ${hexValue}`);
     **/
 
     getActiveTrackers() {
-        if (gx6Enabled) {
+        if (gx6Enabled && bluetoothEnabled) {
+            return activeDevices.concat(bluetooth.getActiveTrackers());
+        } else if (gx6Enabled) {
             return activeDevices;
         } else if (bluetoothEnabled) {
             return bluetooth.getActiveTrackers();
@@ -965,7 +964,7 @@ function processButtonData(data, trackerName, characteristic) {
     let buttonState = null;
 
     try {
-        if (bluetoothEnabled) {
+        if (trackerName.startsWith("HaritoraXW-")) {
             if (characteristic === "MainButton") {
                 currentButtons[MAIN_BUTTON_INDEX] += 1;
             } else if (characteristic === "SecondaryButton") {
@@ -1017,7 +1016,7 @@ function processBatteryData(data, trackerName) {
     const CHARGE_STATUS_INDEX = 2;
     let batteryData = [null, null, null];
 
-    if (bluetoothEnabled) {
+    if (trackerName.startsWith("HaritoraXW-")) {
         try {
             let batteryRemainingHex = Buffer.from(data, "base64").toString("hex");
             batteryData[0] = parseInt(batteryRemainingHex, 16);
