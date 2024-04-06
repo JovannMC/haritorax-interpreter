@@ -8,12 +8,14 @@ const BAUD_RATE = 500000; // from the haritora_setting.json in the HaritoraConfi
 const trackerAssignment = new Map([
     // tracker part, [tracker id, port, port id]
     ["DONGLE", [0, "", ""]],
-    ["hip", [6, "", ""]],
     ["chest", [1, "", ""]],
+    ["leftKnee", [2, ""], ""],
+    ["leftAnkle", [3, ""], ""],
     ["rightKnee",  [4, "", ""]],
     ["rightAnkle", [5, "", ""]],
-    ["leftKnee", [2, ""], ""],
-    ["leftAnkle", [3, ""], ""]
+    ["hip", [6, "", ""]],
+    ["leftElbow", [7, ""], ""],
+    ["rightElbow", [8, ""], ""]
 ]);
 
 const deviceInformation = new Map([
@@ -24,7 +26,9 @@ const deviceInformation = new Map([
     ["hip", ["", "", ""]],
     ["chest", ["", "", ""]],
     ["leftKnee", ["", "", ""]],
-    ["leftAnkle", ["", "", ""]]
+    ["leftAnkle", ["", "", ""]],
+    ["leftElbow", ["", "", ""]],
+    ["rightElbow", ["", "", ""]]
 ]);
 
 // Stores the ports that are currently active as objects for access later

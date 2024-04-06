@@ -3,14 +3,14 @@
 import { Buffer } from "buffer";
 import { EventEmitter } from "events";
 import Quaternion from "quaternion";
-import GX6 from "../mode/gx6.js";
+import GX from "../mode/gx.js";
 import Bluetooth from "../mode/bluetooth.js";
 
 let debug = 0;
 
-const gx6 = new GX6();
+const gx = new GX();
 const bluetooth = new Bluetooth();
-let gx6Enabled = false;
+let gxEnabled = false;
 let bluetoothEnabled = false;
 let haritora;
 
@@ -26,7 +26,9 @@ const trackerButtons = new Map([
     ["hip", [0, 0]],
     ["chest", [0, 0]],
     ["leftKnee", [0, 0]],
-    ["leftAnkle", [0, 0]]
+    ["leftAnkle", [0, 0]],
+    ["leftElbow", [0, 0]],
+    ["rightElbow", [0, 0]]
 ]);
 
 const trackerSettingsRaw = new Map([
@@ -36,7 +38,9 @@ const trackerSettingsRaw = new Map([
     ["hip", ""],
     ["chest", ""],
     ["leftKnee", ""],
-    ["leftAnkle", ""]
+    ["leftAnkle", ""],
+    ["leftElbow", ""],
+    ["rightElbow", ""]
 ]);
 
 const trackerSettings = new Map([
@@ -46,7 +50,9 @@ const trackerSettings = new Map([
     ["hip", [2, "50", [], false]],
     ["chest", [2, "50", [], false]],
     ["leftKnee", [2, "50", [], false]],
-    ["leftAnkle", [2, "50", [], false]]
+    ["leftAnkle", [2, "50", [], false]],
+    ["leftElbow", [2, "50", [], false]],
+    ["rightElbow", [2, "50", [], false]]
 ]);
 
 const trackerBattery = new Map([
@@ -56,7 +62,9 @@ const trackerBattery = new Map([
     ["hip", [0, 0, ""]],
     ["chest", [0, 0, ""]],
     ["leftKnee", [0, 0, ""]],
-    ["leftAnkle", [0, 0, ""]]
+    ["leftAnkle", [0, 0, ""]],
+    ["leftElbow", [0, 0, ""]],
+    ["rightElbow", [0, 0, ""]]
 ]);
 
 let activeDevices = [];
@@ -186,12 +194,12 @@ export default class HaritoraXWireless extends EventEmitter {
      * @param {array} portNames - The port names to connect to. (GX6 only)
      * 
      * @example
-     * device.startConnection("gx6");
+     * device.startConnection("gx");
     **/
     startConnection(connectionMode, portNames) {
-        if (connectionMode === "gx6") {
-            gx6.startConnection(portNames);
-            gx6Enabled = true;
+        if (connectionMode === "gx") {
+            gx.startConnection(portNames);
+            gxEnabled = true;
         } else if (connectionMode === "bluetooth") {
             bluetooth.startConnection();
             bluetoothEnabled = true;
@@ -205,12 +213,12 @@ export default class HaritoraXWireless extends EventEmitter {
      * @param {string} connectionMode - Disconnect from the trackers with the specified mode (gx6 or bluetooth).
      * 
      * @example
-     * device.stopConnection("gx6");
+     * device.stopConnection("gx");
     **/
     stopConnection(connectionMode) {
-        if (connectionMode === "gx6") {
-            gx6.stopConnection();
-            gx6Enabled = false;
+        if (connectionMode === "gx") {
+            gx.stopConnection();
+            gxEnabled = false;
         } else if (connectionMode === "bluetooth") {
             bluetooth.stopConnection();
             bluetoothEnabled = false;
@@ -239,7 +247,7 @@ export default class HaritoraXWireless extends EventEmitter {
         const TRACKERS_GROUP_ONE = ["rightKnee", "hip", "leftKnee"];
         const TRACKERS_GROUP_TWO = ["rightAnkle", "chest", "leftAnkle"];
 
-        if (trackerName.startsWith("HaritoraXW-")) {
+        if (trackerName.startsWith("HaritoraX")) {
             log("Setting tracker settings for bluetooth is not supported yet.");
             return false;
         } else {
@@ -275,8 +283,8 @@ Raw hex data calculated to be sent: ${hexValue}`);
             
             try {
                 log(`Sending tracker settings to ${trackerName}: ${trackerSettingsBuffer.toString()}`);
-                let ports = gx6.getActivePorts();
-                let trackerPort = gx6.getTrackerPort(trackerName);
+                let ports = gx.getActivePorts();
+                let trackerPort = gx.getTrackerPort(trackerName);
 
                 ports[trackerPort].write(trackerSettingsBuffer, (err) => {
                     if (err) {
@@ -327,7 +335,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
     **/
 
     setAllTrackerSettings(sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection) {
-        if (gx6Enabled) {
+        if (gxEnabled) {
             try {
                 const sensorModeBit = sensorMode === 1 ? SENSOR_MODE_1 : SENSOR_MODE_2; // Default to mode 2
                 const postureDataRateBit = fpsMode === 100 ? FPS_MODE_100 : FPS_MODE_50; // Default to 50 FPS
@@ -349,8 +357,8 @@ Ankle motion detection: ${ankleMotionDetection}
 Raw hex data calculated to be sent: ${hexValue}`);
 
                 for (let trackerName of trackerSettingsRaw.keys()) {
-                    let ports = gx6.getActivePorts();
-                    let trackerPort = gx6.getTrackerPort(trackerName);
+                    let ports = gx.getActivePorts();
+                    let trackerPort = gx.getTrackerPort(trackerName);
 
                     ports[trackerPort].write(trackerSettingsBuffer, (err) => {
                         if (err) {
@@ -404,11 +412,11 @@ Raw hex data calculated to be sent: ${hexValue}`);
         let model = null;
         let version = null;
         
-        if (trackerName === "(DONGLE)" || gx6Enabled) {
-            serial = gx6.getDeviceInformation(trackerName)[SERIAL_INDEX];
-            model = gx6.getDeviceInformation(trackerName)[MODEL_INDEX];
-            version = gx6.getDeviceInformation(trackerName)[VERSION_INDEX];
-        } else if (trackerName.startsWith("HaritoraXW-")) {
+        if (trackerName === "(DONGLE)" || gxEnabled) {
+            serial = gx.getDeviceInformation(trackerName)[SERIAL_INDEX];
+            model = gx.getDeviceInformation(trackerName)[MODEL_INDEX];
+            version = gx.getDeviceInformation(trackerName)[VERSION_INDEX];
+        } else if (trackerName.startsWith("HaritoraX")) {
             let trackerObject = bluetooth.getActiveDevices().find(device => device.advertisement.localName === trackerName);
             if (!trackerObject) {
                 log(`Tracker ${trackerName} not found`);
@@ -477,10 +485,10 @@ Raw hex data calculated to be sent: ${hexValue}`);
                 this.emit("battery", trackerName, batteryRemaining, batteryVoltage, chargeStatus);
                 return { batteryRemaining, batteryVoltage, chargeStatus };
             } else {
-                if (gx6Enabled) {
+                if (gxEnabled) {
                     log(`Tracker ${trackerName} battery info not found`);
                     return null;
-                } else if (trackerName.startsWith("HaritoraXW-")) {
+                } else if (trackerName.startsWith("HaritoraX")) {
                     let trackerObject = bluetooth.getActiveDevices().find(device => device.advertisement.localName === trackerName);
                     if (!trackerObject) {
                         log(`Tracker ${trackerName} not found`);
@@ -513,9 +521,9 @@ Raw hex data calculated to be sent: ${hexValue}`);
     **/
 
     getActiveTrackers() {
-        if (gx6Enabled && bluetoothEnabled) {
+        if (gxEnabled && bluetoothEnabled) {
             return activeDevices.concat(bluetooth.getActiveTrackers());
-        } else if (gx6Enabled) {
+        } else if (gxEnabled) {
             return activeDevices;
         } else if (bluetoothEnabled) {
             return bluetooth.getActiveTrackers();
@@ -637,8 +645,8 @@ Ankle motion detection: ${ankleMotionDetection}`);
      * @returns {boolean} - Whether the connection mode is active or not
     **/
     getConnectionModeActive(connectionMode) {
-        if (connectionMode === "gx6") {
-            return gx6Enabled;
+        if (connectionMode === "gx") {
+            return gxEnabled;
         } else if (connectionMode === "bluetooth") {
             return bluetoothEnabled;
         } else {
@@ -647,7 +655,7 @@ Ankle motion detection: ${ankleMotionDetection}`);
     }
 }
 
-gx6.on("data", (trackerName, port, portId, identifier, portData) => {
+gx.on("data", (trackerName, port, portId, identifier, portData) => {
     switch (identifier[0]) {
     case "x":
         processIMUData(portData, trackerName);
@@ -964,14 +972,14 @@ function processButtonData(data, trackerName, characteristic) {
     let buttonState = null;
 
     try {
-        if (trackerName.startsWith("HaritoraXW-")) {
+        if (trackerName.startsWith("HaritoraX")) {
             if (characteristic === "MainButton") {
                 currentButtons[MAIN_BUTTON_INDEX] += 1;
             } else if (characteristic === "SecondaryButton") {
                 currentButtons[SUB_BUTTON_INDEX] += 1;
             }
             buttonState = TRACKER_ON; // Tracker is always on when connected via bluetooth, because need to be connected to read button data
-        } else if (gx6Enabled) {
+        } else if (gxEnabled) {
             currentButtons[MAIN_BUTTON_INDEX] = parseInt(data[6], 16);
             currentButtons[SUB_BUTTON_INDEX] = parseInt(data[9], 16);
 
@@ -1016,7 +1024,7 @@ function processBatteryData(data, trackerName) {
     const CHARGE_STATUS_INDEX = 2;
     let batteryData = [null, null, null];
 
-    if (trackerName.startsWith("HaritoraXW-")) {
+    if (trackerName.startsWith("HaritoraX")) {
         try {
             let batteryRemainingHex = Buffer.from(data, "base64").toString("hex");
             batteryData[0] = parseInt(batteryRemainingHex, 16);
@@ -1024,7 +1032,7 @@ function processBatteryData(data, trackerName) {
         } catch {
             console.error(`Error converting battery data to hex for ${trackerName}: ${data}`);
         }
-    } else if (gx6Enabled) {
+    } else if (gxEnabled) {
         try {
             const batteryInfo = JSON.parse(data);
             log(`Tracker ${trackerName} remaining: ${batteryInfo["battery remaining"]}%`);

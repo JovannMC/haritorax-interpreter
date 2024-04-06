@@ -1,6 +1,6 @@
 import { HaritoraXWireless } from "../src/index.js";
 
-let mode = process.argv[2] || "gx6";
+let mode = process.argv[2] || "gx";
 let device = new HaritoraXWireless(2);
 
 if (mode === "bt" || mode === "bluetooth") {
@@ -20,7 +20,7 @@ if (mode === "bt" || mode === "bluetooth") {
         }
     }, 3000);
 } else {
-    device.startConnection("gx6", ["COM4", "COM5", "COM6"]);
+    device.startConnection("gx", ["COM4", "COM5", "COM6"]);
 
     device.on("connect", (trackerName) => {
         console.log(`Connected to tracker ${trackerName}`);
@@ -47,7 +47,7 @@ if (mode === "bt" || mode === "bluetooth") {
 
     /*setTimeout(() => {
     console.log("Stopping connection");
-    device.stopConnection("gx6");
+    device.stopConnection("gx");
     }, 5000);
 
     setTimeout(() => {

@@ -39,7 +39,7 @@ Will write actual documentation at some point, for now refer to the source code,
 import { HaritoraXWireless } from "haritorax-interpreter";
 
 let device = new HaritoraXWireless(2); // enable debug mode w/ function info
-device.startConnection("gx6", ["COM4", "COM5", "COM6"]); // start connecting to dongles via GX6, with the ports COM4, COM5, and COM6
+device.startConnection("gx", ["COM4", "COM5", "COM6"]); // start connecting to dongles via GX6, with the ports COM4, COM5, and COM6
 
 device.on("imu", (trackerName, rotation, gravity, ankle) => {
     // IMU data received, do stuff
@@ -55,7 +55,7 @@ setTimeout(() => {
 }, 2000)
 
 setTimeout(() => {
-    device.stopConnection("gx6");
+    device.stopConnection("gx");
 }, 10000)
 ```
 

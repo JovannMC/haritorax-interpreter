@@ -63,8 +63,10 @@ export default class Bluetooth extends EventEmitter {
 
     onDiscover(peripheral) {
         const { advertisement: { localName } } = peripheral;
-        if (localName && localName.startsWith("HaritoraXW-") && !activeDevices.includes(peripheral)) {
+        if (localName && localName.startsWith("HaritoraX") && !activeDevices.includes(peripheral)) {
             console.log(`(haritorax-interpreter) - Found device: ${localName}`);
+            // I do not have any device other than the wireless device, so I cannot test this
+            if (localName.startsWith("HaritoraX-")) console.log("(haritorax-interpreter) - HaritoraX (1.0/1.1/1.1b) detected. Device is not fully supported and you may experience issues.");
             activeDevices.push(peripheral);
 
             peripheral.connect(error => {
