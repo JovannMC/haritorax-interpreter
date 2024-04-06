@@ -14,23 +14,23 @@ Check out the Haritora-GX6 proof-of-concept repository here: https://github.com/
 
 ## Documentation
 
-Will write actual documentation at some point, for now refer to the source code, JSDoc comments, and example below.
+Will write actual documentation at some point, for now refer to the source code, examples, and JSDoc comments.
 
 ## Supported devices
 
 | Device             | Supported | Elbow/Hip support |
 |--------------------|-----------|-------------------|
-| HaritoraX Wireless |     Y     |         *         |
-| HaritoraX 1.1B     |     X     |         X         |
-| HaritoraX 1.1      |     X     |         X         |
-| HaritoraX 1.0      |     X     |         X         |
+| HaritoraX Wireless |     Y     |         Y         |
+| HaritoraX 1.1B     |     ?     |         ?         |
+| HaritoraX 1.1      |     ?     |         ?         |
+| HaritoraX 1.0      |     ?     |         ?         |
 | Haritora           |     X     |         X         |
 
 | Communication mode        | Supported |
 |---------------------------|-----------|
 | Bluetooth                 |     *     |
 | GX6 Communication Dongle  |     Y     |
-| GX2 Communication Dongle  |     X     |
+| GX2 Communication Dongle  |     Y     |
 
 **\* partial support**
 
@@ -39,7 +39,7 @@ Will write actual documentation at some point, for now refer to the source code,
 import { HaritoraXWireless } from "haritorax-interpreter";
 
 let device = new HaritoraXWireless(2); // enable debug mode w/ function info
-device.startConnection("gx", ["COM4", "COM5", "COM6"]); // start connecting to dongles via GX6, with the ports COM4, COM5, and COM6
+device.startConnection("gx", ["COM4", "COM5", "COM6", "COM7"]); // start connecting to dongles via GX dongles, with the ports COM4, COM5, COM6, and COM7
 
 device.on("imu", (trackerName, rotation, gravity, ankle) => {
     // IMU data received, do stuff
@@ -73,4 +73,4 @@ This package is licensed under the [MIT](https://opensource.org/license/mit/) Li
 
 - [haritorax-slimevr-bridge](https://github.com/sim1222/haritorax-slimevr-bridge) - sim1222 - math for decoding the IMU packet data
 - [SlimeTora](https://github.com/OCSYT/SlimeTora/) - BracketProto - code for fixing drifting from incorrect acceleration (gravity) values
-- [ShiftAll Discord](https://discord.gg/vqXmAFy5RC) - ommunity - helping with testing the package
+- [ShiftAll Discord](https://discord.gg/vqXmAFy5RC) - community - helping with testing the package
