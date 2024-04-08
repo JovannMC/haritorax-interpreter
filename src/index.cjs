@@ -359,10 +359,10 @@ let gxEnabled = false;
 let bluetoothEnabled = false;
 let haritora;
 
-const SENSOR_MODE_1 = "1";
-const SENSOR_MODE_2 = "0";
-const FPS_MODE_100 = "1";
-const FPS_MODE_50 = "0";
+const SENSOR_MODE_1 = 1;
+const SENSOR_MODE_2 = 0;
+const FPS_MODE_100 = 1;
+const FPS_MODE_50 = 0;
 
 const trackerButtons = new Map([
     // trackerName, [mainButton, subButton]
@@ -390,14 +390,14 @@ const trackerSettingsRaw = new Map([
 
 const trackerSettings = new Map([
     // trackerName, [sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection]
-    ["rightKnee", [2, "50", [], false]],
-    ["rightAnkle", [2, "50", [], false]],
-    ["hip", [2, "50", [], false]],
-    ["chest", [2, "50", [], false]],
-    ["leftKnee", [2, "50", [], false]],
-    ["leftAnkle", [2, "50", [], false]],
-    ["leftElbow", [2, "50", [], false]],
-    ["rightElbow", [2, "50", [], false]]
+    ["rightKnee", [2, 50, [], false]],
+    ["rightAnkle", [2, 50, [], false]],
+    ["hip", [2, 50, [], false]],
+    ["chest", [2, 50, [], false]],
+    ["leftKnee", [2, 50, [], false]],
+    ["leftAnkle", [2, 50, [], false]],
+    ["leftElbow", [2, 50, [], false]],
+    ["rightElbow", [2, 50, [], false]]
 ]);
 
 const trackerBattery = new Map([
@@ -585,7 +585,7 @@ class HaritoraXWireless extends events.EventEmitter {
      * @fires this#settings
      * 
      * @example
-     * trackers.setTrackerSettings("rightAnkle", 100, 1, ['accel', 'gyro'], true);
+     * trackers.setTrackerSettings("rightAnkle", 1, 100, ['accel', 'gyro'], true);
     **/ 
 
     setTrackerSettings(trackerName, sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection) {
@@ -599,7 +599,7 @@ class HaritoraXWireless extends events.EventEmitter {
             log(`Setting tracker settings for ${trackerName}...`);
             const sensorModeBit = sensorMode === 1 ? SENSOR_MODE_1 : SENSOR_MODE_2; // Default to mode 2
             const postureDataRateBit = fpsMode === 100 ? FPS_MODE_100 : FPS_MODE_50; // Default to 50 FPS
-            const ankleMotionDetectionBit = ankleMotionDetection ? "1" : "0"; // Default to false
+            const ankleMotionDetectionBit = ankleMotionDetection ? 1 : 0; // Default to false
             let sensorAutoCorrectionBit = 0;
             if (sensorAutoCorrection.includes("accel")) sensorAutoCorrectionBit |= 0x01;
             if (sensorAutoCorrection.includes("gyro")) sensorAutoCorrectionBit |= 0x02;
@@ -624,7 +624,7 @@ Sensor auto correction: ${sensorAutoCorrection}
 Ankle motion detection: ${ankleMotionDetection}
 Raw hex data calculated to be sent: ${hexValue}`);
 
-            trackerSettings.set(trackerName, [sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection]);
+            trackerSettings.set(trackerName, [parseInt(sensorMode), parseInt(fpsMode), sensorAutoCorrection, ankleMotionDetection]);
             
             try {
                 log(`Sending tracker settings to ${trackerName}: ${trackerSettingsBuffer.toString()}`);
@@ -645,7 +645,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
             }
         }
 
-        this.emit("settings", trackerName, sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
+        this.emit("settings", trackerName, parseInt(sensorMode), parseInt(fpsMode), sensorAutoCorrection, ankleMotionDetection);
         return true;
     }
 
@@ -668,15 +668,15 @@ Raw hex data calculated to be sent: ${hexValue}`);
      * Sets the tracker settings for all connected trackers
      * Support: GX6
      *
-     * @param {number} fpsMode - The posture data transfer rate/FPS (50 or 100).
      * @param {number} sensorMode - The sensor mode, which controls whether magnetometer is used (1 or 2).
+     * @param {number} fpsMode - The posture data transfer rate/FPS (50 or 100).
      * @param {string} sensorAutoCorrection - The sensor auto correction mode, multiple or none can be used (accel, gyro, mag).
      * @param {boolean} ankleMotionDetection - Whether ankle motion detection is enabled. (true or false)
      * @returns {boolean} - Whether the settings were successfully sent to all trackers.
      * @fires this#settings
      * 
      * @example
-     * trackers.setAllTrackerSettings(50, 2, ['mag'], false);
+     * trackers.setAllTrackerSettings(2, 50, ['mag'], false);
     **/
 
     setAllTrackerSettings(sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection) {
@@ -684,7 +684,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
             try {
                 const sensorModeBit = sensorMode === 1 ? SENSOR_MODE_1 : SENSOR_MODE_2; // Default to mode 2
                 const postureDataRateBit = fpsMode === 100 ? FPS_MODE_100 : FPS_MODE_50; // Default to 50 FPS
-                const ankleMotionDetectionBit = ankleMotionDetection ? "1" : "0"; // Default to false
+                const ankleMotionDetectionBit = ankleMotionDetection ? 1 : 0; // Default to false
                 let sensorAutoCorrectionBit = 0;
                 if (sensorAutoCorrection.includes("accel")) sensorAutoCorrectionBit |= 0x01;
                 if (sensorAutoCorrection.includes("gyro")) sensorAutoCorrectionBit |= 0x02;
@@ -724,8 +724,8 @@ Raw hex data calculated to be sent: ${hexValue}`);
         }
 
         for (let trackerName of trackerSettingsRaw.keys()) {
-            this.emit("settings", trackerName, sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
-            trackerSettings.set(trackerName, [sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection]);
+            this.emit("settings", trackerName, parseInt(sensorMode), parseInt(fpsMode), sensorAutoCorrection, ankleMotionDetection);
+            trackerSettings.set(trackerName, [parseInt(sensorMode), parseInt(fpsMode), sensorAutoCorrection, ankleMotionDetection]);
         }
         return true;
     }
@@ -1436,9 +1436,13 @@ function processTrackerSettings(data, trackerName) {
         log(`Raw data: ${data}`);
 
         if (!trackerSettingsRaw.has(trackerName) || trackerSettingsRaw.get(trackerName) !== data) {
+            const sensorModeInt = parseInt(sensorModeText);
+            const postureDataRateInt = parseInt(postureDataRateText);
+            const ankleMotionDetectionBoolean = ankleMotionDetectionText === "true";
+
             trackerSettingsRaw.set(trackerName, data);
-            trackerSettings.set(trackerName, [sensorModeText, postureDataRateText, sensorAutoCorrectionComponents, ankleMotionDetectionText]);
-            haritora.emit("settings", trackerName, sensorModeText, postureDataRateText, sensorAutoCorrectionComponents, ankleMotionDetectionText);
+            trackerSettings.set(trackerName, [sensorModeInt, postureDataRateInt, sensorAutoCorrectionComponents, ankleMotionDetectionBoolean]);
+            haritora.emit("settings", trackerName, sensorModeInt, postureDataRateInt, sensorAutoCorrectionComponents, ankleMotionDetectionBoolean);
         }
     } catch (error) {
         console.error(`Error processing tracker settings for ${trackerName}:`, error);
