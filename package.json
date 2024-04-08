@@ -16,7 +16,7 @@
   },
   "scripts": {
     "start": "node ./test/test.js",
-    "build": "rollup -c"
+    "build": "tsc"
   },
   "author": "JovannMC <jovannmc@femboyfurry.net> (https://femboyfurry.net)",
   "license": "MIT",
@@ -35,6 +35,8 @@
     "serialport": "^12.0.0"
   },
   "devDependencies": {
-    "eslint": "^8.57.0"
+    "eslint": "^8.57.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.4"
   }
 }

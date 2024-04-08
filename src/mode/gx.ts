@@ -9,13 +9,13 @@ const trackerAssignment = new Map([
     // tracker part, [tracker id, port, port id]
     ["DONGLE", [0, "", ""]],
     ["chest", [1, "", ""]],
-    ["leftKnee", [2, ""], ""],
-    ["leftAnkle", [3, ""], ""],
-    ["rightKnee",  [4, "", ""]],
+    ["leftKnee", [2, "", ""]],
+    ["leftAnkle", [3, "", ""]],
+    ["rightKnee", [4, "", ""]],
     ["rightAnkle", [5, "", ""]],
     ["hip", [6, "", ""]],
-    ["leftElbow", [7, ""], ""],
-    ["rightElbow", [8, ""], ""]
+    ["leftElbow", [7, "", ""]],
+    ["rightElbow", [8, "", ""]],
 ]);
 
 const deviceInformation = new Map([
@@ -28,35 +28,37 @@ const deviceInformation = new Map([
     ["leftKnee", ["", "", ""]],
     ["leftAnkle", ["", "", ""]],
     ["leftElbow", ["", "", ""]],
-    ["rightElbow", ["", "", ""]]
+    ["rightElbow", ["", "", ""]],
 ]);
 
 // Stores the ports that are currently active as objects for access later
-let activePorts = {};
+let activePorts: ActivePorts = {};
 let trackersAssigned = false;
 
 export default class GX6 extends EventEmitter {
     constructor() {
         super();
     }
-    
-    startConnection(portNames) {
-        portNames.forEach(port => {
+
+    startConnection(portNames: string[]) {
+        portNames.forEach((port) => {
             const serial = new SerialPort({
                 path: port,
-                baudRate: BAUD_RATE
+                baudRate: BAUD_RATE,
             });
             const parser = serial.pipe(new ReadlineParser({ delimiter: "\n" }));
             activePorts[port] = serial;
-            
+
             serial.on("open", () => {
                 this.emit("connected", port);
             });
 
-            parser.on("data", data => {
+            parser.on("data", (data) => {
                 const splitData = data.toString().split(/:(.+)/);
                 const identifier = splitData[0].toLowerCase();
-                const portId = identifier.match(/\d/) ? identifier.match(/\d/)[0] : "DONGLE";
+                const portId = identifier.match(/\d/)
+                    ? identifier.match(/\d/)[0]
+                    : "DONGLE";
                 const portData = splitData[1];
 
                 if (!trackersAssigned) {
@@ -65,7 +67,11 @@ export default class GX6 extends EventEmitter {
                             if (identifier.startsWith("r")) {
                                 const trackerId = parseInt(portData.charAt(4));
                                 if (value[0] == trackerId) {
-                                    trackerAssignment.set(key, [trackerId, port, portId]);
+                                    trackerAssignment.set(key, [
+                                        trackerId,
+                                        port,
+                                        portId,
+                                    ]);
                                     //console.log(`(haritorax-interpreter) - Setting ${key} to port ${port} with port ID ${portId}`);
                                 }
                             } else if (identifier.startsWith("i")) {
@@ -73,13 +79,21 @@ export default class GX6 extends EventEmitter {
                                 const version = info["version"];
                                 const model = info["model"];
                                 const serial = info["serial no"];
-                                
-                                deviceInformation.set(key, [version, model, serial]);
+
+                                deviceInformation.set(key, [
+                                    version,
+                                    model,
+                                    serial,
+                                ]);
                             }
                         }
                     }
 
-                    if (Array.from(trackerAssignment.values()).every(value => value[1] !== "")) {
+                    if (
+                        Array.from(trackerAssignment.values()).every(
+                            (value) => value[1] !== ""
+                        )
+                    ) {
                         trackersAssigned = true;
                         //console.log("(haritorax-interpreter) - All trackers have been assigned: ", Array.from(trackerAssignment.entries()));
                     }
@@ -93,7 +107,14 @@ export default class GX6 extends EventEmitter {
                     }
                 }
 
-                this.emit("data", trackerName, port, portId, identifier, portData);
+                this.emit(
+                    "data",
+                    trackerName,
+                    port,
+                    portId,
+                    identifier,
+                    portData
+                );
             });
 
             serial.on("close", () => {
@@ -120,15 +141,15 @@ export default class GX6 extends EventEmitter {
         return Array.from(trackerAssignment.keys());
     }
 
-    getTrackerId(tracker) {
+    getTrackerId(tracker: string) {
         const port = trackerAssignment.get(tracker)[0];
         if (port) {
             return port;
         }
         return null;
     }
-    
-    getTrackerPort(tracker) {
+
+    getTrackerPort(tracker: string) {
         const port = trackerAssignment.get(tracker)[1];
         if (port) {
             return port;
@@ -136,7 +157,7 @@ export default class GX6 extends EventEmitter {
         return null;
     }
 
-    getTrackerPortId(tracker) {
+    getTrackerPortId(tracker: string) {
         const portId = trackerAssignment.get(tracker)[2];
         if (portId) {
             return portId;
@@ -144,7 +165,7 @@ export default class GX6 extends EventEmitter {
         return null;
     }
 
-    getPartFromId(trackerId) {
+    getPartFromId(trackerId: string) {
         for (let [key, value] of trackerAssignment.entries()) {
             if (value[0] == trackerId) {
                 return key;
@@ -152,7 +173,7 @@ export default class GX6 extends EventEmitter {
         }
     }
 
-    getPartFromInfo(port, portId) {
+    getPartFromInfo(port: string, portId: string) {
         for (let [key, value] of trackerAssignment.entries()) {
             if (value[1] == port && value[2] == portId) {
                 return key;
@@ -160,7 +181,7 @@ export default class GX6 extends EventEmitter {
         }
     }
 
-    getDeviceInformation(deviceName) {
+    getDeviceInformation(deviceName: string) {
         //console.log((haritorax-interpreter) - deviceInformation);
         return deviceInformation.get(deviceName);
     }
@@ -168,6 +189,14 @@ export default class GX6 extends EventEmitter {
     getActivePorts() {
         return activePorts;
     }
+}
+
+/*
+ * Typescript type definitions
+ */
+
+interface ActivePorts {
+    [key: string]: SerialPort;
 }
 
 export { GX6 };
