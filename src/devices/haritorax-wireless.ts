@@ -194,7 +194,7 @@ export default class HaritoraXWireless extends EventEmitter {
      * @example
      * device.startConnection("gx");
      **/
-    startConnection(connectionMode: string, portNames: string[]) {
+    startConnection(connectionMode: string, portNames?: string[]) {
         if (connectionMode === "gx") {
             gx.startConnection(portNames);
             gxEnabled = true;
@@ -1239,7 +1239,7 @@ function processButtonData(
     let buttonState = null;
 
     try {
-        if (trackerName.startsWith("HaritoraX")) {
+        if (trackerName && trackerName.startsWith("HaritoraX")) {
             if (characteristic === "MainButton") {
                 currentButtons[MAIN_BUTTON_INDEX] += 1;
             } else if (characteristic === "SecondaryButton") {

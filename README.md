@@ -6,8 +6,6 @@ A node.js package that allows you to communicate and interact with the HaritoraX
 
 Check out the Haritora-GX6 proof-of-concept repository here: https://github.com/JovannMC/haritora-gx6-poc
 
-**This package is built with ESM. CommonJS and TypeScript support is in beta and may be buggy!**
-
 ## Installation
 
 `npm install haritorax-interpreter`
@@ -34,7 +32,7 @@ Will write actual documentation at some point, for now refer to the source code,
 
 **\* partial support**
 
-## Example for ESM
+## Example
 ```js
 import { HaritoraXWireless } from "haritorax-interpreter";
 
