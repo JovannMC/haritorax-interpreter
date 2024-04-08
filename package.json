@@ -7,13 +7,8 @@
     "url": "https://github.com/JovannMC/haritorax-interpreter/issues",
     "email": "contact@femboyfurry.net"
   },
-  "type": "module",
   "description": "Communicate with the HaritoraX trackers",
-  "main": "./src/index.js",
-  "exports": {
-    "import": "./src/index.js",
-    "require": "./src/index.cjs"
-  },
+  "main": "./dist/index.js",
   "scripts": {
     "start": "node ./test/test.js",
     "build": "tsc"

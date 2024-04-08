@@ -1,4 +1,4 @@
-import { HaritoraXWireless } from "../src/index.js";
+const { HaritoraXWireless } = require("../dist/index.js");
 
 let mode = process.argv[2] || "gx";
 let device = new HaritoraXWireless(2);
