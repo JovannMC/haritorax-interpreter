@@ -36,7 +36,7 @@ Will write actual documentation at some point, for now refer to the source code,
 ```js
 import { HaritoraXWireless } from "haritorax-interpreter";
 
-let device = new HaritoraXWireless(2); // enable debug mode w/ function info
+let device = new HaritoraXWireless(2); // enable debug mode w/ function & line info
 device.startConnection("gx", ["COM4", "COM5", "COM6", "COM7"]); // start connecting to dongles via GX dongles, with the ports COM4, COM5, COM6, and COM7
 
 device.on("imu", (trackerName, rotation, gravity, ankle) => {
