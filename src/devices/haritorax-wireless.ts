@@ -1374,10 +1374,10 @@ function processTrackerSettings(data: string, trackerName: string) {
             data[ANKLE_MOTION_DETECTION_INDEX]
         );
 
-        const sensorModeText = sensorMode === 0 ? "2" : "1";
-        const postureDataRateText = postureDataRate === 0 ? "50" : "100";
+        const sensorModeText = sensorMode === 0 ? 2 : 1;
+        const postureDataRateText = postureDataRate === 0 ? 50 : 100;
         const ankleMotionDetectionText =
-            ankleMotionDetection === 0 ? "false" : "true";
+            ankleMotionDetection === 0 ? false : true;
 
         const sensorAutoCorrectionComponents = [];
         if (sensorAutoCorrection & 1)
@@ -1401,25 +1401,20 @@ function processTrackerSettings(data: string, trackerName: string) {
             !trackerSettingsRaw.has(trackerName) ||
             trackerSettingsRaw.get(trackerName) !== data
         ) {
-            const sensorModeInt = parseInt(sensorModeText);
-            const postureDataRateInt = parseInt(postureDataRateText);
-            const ankleMotionDetectionBoolean =
-                ankleMotionDetectionText === "true";
-
             trackerSettingsRaw.set(trackerName, data);
             trackerSettings.set(trackerName, [
-                sensorModeInt,
-                postureDataRateInt,
+                sensorModeText,
+                postureDataRateText,
                 sensorAutoCorrectionComponents,
-                ankleMotionDetectionBoolean,
+                ankleMotionDetectionText,
             ]);
             haritora.emit(
                 "settings",
                 trackerName,
-                sensorModeInt,
-                postureDataRateInt,
+                sensorModeText,
+                postureDataRateText,
                 sensorAutoCorrectionComponents,
-                ankleMotionDetectionBoolean
+                ankleMotionDetectionText,
             );
         }
     } catch (error) {
