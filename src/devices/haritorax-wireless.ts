@@ -280,16 +280,19 @@ export default class HaritoraXWireless extends EventEmitter {
         sensorAutoCorrection: string[],
         ankleMotionDetection: boolean
     ) {
+        // !
+        // TODO: fix left knee setting for chest, right knee setting for hip
+        // TODO: probably see if you can submit settings one by one
         const TRACKERS_GROUP_ONE = [
-            "rightKnee",
             "hip",
-            "leftKnee",
+            "rightKnee",
+            "leftAnkle",
             "leftElbow",
         ];
         const TRACKERS_GROUP_TWO = [
-            "rightAnkle",
             "chest",
-            "leftAnkle",
+            "rightAnkle",
+            "leftKnee",
             "rightElbow",
         ];
 
