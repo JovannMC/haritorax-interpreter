@@ -4,48 +4,41 @@
 name: Node.js Package
 
 on:
-  release:
-    types: [created]
-  push:
-    branches:
-      - '**'
-    paths-ignore:
-      - '**.md'
-    tags:
-      - 'v*.*.*'
+    release:
+        types: [created]
+    push:
+        branches:
+            - "**"
+        paths-ignore:
+            - "**.md"
+        tags:
+            - "v*.*.*"
 
 jobs:
-  check-title:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check commit title
-        run: |
-          commit_title=$(git log --format=%s -n 1 ${{ github.event.after }})
-          if [[ ! "$commit_title" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-            echo "Commit title '$commit_title' doesn't start with a semantic version number. Cancelling workflow."
-            exit 1
-          fi
+    check-title:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v2
+            - name: Check commit title
+              run: |
+                  commit_title=$(git log --format=%s -n 1 ${{ github.event.after }})
+                  if [[ ! "$commit_title" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+                    echo "Commit title '$commit_title' doesn't start with a semantic version number. Cancelling workflow."
+                    exit 1
+                  fi
 
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
-        with:
-          node-version: 16
-      - run: npm ci
-
-  publish-npm:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
-        with:
-          node-version: 16
-          registry-url: https://registry.npmjs.org/
-      - run: npm ci
-      - run: npm run build
-      - run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{secrets.npm_token}}
+    build-and-publish-npm:
+        needs: check-title
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v3
+            - uses: actions/setup-node@v3
+              with:
+                  node-version: 16
+                  registry-url: https://registry.npmjs.org/
+            - run: npm ci
+            - run: npm run build
+            - run: npm publish
+              env:
+                  NODE_AUTH_TOKEN: ${{secrets.npm_token}}

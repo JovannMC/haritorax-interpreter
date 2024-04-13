@@ -230,7 +230,7 @@ export default class HaritoraXWireless extends EventEmitter {
                 gxEnabled = false;
                 return true;
             } else {
-                console.error("Error stopping GX6 connection")
+                console.error("Error stopping GX6 connection");
                 return false;
             }
         } else if (connectionMode === "bluetooth") {
@@ -239,7 +239,7 @@ export default class HaritoraXWireless extends EventEmitter {
                 bluetoothEnabled = false;
                 return true;
             } else {
-                console.error("Error stopping Bluetooth connection")
+                console.error("Error stopping Bluetooth connection");
                 return false;
             }
         }
@@ -284,7 +284,9 @@ export default class HaritoraXWireless extends EventEmitter {
         ];
 
         if (trackerName.startsWith("HaritoraX")) {
-            console.error("Setting tracker settings for bluetooth is not supported yet.");
+            console.error(
+                "Setting tracker settings for bluetooth is not supported yet."
+            );
             return false;
         } else {
             log(`Setting tracker settings for ${trackerName}...`);
