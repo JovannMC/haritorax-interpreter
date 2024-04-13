@@ -51,7 +51,7 @@ export default class Bluetooth extends EventEmitter {
     }
 
     startConnection() {
-        console.log("Connected to bluetooth");
+        console.log("(haritorax-interpreter) - Connected to bluetooth");
 
         if (noble.state === "poweredOn") {
             try {
@@ -59,11 +59,15 @@ export default class Bluetooth extends EventEmitter {
                 this.emit("connected");
                 return true;
             } catch (error) {
-                console.error(`Error starting scanning:\n${error}`);
+                console.error(
+                    `(haritorax-interpreter) - Error starting scanning of BT devices:\n${error}`
+                );
                 return false;
             }
         } else {
-            console.error(`Error occurred while trying to start scanning: Bluetooth state is ${noble.state}`);
+            console.error(
+                `(haritorax-interpreter) - Error occurred while trying to start scanning: Bluetooth state is ${noble.state}`
+            );
             return false;
         }
     }
@@ -217,7 +221,7 @@ export default class Bluetooth extends EventEmitter {
             );
             return false;
         }
-        
+
         activeDevices = [];
         allowReconnect = false;
 
