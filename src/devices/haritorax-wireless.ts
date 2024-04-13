@@ -190,19 +190,29 @@ export default class HaritoraXWireless extends EventEmitter {
      * Starts the connection to the trackers with the specified mode.
      *
      * @param {string} connectionMode - Connect to the trackers with the specified mode (GX6 or bluetooth).
-     * @param {array} portNames - The port names to connect to. (GX6 only)
+     * @param {string[]} [portNames] - The port names to connect to. (GX6 only)
+     * @returns {boolean} - Whether the connection was successfully started. (Bluetooth only)
      *
      * @example
      * device.startConnection("gx");
      **/
     startConnection(connectionMode: string, portNames?: string[]) {
         if (connectionMode === "gx") {
+            // gotta assume the user will actually provide valid ports, since I couldn't figure out how to return false if there's errors.
             gx.startConnection(portNames);
             gxEnabled = true;
+            return true;
         } else if (connectionMode === "bluetooth") {
-            bluetooth.startConnection();
-            bluetoothEnabled = true;
+            try {
+                bluetooth.startConnection();
+                bluetoothEnabled = true;
+            } catch (err) {
+                console.error(`Error starting bluetooth connection: ${err}`);
+                return false;
+            }
+            return true;
         }
+        return false;
     }
 
     /**
@@ -213,13 +223,25 @@ export default class HaritoraXWireless extends EventEmitter {
      * @example
      * device.stopConnection("gx");
      **/
-    stopConnection(connectionMode: string) {
+    async stopConnection(connectionMode: string) {
         if (connectionMode === "gx") {
-            gx.stopConnection();
-            gxEnabled = false;
+            let connectionStopped = await gx.stopConnection();
+            if (connectionStopped) {
+                gxEnabled = false;
+                return true;
+            } else {
+                console.error("Error stopping GX6 connection")
+                return false;
+            }
         } else if (connectionMode === "bluetooth") {
-            bluetooth.stopConnection();
-            bluetoothEnabled = false;
+            let connectionStopped = await bluetooth.stopConnection();
+            if (connectionStopped) {
+                bluetoothEnabled = false;
+                return true;
+            } else {
+                console.error("Error stopping Bluetooth connection")
+                return false;
+            }
         }
     }
 
@@ -262,7 +284,7 @@ export default class HaritoraXWireless extends EventEmitter {
         ];
 
         if (trackerName.startsWith("HaritoraX")) {
-            log("Setting tracker settings for bluetooth is not supported yet.");
+            console.error("Setting tracker settings for bluetooth is not supported yet.");
             return false;
         } else {
             log(`Setting tracker settings for ${trackerName}...`);
@@ -452,7 +474,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
                 return false;
             }
         } else {
-            log("No connection mode is enabled");
+            console.error("No connection mode is enabled");
             return false;
         }
 
@@ -939,7 +961,7 @@ function processIMUData(data: string, trackerName: string) {
 
     // Check if the data is valid
     if (!data || data.length !== 24) {
-        log(`Invalid IMU packet for tracker ${trackerName}: ${data}`);
+        console.error(`Invalid IMU packet for tracker ${trackerName}: ${data}`);
         return false;
     }
 
@@ -1210,7 +1232,7 @@ function processTrackerData(data: string, trackerName: string) {
         log(`Tracker ${trackerName} other data processed: ${data}`);
     }
 
-    // TODO - Find out what the other data represents, then add to emitted event
+    // TODO - Find out what the other data represents, then add to emitted event. Seems to be likely mag data?
     haritora.emit("tracker", trackerName, data);
 }
 

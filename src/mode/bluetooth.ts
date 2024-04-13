@@ -52,12 +52,19 @@ export default class Bluetooth extends EventEmitter {
 
     startConnection() {
         console.log("Connected to bluetooth");
-        this.emit("connected");
 
-        try {
-            noble.startScanning([], true);
-        } catch (error) {
-            console.error(`Error starting scanning:\n${error}`);
+        if (noble.state === "poweredOn") {
+            try {
+                noble.startScanning([], true);
+                this.emit("connected");
+                return true;
+            } catch (error) {
+                console.error(`Error starting scanning:\n${error}`);
+                return false;
+            }
+        } else {
+            console.error(`Error occurred while trying to start scanning: Bluetooth state is ${noble.state}`);
+            return false;
         }
     }
 
@@ -198,15 +205,25 @@ export default class Bluetooth extends EventEmitter {
     }
 
     stopConnection() {
-        console.log("(haritorax-interpreter) - Disconnected from bluetooth");
-        noble.stopScanning();
-        for (let device of activeDevices) {
-            device.disconnect();
+        try {
+            noble.stopScanning();
+            for (let device of activeDevices) {
+                device.disconnect();
+            }
+        } catch (err) {
+            console.error(
+                "(haritorax-interpreter) - Error while closing bluetooth connection: ",
+                err
+            );
+            return false;
         }
+        
         activeDevices = [];
         allowReconnect = false;
 
         this.emit("disconnected");
+        console.log("(haritorax-interpreter) - Disconnected from bluetooth");
+        return true;
     }
 
     getServices() {

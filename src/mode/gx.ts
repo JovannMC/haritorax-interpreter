@@ -124,13 +124,23 @@ export default class GX6 extends EventEmitter {
     }
 
     stopConnection() {
-        for (let port in activePorts) {
-            if (activePorts[port].isOpen) {
-                activePorts[port].close();
-                activePorts[port].destroy();
+        try {
+            for (let port in activePorts) {
+                if (activePorts[port].isOpen) {
+                    activePorts[port].close();
+                    activePorts[port].destroy();
+                }
             }
+        } catch (err) {
+            console.error(
+                "(haritorax-interpreter) - Error while closing serial ports: ",
+                err
+            );
+            return false;
         }
+
         this.emit("disconnected");
+        return true;
     }
 
     getTrackerAssignment() {
