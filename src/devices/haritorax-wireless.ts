@@ -8,8 +8,8 @@ import Bluetooth from "../mode/bluetooth.js";
 
 let debug = 0;
 
-const gx = new GX();
-const bluetooth = new Bluetooth();
+let gx: GX;
+let bluetooth: Bluetooth;
 let gxEnabled = false;
 let bluetoothEnabled = false;
 let haritora: HaritoraXWireless;
@@ -74,7 +74,7 @@ let activeDevices: string[] = [];
 
 /**
  * The "imu" event which provides info about the tracker's IMU data.
- * Support: GX6, Bluetooth
+ * Support: GX6, GX2, Bluetooth
  *
  * @event this#imu
  * @type {object}
@@ -93,7 +93,7 @@ let activeDevices: string[] = [];
 
 /**
  * The "tracker" event which provides info about the tracker's other data.
- * Support: GX6
+ * Support: GX6, GX2
  *
  * @event this#tracker
  * @type {object}
@@ -103,7 +103,7 @@ let activeDevices: string[] = [];
 
 /**
  * The "settings" event which provides info about the tracker settings. Does not support grabbing the data first reported by the tracker and only supports data set by setTrackerSettings() (was removed due to issues)
- * Support: GX6
+ * Support: GX6, GX2
  *
  * @event this#settings
  * @type {object}
@@ -116,7 +116,7 @@ let activeDevices: string[] = [];
 
 /**
  * The "button" event which provides info about the tracker's button data.
- * Support: GX6, Bluetooth (partial)
+ * Support: GX6, GX2, Bluetooth (partial)
  *
  * @event this#button
  * @type {object}
@@ -128,7 +128,7 @@ let activeDevices: string[] = [];
 
 /**
  * The "battery" event which provides info about the tracker's battery data.
- * Support: GX6, Bluetooth (partial)
+ * Support: GX6, GX2, Bluetooth (partial)
  *
  * @event this#battery
  * @type {object}
@@ -140,7 +140,7 @@ let activeDevices: string[] = [];
 
 /**
  * The "info" event which provides info about the tracker or dongle.
- * Support: GX6, Bluetooth
+ * Support: GX6, GX2, Bluetooth
  *
  * @event this#info
  * @type {object}
@@ -152,7 +152,7 @@ let activeDevices: string[] = [];
 
 /**
  * The "connect" event which provides the name of the tracker that has connected.
- * Support: GX6, Bluetooth
+ * Support: GX6, GX2, Bluetooth
  *
  * @event this#connect
  * @type {string}
@@ -161,7 +161,7 @@ let activeDevices: string[] = [];
 
 /**
  * The "disconnect" event which provides the name of the tracker that has disconnected.
- * Support: GX6, Bluetooth
+ * Support: GX6, GX2, Bluetooth
  *
  * @event this#disconnect
  * @type {string}
@@ -184,6 +184,7 @@ export default class HaritoraXWireless extends EventEmitter {
         super();
         debug = debugMode;
         haritora = this;
+        log(`Set debug mode for HaritoraXWireless: ${debug}`);
     }
 
     /**
@@ -196,22 +197,31 @@ export default class HaritoraXWireless extends EventEmitter {
      * @example
      * device.startConnection("gx");
      **/
-    startConnection(connectionMode: string, portNames?: string[]) {
+    async startConnection(connectionMode: string, portNames?: string[]) {
+        gx = new GX(debug);
+        bluetooth = new Bluetooth(debug);
+        listenToDeviceEvents();
+
         if (connectionMode === "gx") {
-            // gotta assume the user will actually provide valid ports, since I couldn't figure out how to return false if there's errors.
-            gx.startConnection(portNames);
-            gxEnabled = true;
-            return true;
-        } else if (connectionMode === "bluetooth") {
-            try {
-                bluetooth.startConnection();
-                bluetoothEnabled = true;
-            } catch (err) {
-                console.error(`Error starting bluetooth connection: ${err}`);
+            let connectionStarted = await gx.startConnection(portNames);
+            if (connectionStarted) {
+                gxEnabled = true;
+                return true;
+            } else {
+                error("Error starting GX connection");
                 return false;
             }
-            return true;
+        } else if (connectionMode === "bluetooth") {
+            let connectionStarted = await bluetooth.startConnection();
+            if (connectionStarted) {
+                bluetoothEnabled = true;
+                return true;
+            } else {
+                error("Error starting Bluetooth connection");
+                return false;
+            }
         }
+        error("Invalid connection mode");
         return false;
     }
 
@@ -224,22 +234,22 @@ export default class HaritoraXWireless extends EventEmitter {
      * device.stopConnection("gx");
      **/
     async stopConnection(connectionMode: string) {
-        if (connectionMode === "gx") {
+        if (connectionMode === "gx" && gxEnabled) {
             let connectionStopped = await gx.stopConnection();
             if (connectionStopped) {
                 gxEnabled = false;
                 return true;
             } else {
-                console.error("Error stopping GX6 connection");
+                error("Error stopping GX6 connection");
                 return false;
             }
-        } else if (connectionMode === "bluetooth") {
+        } else if (connectionMode === "bluetooth" && bluetoothEnabled) {
             let connectionStopped = await bluetooth.stopConnection();
             if (connectionStopped) {
                 bluetoothEnabled = false;
                 return true;
             } else {
-                console.error("Error stopping Bluetooth connection");
+                error("Error stopping Bluetooth connection");
                 return false;
             }
         }
@@ -249,7 +259,7 @@ export default class HaritoraXWireless extends EventEmitter {
 
     /**
      * Sets the tracker settings for a specific tracker.
-     * Support: GX6
+     * Support: GX6, GX2
      *
      * @param {string} trackerName - The name of the tracker to apply settings to (rightKnee, rightAnkle, hip, chest, leftKnee, leftAnkle, leftElbow, rightElbow).
      * @param {number} sensorMode - The sensor mode, which controls whether magnetometer is used (1 or 2).
@@ -284,8 +294,8 @@ export default class HaritoraXWireless extends EventEmitter {
         ];
 
         if (trackerName.startsWith("HaritoraX")) {
-            console.error(
-                "Setting tracker settings for bluetooth is not supported yet."
+            error(
+                "Setting tracker settings for Bluetooth is not supported yet."
             );
             return false;
         } else {
@@ -346,9 +356,8 @@ Raw hex data calculated to be sent: ${hexValue}`);
 
                 ports[trackerPort].write(trackerSettingsBuffer, (err) => {
                     if (err) {
-                        console.error(
-                            `${trackerName} - Error writing data to serial port ${trackerPort}:`,
-                            err
+                        error(
+                            `${trackerName} - Error writing data to serial port ${trackerPort}: ${err}`
                         );
                     } else {
                         trackerSettingsRaw.set(trackerName, hexValue);
@@ -358,9 +367,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
                     }
                 });
             } catch (error: any) {
-                console.error(
-                    `Error sending tracker settings:\n${error.message}`
-                );
+                error(`Error sending tracker settings:\n${error.message}`);
                 return false;
             }
         }
@@ -405,7 +412,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
 
     /**
      * Sets the tracker settings for all connected trackers
-     * Support: GX6
+     * Support: GX6, GX2
      *
      * @param {number} sensorMode - The sensor mode, which controls whether magnetometer is used (1 or 2).
      * @param {number} fpsMode - The posture data transfer rate/FPS (50 or 100).
@@ -459,9 +466,8 @@ Raw hex data calculated to be sent: ${hexValue}`);
 
                     ports[trackerPort].write(trackerSettingsBuffer, (err) => {
                         if (err) {
-                            console.error(
-                                `${trackerName} - Error writing data to serial port ${trackerPort}:`,
-                                err
+                            error(
+                                `${trackerName} - Error writing data to serial port ${trackerPort}: ${err}`
                             );
                         } else {
                             trackerSettingsRaw.set(trackerName, hexValue);
@@ -471,12 +477,12 @@ Raw hex data calculated to be sent: ${hexValue}`);
                         }
                     });
                 }
-            } catch (error) {
-                console.error(`Error sending tracker settings:\n ${error}`);
+            } catch (err) {
+                error(`Error sending tracker settings:\n ${err}`);
                 return false;
             }
         } else {
-            console.error("No connection mode is enabled");
+            error("No connection mode is enabled");
             return false;
         }
 
@@ -501,7 +507,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
 
     /**
      * Returns device info for the specified tracker or dongle.
-     * Support: GX6, Bluetooth
+     * Support: GX, Bluetooth
      *
      * @function getDeviceInfo
      * @returns {object} - The device info (version, model, serial)
@@ -509,7 +515,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
      **/
 
     async getDeviceInfo(trackerName: string) {
-        // GX6
+        // GX
         const VERSION_INDEX = 0;
         const MODEL_INDEX = 1;
         const SERIAL_INDEX = 2;
@@ -587,8 +593,8 @@ Raw hex data calculated to be sent: ${hexValue}`);
 
             try {
                 await Promise.all(readPromises);
-            } catch (error) {
-                console.error(error);
+            } catch (err) {
+                error(`Error getting device info for ${trackerName}: ${err}`);
             }
         }
 
@@ -599,7 +605,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
 
     /**
      * Get battery info from the trackers.
-     * Support: GX6, Bluetooth
+     * Support: GX6, GX2, Bluetooth
      *
      * @function getBatteryInfo
      * @returns {object} - The battery info (batteryRemaining, batteryVoltage, chargeStatus)
@@ -653,7 +659,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
 
                     batteryCharacteristic.read((err: any, data: any[]) => {
                         if (err) {
-                            console.error(
+                            error(
                                 `Error reading battery characteristic for ${trackerName}: ${err}`
                             );
                         } else {
@@ -672,17 +678,14 @@ Raw hex data calculated to be sent: ${hexValue}`);
                     });
                 }
             }
-        } catch (error) {
-            console.error(
-                `Error getting battery info for ${trackerName}:`,
-                error
-            );
+        } catch (err) {
+            error(`Error getting battery info for ${trackerName}: ${err}`);
         }
     }
 
     /**
      * Get the active trackers.
-     * Support: GX6, Bluetooth
+     * Support: GX6, GX2, Bluetooth
      *
      * @function getActiveTrackers
      * @returns {array} - The active trackers.
@@ -702,7 +705,7 @@ Raw hex data calculated to be sent: ${hexValue}`);
 
     /**
      * Get the tracker's settings.
-     * Support: GX6
+     * Support: GX6, GX2
      *
      * @function getTrackerSettings
      * @param {string} trackerName
@@ -732,18 +735,15 @@ Ankle motion detection: ${ankleMotionDetection}`);
                 log(`Tracker ${trackerName} settings not found`);
                 return null;
             }
-        } catch (error) {
-            console.error(
-                `Error getting tracker settings for ${trackerName}:`,
-                error
-            );
+        } catch (err) {
+            error(`Error getting tracker settings for ${trackerName}: ${err}`);
             return null;
         }
     }
 
     /**
      * Get the tracker's (raw hex) settings
-     * Support: GX6
+     * Support: GX6, GX2
      *
      * @function getTrackerSettingsRaw
      * @param {string} trackerName
@@ -759,18 +759,15 @@ Ankle motion detection: ${ankleMotionDetection}`);
                 log(`Tracker ${trackerName} raw hex settings not found`);
                 return null;
             }
-        } catch (error) {
-            console.error(
-                `Error getting tracker settings for ${trackerName}:`,
-                error
-            );
+        } catch (err) {
+            error(`Error getting tracker settings for ${trackerName}: ${err}`);
             return null;
         }
     }
 
     /**
      * Get the tracker's battery info.
-     * Support: GX6
+     * Support: GX6, GX2
      *
      * @function getTrackerBattery
      * @param {string} trackerName
@@ -793,18 +790,15 @@ Ankle motion detection: ${ankleMotionDetection}`);
                 log(`Tracker ${trackerName} battery info not found`);
                 return null;
             }
-        } catch (error) {
-            console.error(
-                `Error getting battery info for ${trackerName}:`,
-                error
-            );
+        } catch (err) {
+            error(`Error getting battery info for ${trackerName}: ${err}`);
             return null;
         }
     }
 
     /**
      * Get the tracker's buttons.
-     * Support: GX6, Bluetooth
+     * Support: GX6, GX2, Bluetooth
      *
      * @function getTrackerButtons
      * @param {string} trackerName
@@ -821,18 +815,15 @@ Ankle motion detection: ${ankleMotionDetection}`);
                 log(`Tracker ${trackerName} buttons not found`);
                 return null;
             }
-        } catch (error) {
-            console.error(
-                `Error getting tracker buttons for ${trackerName}:`,
-                error
-            );
+        } catch (err) {
+            error(`Error getting tracker buttons for ${trackerName}: ${err}`);
             return null;
         }
     }
 
     /**
      * Check whether the connection mode is active or not.
-     * Support: GX6, Bluetooth
+     * Support: GX6, GX2, Bluetooth
      *
      * @function getConnectionModeActive
      * @param {string} connectionMode
@@ -849,103 +840,115 @@ Ankle motion detection: ${ankleMotionDetection}`);
     }
 }
 
-gx.on(
-    "data",
-    (
-        trackerName: string,
-        port: string,
-        portId: string,
-        identifier: string,
-        portData: string
-    ) => {
-        switch (identifier[0]) {
-            case "x":
-                processIMUData(portData, trackerName);
-                break;
-            case "a":
-                processTrackerData(portData, trackerName);
-                break;
-            case "r":
-                processButtonData(portData, trackerName);
-                break;
-            case "v":
-                processBatteryData(portData, trackerName);
-                break;
-            case "o":
-                // Removed due to asynchronous issues (especially when firing multiple "setTrackerSettings()")
-                break;
-            case "i":
-                // Handled by GX6 class
-                break;
-            default:
-                log(`${port} - Unknown data from ${trackerName}: ${portData}`);
+function listenToDeviceEvents() {
+    gx.on(
+        "data",
+        (
+            trackerName: string,
+            port: string,
+            portId: string,
+            identifier: string,
+            portData: string
+        ) => {
+            switch (identifier[0]) {
+                case "x":
+                    processIMUData(portData, trackerName);
+                    break;
+                case "a":
+                    processTrackerData(portData, trackerName);
+                    break;
+                case "r":
+                    processButtonData(portData, trackerName);
+                    break;
+                case "v":
+                    processBatteryData(portData, trackerName);
+                    break;
+                case "o":
+                    // Removed due to asynchronous issues (especially when firing multiple "setTrackerSettings()")
+                    break;
+                case "i":
+                    // Handled by GX6 class
+                    break;
+                default:
+                    log(
+                        `${port} - Unknown data from ${trackerName}: ${portData}`
+                    );
+            }
         }
-    }
-);
+    );
 
-// TODO: magnetometer, add settings
-bluetooth.on(
-    "data",
-    (
-        localName: string,
-        service: string,
-        characteristic: string,
-        data: string
-    ) => {
-        if (service === "Device Information") return;
+    gx.on("log", (message: string) => {
+        log(message);
+    });
 
-        switch (characteristic) {
-            case "Sensor":
-                processIMUData(data, localName);
-                break;
-            case "MainButton":
-            case "SecondaryButton":
-                processButtonData(data, localName, characteristic);
-                break;
-            case "BatteryLevel":
-                processBatteryData(data, localName);
-                break;
-            case "Settings":
-                // TODO - Process settings data, probably will need to be manually read and set
-                //processTrackerSettings(data, localName);
-                break;
-            default:
-                log(
-                    `Unknown data from ${localName}: ${data} - ${characteristic} - ${service}`
-                );
-                log(
-                    `Data in utf-8: ${Buffer.from(data, "base64").toString(
-                        "utf-8"
-                    )}`
-                );
-                log(
-                    `Data in hex: ${Buffer.from(data, "base64").toString(
-                        "hex"
-                    )}`
-                );
-                log(
-                    `Data in base64: ${Buffer.from(data, "base64").toString(
-                        "base64"
-                    )}`
-                );
+    gx.on("logError", (message: string) => {
+        error(message);
+    });
+
+    // TODO: magnetometer, add settings
+    bluetooth.on(
+        "data",
+        (
+            localName: string,
+            service: string,
+            characteristic: string,
+            data: string
+        ) => {
+            if (service === "Device Information") return;
+
+            switch (characteristic) {
+                case "Sensor":
+                    processIMUData(data, localName);
+                    break;
+                case "MainButton":
+                case "SecondaryButton":
+                    processButtonData(data, localName, characteristic);
+                    break;
+                case "BatteryLevel":
+                    processBatteryData(data, localName);
+                    break;
+                case "Settings":
+                    // TODO - Process settings data, probably will need to be manually read and set
+                    //processTrackerSettings(data, localName);
+                    break;
+                default:
+                    log(
+                        `Unknown data from ${localName}: ${data} - ${characteristic} - ${service}`
+                    );
+                    log(
+                        `Data in utf-8: ${Buffer.from(data, "base64").toString(
+                            "utf-8"
+                        )}`
+                    );
+                    log(
+                        `Data in hex: ${Buffer.from(data, "base64").toString(
+                            "hex"
+                        )}`
+                    );
+                    log(
+                        `Data in base64: ${Buffer.from(data, "base64").toString(
+                            "base64"
+                        )}`
+                    );
+            }
         }
-    }
-);
+    );
 
-bluetooth.on("connect", (peripheral) => {
-    haritora.emit("connect", peripheral.advertisement.localName);
-    log(`Connected to ${peripheral.advertisement.localName}`);
-});
+    bluetooth.on("connect", (peripheral) => {
+        haritora.emit("connect", peripheral.advertisement.localName);
+        log(`Connected to ${peripheral.advertisement.localName}`);
+    });
 
-bluetooth.on("disconnect", (peripheral) => {
-    haritora.emit("disconnect", peripheral.advertisement.localName);
-    log(`Disconnected from ${peripheral.advertisement.localName}`);
-});
+    bluetooth.on("disconnect", (peripheral) => {
+        haritora.emit("disconnect", peripheral.advertisement.localName);
+        log(`Disconnected from ${peripheral.advertisement.localName}`);
+    });
+}
 
 /**
  * Processes the IMU data received from the tracker by the dongle.
  * The data contains the information about the rotation, gravity, and ankle motion (if enabled) of the tracker.
- * Support: GX6, Bluetooth
+ * Support: GX6, GX2, Bluetooth
  *
  * @function processIMUData
  *
@@ -962,8 +965,8 @@ function processIMUData(data: string, trackerName: string) {
     }
 
     // Check if the data is valid
-    if (!data || data.length !== 24) {
-        console.error(`Invalid IMU packet for tracker ${trackerName}: ${data}`);
+    if (!data || data.length < 14) {
+        error(`Invalid IMU packet for tracker ${trackerName}: ${data}`);
         return false;
     }
 
@@ -987,10 +990,7 @@ function processIMUData(data: string, trackerName: string) {
 
         haritora.emit("imu", trackerName, rotation, gravity, ankle);
     } catch (err) {
-        console.error(
-            `Error decoding tracker ${trackerName} IMU packet data:`,
-            err
-        );
+        error(`Error decoding tracker ${trackerName} IMU packet data: ${err}`);
     }
 }
 
@@ -1211,7 +1211,7 @@ function calculateRotationDifference(
 /**
  * Processes other tracker data received from the tracker by the dongle.
  * Read function comments for more information.
- * Support: GX6
+ * Support: GX6, GX2
  *
  * @function processTrackerData
  * @param {string} data - The data to process.
@@ -1241,7 +1241,7 @@ function processTrackerData(data: string, trackerName: string) {
 /**
  * Processes the button data received from the tracker by the dongle.
  * The data contains the information about the main and sub buttons on the tracker.
- * Support: GX6, Bluetooth
+ * Support: GX6, GX2, Bluetooth
  *
  * @function processButtonData
  * @param {string} data - The data to process.
@@ -1292,9 +1292,7 @@ function processButtonData(
             }
         }
     } catch (err) {
-        console.error(
-            `Error processing button data for ${trackerName}: ${err}`
-        );
+        error(`Error processing button data for ${trackerName}: ${err}`);
         return false;
     }
 
@@ -1319,7 +1317,7 @@ function processButtonData(
 /**
  * Processes the battery data received from the tracker by the dongle.
  * It contains the information about the battery percentage, voltage, and charge status of the tracker.
- * Support: GX6, Bluetooth (partial)
+ * Support: GX6, GX2, Bluetooth (partial)
  *
  * @function processBatteryData
  * @param {string} data - The data to process.
@@ -1347,7 +1345,7 @@ function processBatteryData(data: string, trackerName: string) {
                 `Tracker ${trackerName} battery remaining: ${batteryData[BATTERY_REMAINING_INDEX]}%`
             );
         } catch {
-            console.error(
+            error(
                 `Error converting battery data to hex for ${trackerName}: ${data}`
             );
         }
@@ -1368,9 +1366,7 @@ function processBatteryData(data: string, trackerName: string) {
             batteryData[BATTERY_VOLTAGE_INDEX] = batteryInfo["battery voltage"];
             batteryData[CHARGE_STATUS_INDEX] = batteryInfo["charge status"];
         } catch (err) {
-            console.error(
-                `Error parsing battery data JSON for ${trackerName}: ${err}`
-            );
+            error(`Error parsing battery data JSON for ${trackerName}: ${err}`);
         }
     }
 
@@ -1379,14 +1375,38 @@ function processBatteryData(data: string, trackerName: string) {
 }
 
 function log(message: string) {
+    let emittedMessage = undefined;
     if (debug === 1) {
-        console.log(message);
+        emittedMessage = `(haritorax-interpreter) - ${message}`;
+        console.log(emittedMessage);
+        haritora.emit("log", emittedMessage);
     } else if (debug === 2) {
         const stack = new Error().stack;
         const callerLine = stack.split("\n")[2];
         const callerName = callerLine.match(/at (\S+)/)[1];
         const lineNumber = callerLine.match(/:(\d+):/)[1];
-        console.log(`${callerName} (line ${lineNumber}) || ${message}`);
+
+        emittedMessage = `(haritorax-interpreter) - ${callerName} (line ${lineNumber}) || ${message}`;
+        console.log(emittedMessage);
+        haritora.emit("log", emittedMessage);
+    }
+}
+
+function error(message: string) {
+    let emittedError = undefined;
+    if (debug === 1) {
+        emittedError = `(haritorax-interpreter) - ${message}`;
+        console.error(emittedError);
+    haritora.emit("logError", emittedError);
+    } else if (debug === 2) {
+        const stack = new Error().stack;
+        const callerLine = stack.split("\n")[2];
+        const callerName = callerLine.match(/at (\S+)/)[1];
+        const lineNumber = callerLine.match(/:(\d+):/)[1];
+
+        emittedError = `(haritorax-interpreter) - ${callerName} (line ${lineNumber}) || ${message}`;
+        console.error(emittedError);
+        haritora.emit("logError", emittedError);
     }
 }
 

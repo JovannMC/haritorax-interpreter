@@ -3,6 +3,9 @@
 import { SerialPort, ReadlineParser } from "serialport";
 import { EventEmitter } from "events";
 
+let gx: GX = undefined;
+let debug = 0;
+
 const BAUD_RATE = 500000; // from the haritora_setting.json in the HaritoraConfigurator
 
 const trackerAssignment = new Map([
@@ -35,17 +38,32 @@ const deviceInformation = new Map([
 let activePorts: ActivePorts = {};
 let trackersAssigned = false;
 
-export default class GX6 extends EventEmitter {
-    constructor() {
+export default class GX extends EventEmitter {
+    constructor(debugMode = 0) {
         super();
+        debug = debugMode;
+        gx = this;
+        console.log(`(haritorax-interpreter) - Debug mode for GX: ${debug}`);
     }
 
     startConnection(portNames: string[]) {
         portNames.forEach((port) => {
-            const serial = new SerialPort({
-                path: port,
-                baudRate: BAUD_RATE,
-            });
+            let serial = undefined;
+            try {
+                serial = new SerialPort({
+                    path: port,
+                    baudRate: BAUD_RATE,
+                });
+
+                serial.on("error", (err) => {
+                    error(`Error while opening serial port: ${err}`);
+                    return false;
+                });
+            } catch (err) {
+                error("Unexpected error: ${err}");
+                return false;
+            }
+
             const parser = serial.pipe(new ReadlineParser({ delimiter: "\n" }));
             activePorts[port] = serial;
 
@@ -72,8 +90,8 @@ export default class GX6 extends EventEmitter {
                                         port,
                                         portId,
                                     ]);
-                                    console.log(
-                                        `(haritorax-interpreter) - Setting ${key} to port ${port} with port ID ${portId}`
+                                    log(
+                                        ` Setting ${key} to port ${port} with port ID ${portId}`
                                     );
                                 }
                             } else if (identifier.startsWith("i")) {
@@ -97,9 +115,10 @@ export default class GX6 extends EventEmitter {
                         )
                     ) {
                         trackersAssigned = true;
-                        console.log(
-                            "(haritorax-interpreter) - All trackers have been assigned: ",
-                            Array.from(trackerAssignment.entries())
+                        log(
+                            `All trackers have been assigned: ${Array.from(
+                                trackerAssignment.entries()
+                            )}`
                         );
                     }
                 }
@@ -126,6 +145,7 @@ export default class GX6 extends EventEmitter {
                 this.emit("disconnected", port);
             });
         });
+        return true;
     }
 
     stopConnection() {
@@ -137,10 +157,7 @@ export default class GX6 extends EventEmitter {
                 }
             }
         } catch (err) {
-            console.error(
-                "(haritorax-interpreter) - Error while closing serial ports: ",
-                err
-            );
+            error(`Error while closing serial ports: ${err}`);
             return false;
         }
 
@@ -206,6 +223,18 @@ export default class GX6 extends EventEmitter {
 }
 
 /*
+ * Helper functions
+ */
+
+function log(message: string) {
+    gx.emit("log", message);
+}
+
+function error(message: string) {
+    gx.emit("logError", message);
+}
+
+/*
  * Typescript type definitions
  */
 
@@ -213,4 +242,4 @@ interface ActivePorts {
     [key: string]: SerialPort;
 }
 
-export { GX6 };
+export { GX };

@@ -24,12 +24,12 @@ if (mode === "bt" || mode === "bluetooth") {
 
     device.on("connect", (trackerName) => {
         console.log(`Connected to tracker ${trackerName}`);
-        console.log(`Active trackers for GX6:`, device.getActiveTrackers());
+        console.log(`Active trackers for GX:`, device.getActiveTrackers());
     });
 
     setInterval(async () => {
         try {
-            console.log("Active trackers for GX6:", device.getActiveTrackers());
+            console.log("Active trackers for GX:", device.getActiveTrackers());
             console.log("Device info:", await device.getDeviceInfo("rightAnkle"));
             console.log("Device battery:", await device.getBatteryInfo("rightAnkle"));
         } catch (error) {

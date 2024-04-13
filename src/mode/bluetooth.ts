@@ -3,6 +3,9 @@
 import noble from "@abandonware/noble";
 import { EventEmitter } from "events";
 
+let bluetooth: Bluetooth = undefined;
+let debug = 0;
+
 const services = new Map([
     ["1800", "Generic Access"],
     ["1801", "Generic Attribute"],
@@ -45,30 +48,40 @@ let activeCharacteristics: any[] = [];
 let allowReconnect = true;
 
 export default class Bluetooth extends EventEmitter {
-    constructor() {
+    constructor(debugMode = 0) {
         super();
         noble.on("discover", this.onDiscover.bind(this));
+        debug = debugMode;
+        bluetooth = this;
+        console.log(`(haritorax-interpreter) - Debug mode for BT: ${debug}`);
     }
 
     startConnection() {
-        console.log("(haritorax-interpreter) - Connected to bluetooth");
+        log("Connected to bluetooth");
 
         if (noble.state === "poweredOn") {
             try {
                 noble.startScanning([], true);
                 this.emit("connected");
                 return true;
-            } catch (error) {
-                console.error(
-                    `(haritorax-interpreter) - Error starting scanning of BT devices:\n${error}`
-                );
+            } catch (err) {
+                error(`Error starting scanning of BT devices:\n${err}`);
                 return false;
             }
         } else {
-            console.error(
-                `(haritorax-interpreter) - Error occurred while trying to start scanning: Bluetooth state is ${noble.state}`
-            );
-            return false;
+            noble.on("stateChange", (state) => {
+                if (state === "poweredOn") {
+                    try {
+                        noble.startScanning([], true);
+                        this.emit("connected");
+                        return true;
+                    } catch (err) {
+                        error(`Error starting scanning of BT devices:\n${err}`);
+                        return false;
+                    }
+                }
+            });
+            return true;
         }
     }
 
@@ -86,38 +99,30 @@ export default class Bluetooth extends EventEmitter {
             localName.startsWith("HaritoraX") &&
             !activeDevices.includes(peripheral)
         ) {
-            console.log(`(haritorax-interpreter) - Found device: ${localName}`);
+            log(`Found device: ${localName}`);
             // I do not have any device other than the wireless device, so I cannot test this
             if (localName.startsWith("HaritoraX-"))
-                console.log(
-                    "(haritorax-interpreter) - HaritoraX (1.0/1.1/1.1b) detected. Device is not fully supported and you may experience issues."
+                log(
+                    "HaritoraX (1.0/1.1/1.1b) detected. Device is not fully supported and you may experience issues."
                 );
             activeDevices.push(peripheral);
 
-            peripheral.connect((error: any) => {
-                if (error) {
-                    console.error(
-                        `(haritorax-interpreter) - Error connecting to ${localName}:`,
-                        error
-                    );
+            peripheral.connect((err: any) => {
+                if (err) {
+                    error(`Error connecting to ${localName}: ${err}`);
                     return;
                 }
-                console.log(
-                    `(haritorax-interpreter) - Connected to ${localName}`
-                );
+                log(`Connected to ${localName}`);
                 this.emit("connect", peripheral);
 
                 peripheral.discoverServices(
                     null,
-                    (error: any, services: any[]) => {
-                        if (error) {
-                            console.error(
-                                "(haritorax-interpreter) - Error discovering services:",
-                                error
-                            );
+                    (err: any, services: any[]) => {
+                        if (err) {
+                            error(`Error discovering services: ${err}`);
                             return;
                         }
-                        //console.log("(haritorax-interpreter) - Discovered services:", services);
+                        //log("Discovered services:", services);
 
                         services.forEach(
                             (service: {
@@ -133,15 +138,14 @@ export default class Bluetooth extends EventEmitter {
                                 activeServices.push(service);
                                 service.discoverCharacteristics(
                                     [],
-                                    (error: any, characteristics: any[]) => {
-                                        if (error) {
-                                            console.error(
-                                                `(haritorax-interpreter) - Error discovering characteristics of service ${service.uuid}:`,
-                                                error
+                                    (err: any, characteristics: any[]) => {
+                                        if (err) {
+                                            error(
+                                                `Error discovering characteristics of service ${service.uuid}: ${err}`
                                             );
                                             return;
                                         }
-                                        //console.log(`(haritorax-interpreter) - Discovered characteristics of service ${service.uuid}:`, characteristics);
+                                        //log(`Discovered characteristics of service ${service.uuid}:`, characteristics);
 
                                         characteristics.forEach(
                                             (characteristic: {
@@ -151,7 +155,7 @@ export default class Bluetooth extends EventEmitter {
                                                 ) => void;
                                                 uuid: any;
                                                 subscribe: (
-                                                    arg0: (error: any) => void
+                                                    arg0: (err: any) => void
                                                 ) => void;
                                             }) => {
                                                 activeCharacteristics.push(
@@ -170,11 +174,10 @@ export default class Bluetooth extends EventEmitter {
                                                     }
                                                 );
                                                 characteristic.subscribe(
-                                                    (error: any) => {
-                                                        if (error) {
-                                                            console.error(
-                                                                `(haritorax-interpreter) - Error subscribing to characteristic ${characteristic.uuid} of service ${service.uuid}:`,
-                                                                error
+                                                    (err: any) => {
+                                                        if (err) {
+                                                            error(
+                                                                `Error subscribing to characteristic ${characteristic.uuid} of service ${service.uuid}: ${err}`
                                                             );
                                                         }
                                                     }
@@ -191,9 +194,7 @@ export default class Bluetooth extends EventEmitter {
 
             peripheral.on("disconnect", () => {
                 if (!allowReconnect) return;
-                console.log(
-                    `(haritorax-interpreter) - Disconnected from ${localName}`
-                );
+                log(`Disconnected from ${localName}`);
                 this.emit("disconnect", peripheral);
                 const index = activeDevices.indexOf(peripheral);
                 if (index !== -1) {
@@ -215,10 +216,7 @@ export default class Bluetooth extends EventEmitter {
                 device.disconnect();
             }
         } catch (err) {
-            console.error(
-                "(haritorax-interpreter) - Error while closing bluetooth connection: ",
-                err
-            );
+            error(`Error while closing bluetooth connection: ${err}`);
             return false;
         }
 
@@ -226,7 +224,7 @@ export default class Bluetooth extends EventEmitter {
         allowReconnect = false;
 
         this.emit("disconnected");
-        console.log("(haritorax-interpreter) - Disconnected from bluetooth");
+        log("Disconnected from bluetooth");
         return true;
     }
 
@@ -282,6 +280,18 @@ function emitData(
         characteristics.get(characteristic),
         data
     );
+}
+
+/*
+ * Helper functions
+ */
+
+function log(message: string) {
+    bluetooth.emit("log", message);
+}
+
+function error(message: string) {
+    bluetooth.emit("logError", message);
 }
 
 export { Bluetooth };

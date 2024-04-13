@@ -10,7 +10,7 @@
   "description": "Communicate with the HaritoraX trackers",
   "main": "./dist/index.js",
   "scripts": {
-    "start": "node ./test/test.js",
+    "start": "npm run build && node ./test/test.js",
     "build": "tsc && tsc -d"
   },
   "author": "JovannMC <jovannmc@femboyfurry.net> (https://femboyfurry.net)",
