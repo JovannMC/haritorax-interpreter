@@ -366,8 +366,8 @@ Raw hex data calculated to be sent: ${hexValue}`);
                         );
                     }
                 });
-            } catch (error: any) {
-                error(`Error sending tracker settings:\n${error.message}`);
+            } catch (err) {
+                error(`Error sending tracker settings:\n${err}`);
                 return false;
             }
         }
