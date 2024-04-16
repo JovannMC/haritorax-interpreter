@@ -15,6 +15,7 @@ if (mode === "bt" || mode === "bluetooth") {
             console.log("Active trackers for BT:", device.getActiveTrackers());
             console.log("Device info:", await device.getDeviceInfo("HaritoraXW-(SERIAL)"));
             console.log("Device battery:", await device.getBatteryInfo("HaritoraXW-(SERIAL)"));
+            console.log("Device settings:", await device.getTrackerSettings("HaritoraXW-(SERIAL)"));
         } catch (error) {
             console.error("Error getting device data:", error);
         }
@@ -42,7 +43,7 @@ if (mode === "bt" || mode === "bluetooth") {
         console.log(`Tracker settings map:`, device.getTrackerSettings("rightAnkle"));
         console.log(`Tracker raw hex settings map:`, device.getTrackerSettingsRaw("rightAnkle"));
         console.log(`Tracker buttons map:`, device.getTrackerButtons("rightAnkle"));
-        console.log(`Tracker battery map:`, device.getTrackerBattery("rightAnkle"));
+        console.log(`Tracker battery map:`, device.getBatteryInfo("rightAnkle"));
     }, 5000);
 
     /*setTimeout(() => {

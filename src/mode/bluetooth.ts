@@ -136,7 +136,6 @@ export default class Bluetooth extends EventEmitter {
                             }) => {
                                 //log(`Discovered service ${service.uuid}`);
                                 activeServices.push(service);
-                                this.emit("serviceDiscovered", service.uuid);
                                 service.discoverCharacteristics(
                                     [],
                                     (err: any, characteristics: any[]) => {
@@ -158,12 +157,9 @@ export default class Bluetooth extends EventEmitter {
                                                     arg0: (err: any) => void
                                                 ) => void;
                                             }) => {
+                                                //log(`Discovered characteristic: ${characteristic.uuid}`);
                                                 activeCharacteristics.push(
                                                     characteristic
-                                                );
-                                                this.emit(
-                                                    "characteristicDiscovered",
-                                                    characteristic.uuid
                                                 );
                                                 characteristic.on(
                                                     "data",
@@ -232,23 +228,24 @@ export default class Bluetooth extends EventEmitter {
         return true;
     }
 
-    read(
+    async read(
         localName: any,
         service: string,
-        characteristic: string,
-        callback: (error: any, data: any) => void
-    ) {
-        log(
-            `Active services: ${activeServices
-                .map((s: { uuid: string }) => s.uuid)
-                .join(", ")}`
-        );
+        characteristic: string
+    ): Promise<any> {
+        while (!(await areAllBLEDiscovered())) {
+            log(
+                "Waiting for all services and characteristics to be discovered..."
+            );
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+
         log(`Reading characteristic ${characteristic} of service ${service}`);
+
         const device = this.getDeviceInfo(localName);
         if (!device) {
             error(`Device ${localName} not found`);
-            callback(new Error(`Device ${localName} not found`), null);
-            return;
+            throw new Error(`Device ${localName} not found`);
         }
 
         const serviceInstance = activeServices.find(
@@ -256,8 +253,7 @@ export default class Bluetooth extends EventEmitter {
         );
         if (!serviceInstance) {
             error(`Service ${service} not found`);
-            callback(new Error(`Service ${service} not found`), null);
-            return;
+            throw new Error(`Service ${service} not found`);
         }
 
         const characteristicInstance = activeCharacteristics.find(
@@ -265,22 +261,22 @@ export default class Bluetooth extends EventEmitter {
         );
         if (!characteristicInstance) {
             error(`Characteristic ${characteristic} not found`);
-            callback(
-                new Error(`Characteristic ${characteristic} not found`),
-                null
-            );
-            return;
+            throw new Error(`Characteristic ${characteristic} not found`);
         }
 
-        characteristicInstance.read((err: any, data: any) => {
-            if (err) {
-                error(`Error reading characteristic ${characteristic}: ${err}`);
-                callback(err, null);
-                return;
-            }
+        return new Promise((resolve, reject) => {
+            characteristicInstance.read((err: any, data: any) => {
+                const characteristicName = characteristics.get(characteristic);
+                if (err) {
+                    error(`Error reading characteristic ${characteristicName}: ${err}`);
+                    reject(err);
+                    return;
+                }
 
-            log(`Read data from characteristic ${characteristic}`);
-            callback(null, data);
+                const buffer = new Uint8Array(data).buffer;
+
+                resolve(buffer);
+            });
         });
     }
 
@@ -290,68 +286,50 @@ export default class Bluetooth extends EventEmitter {
         characteristic: string,
         data: any
     ): Promise<void> {
-        return new Promise((resolve, reject) => {
-            const device = this.getDeviceInfo(localName);
-            if (!device) {
-                error(`Device ${localName} not found`);
-                reject(new Error(`Device ${localName} not found`));
-                return;
-            }
+        while (!(await areAllBLEDiscovered())) {
+            log(
+                "Waiting for all services and characteristics to be discovered..."
+            );
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
 
-            device.discoverServices([], (err: any, services: any) => {
+        log(
+            `Writing to characteristic ${characteristic} of service ${service}`
+        );
+        const device = this.getDeviceInfo(localName);
+        if (!device) {
+            error(`Device ${localName} not found`);
+            throw new Error(`Device ${localName} not found`);
+        }
+
+        const serviceInstance = activeServices.find(
+            (s: { uuid: string }) => s.uuid === service
+        );
+        if (!serviceInstance) {
+            error(`Service ${service} not found`);
+            throw new Error(`Service ${service} not found`);
+        }
+
+        const characteristicInstance = activeCharacteristics.find(
+            (c: { uuid: string }) => c.uuid === characteristic
+        );
+        if (!characteristicInstance) {
+            error(`Characteristic ${characteristic} not found`);
+            throw new Error(`Characteristic ${characteristic} not found`);
+        }
+
+        return new Promise((resolve, reject) => {
+            characteristicInstance.write(data, false, (err: any) => {
                 if (err) {
-                    error(`Error discovering services: ${err}`);
+                    error(
+                        `Error writing to characteristic ${characteristic}: ${err}`
+                    );
                     reject(err);
                     return;
                 }
 
-                const serviceInstance = services.find(
-                    (s: { uuid: string }) => s.uuid === service
-                );
-                if (!serviceInstance) {
-                    error(`Service ${service} not found`);
-                    reject(new Error(`Service ${service} not found`));
-                    return;
-                }
-                log(`Service instance: ${serviceInstance}`);
-                serviceInstance.discoverCharacteristics(
-                    [],
-                    (err: any, characteristics: any) => {
-                        if (err) {
-                            error(`Error discovering characteristics: ${err}`);
-                            reject(err);
-                            return;
-                        }
-
-                        const characteristicInstance = characteristics.find(
-                            (c: { uuid: string }) => c.uuid === characteristic
-                        );
-                        if (!characteristicInstance) {
-                            error(`Characteristic ${characteristic} not found`);
-                            reject(
-                                new Error(
-                                    `Characteristic ${characteristic} not found`
-                                )
-                            );
-                            return;
-                        }
-
-                        characteristicInstance.write(
-                            data,
-                            false,
-                            (err: any) => {
-                                if (err) {
-                                    error(
-                                        `Error writing to characteristic ${characteristic}: ${err}`
-                                    );
-                                    reject(err);
-                                    return;
-                                }
-                                resolve();
-                            }
-                        );
-                    }
-                );
+                log(`Wrote data to characteristic ${characteristic}`);
+                resolve();
             });
         });
     }
@@ -411,6 +389,41 @@ export default class Bluetooth extends EventEmitter {
         return null;
     }
 }
+
+const importantServices = ["ef84369a90a911eda1eb0242ac120002", "180f"];
+const importantCharacteristics = [
+    "2a19",
+    "ef84420290a911eda1eb0242ac120002",
+    "ef8443f690a911eda1eb0242ac120002",
+    "ef8445c290a911eda1eb0242ac120002",
+    "ef84c30090a911eda1eb0242ac120002",
+    "ef84c30590a911eda1eb0242ac120002",
+];
+
+async function areAllBLEDiscovered(): Promise<boolean> {
+    for (const serviceUuid of importantServices) {
+        if (
+            !activeServices.find((service: any) => service.uuid === serviceUuid)
+        ) {
+            return false;
+        }
+    }
+
+    for (const characteristicUuid of importantCharacteristics) {
+        if (
+            !activeCharacteristics.find(
+                (characteristic: any) =>
+                    characteristic.uuid === characteristicUuid
+            )
+        ) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Proceed with the read or write operation
 
 function emitData(
     classInstance: Bluetooth,
