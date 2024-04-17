@@ -506,7 +506,7 @@ export default class HaritoraXWireless extends EventEmitter {
      * trackers.setAllTrackerSettings(2, 50, ['mag'], false);
      **/
 
-    setAllTrackerSettings(
+    async setAllTrackerSettings(
         sensorMode: number,
         fpsMode: number,
         sensorAutoCorrection: string[],
@@ -565,9 +565,18 @@ export default class HaritoraXWireless extends EventEmitter {
                 error(`Error sending tracker settings:\n ${err}`);
                 return false;
             }
-        } else {
-            error("No connection mode is enabled");
-            return false;
+        }
+
+        if (bluetoothEnabled) {
+            for (let trackerName of bluetooth.getActiveTrackers()) {
+                await this.setTrackerSettings(
+                    trackerName,
+                    sensorMode,
+                    fpsMode,
+                    sensorAutoCorrection,
+                    ankleMotionDetection
+                );
+            }
         }
 
         for (let trackerName of trackerSettingsRaw.keys()) {
