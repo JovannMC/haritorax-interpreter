@@ -296,9 +296,22 @@ export default class HaritoraXWireless extends EventEmitter {
         sensorAutoCorrection: string[],
         ankleMotionDetection: boolean
     ) {
-        // !
-        // TODO: fix left knee setting for chest, right knee setting for hip (this is making me go crazy)
-        // TODO: probably see if you can submit settings one by one (`o0:data` instead of `o0:data o1:data`)
+        // ! fix left knee setting for chest, right knee setting for hip (this is making me go insane, i think there's just a legit limitation. thanks shiftall!)
+        // elbows untested, might not work
+        const TRACKERS_GROUP_ONE = [
+            "rightAnkle",
+            "rightKnee",
+            "leftAnkle",
+            "leftElbow",
+        ];
+        const TRACKERS_GROUP_TWO = [
+            "hip",
+            "chest",
+            "leftKnee",
+            "rightElbow",
+        ];
+
+        log(gx.getTrackerAssignment().toString());
 
         let sensorAutoCorrectionBit = 0;
         if (sensorAutoCorrection.includes("accel"))
@@ -308,7 +321,9 @@ export default class HaritoraXWireless extends EventEmitter {
         if (sensorAutoCorrection.includes("mag"))
             sensorAutoCorrectionBit |= 0x04;
 
+        log(`Setting tracker settings for ${trackerName}...`);
         if (trackerName.startsWith("HaritoraX")) {
+            // Bluetooth
             let sensorModeData;
             if (sensorMode === 1) sensorModeData = 5;
             else sensorModeData = 8;
@@ -380,7 +395,7 @@ export default class HaritoraXWireless extends EventEmitter {
 
             return true;
         } else {
-            log(`Setting tracker settings for ${trackerName}...`);
+            // GX dongle(s)
             const sensorModeBit =
                 sensorMode === 1 ? SENSOR_MODE_1 : SENSOR_MODE_2; // Default to mode 2
             const postureDataRateBit =
@@ -388,11 +403,24 @@ export default class HaritoraXWireless extends EventEmitter {
             const ankleMotionDetectionBit = ankleMotionDetection ? 1 : 0; // Default to false
 
             let hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
+            let trackerSettingsBuffer = undefined;
 
-            let trackerSettingsBuffer = this.generateTrackerSettingsBuffer(
-                trackerName,
-                hexValue
-            );
+            if (TRACKERS_GROUP_ONE.includes(trackerName)) {
+                trackerSettingsBuffer = this.getTrackerSettingsBuffer(
+                    trackerName,
+                    hexValue,
+                    1
+                );
+            } else if (TRACKERS_GROUP_TWO.includes(trackerName)) {
+                trackerSettingsBuffer = this.getTrackerSettingsBuffer(
+                    trackerName,
+                    hexValue,
+                    -1
+                );
+            } else {
+                log(`Invalid tracker name: ${trackerName}`);
+                return;
+            }
 
             log(`Setting the following settings onto tracker ${trackerName}:`);
             log(`Sensor mode: ${sensorMode}`);
@@ -436,32 +464,36 @@ export default class HaritoraXWireless extends EventEmitter {
         return true;
     }
 
-    generateTrackerSettingsBuffer(
+    getTrackerSettingsBuffer(
         trackerName: string,
-        hexValue: string
-    ): Buffer {
-        let trackerPort: string = gx.getTrackerPort(trackerName);
-        let otherTrackerId: string =
-            gx.getTrackerPortId(trackerName) === 0 ? "1" : "0";
-        let otherTrackerName: string = gx.getPartFromInfo(
-            trackerPort,
-            otherTrackerId
-        );
-        let otherHexValue: string = trackerSettingsRaw.get(otherTrackerName);
+        hexValue: string,
+        direction: number
+    ) {
+        const entries = Array.from(trackerSettingsRaw.entries());
+        const currentIndex = entries.findIndex(([key]) => key === trackerName);
 
-        let trackerSettingsString: string;
-        if (gx.getTrackerPortId(trackerName) === 0) {
-            trackerSettingsString = `o0:${hexValue}\r\no1:${otherHexValue}`;
-        } else {
-            trackerSettingsString = `o0:${otherHexValue}\r\no1:${hexValue}`;
+        if (
+            currentIndex !== -1 &&
+            currentIndex + direction >= 0 &&
+            currentIndex + direction < entries.length
+        ) {
+            const adjacentKey = entries[currentIndex + direction][0];
+            let adjacentValue = trackerSettingsRaw.get(adjacentKey);
+            return Buffer.from(
+                `o0:${direction === 1 ? hexValue : adjacentValue}\r\no1:${
+                    direction === 1 ? adjacentValue : hexValue
+                }\r\n`,
+                "utf-8"
+            );
         }
 
-        return Buffer.from(trackerSettingsString, "utf-8");
+        log(`${trackerName} - Calculated hex value: ${hexValue}`);
+        return null;
     }
 
     /**
      * Sets the tracker settings for all connected trackers
-     * Support: GX6, GX2
+     * Support: GX6, GX2, Bluetooth
      *
      * @param {number} sensorMode - The sensor mode, which controls whether magnetometer is used (1 or 2).
      * @param {number} fpsMode - The posture data transfer rate/FPS (50 or 100).
@@ -480,6 +512,7 @@ export default class HaritoraXWireless extends EventEmitter {
         sensorAutoCorrection: string[],
         ankleMotionDetection: boolean
     ) {
+        // TODO: add bt
         if (gxEnabled) {
             try {
                 const sensorModeBit =
@@ -501,7 +534,9 @@ export default class HaritoraXWireless extends EventEmitter {
                     "utf-8"
                 );
 
-                log(`Setting the following settings onto all connected trackers:`);
+                log(
+                    `Setting the following settings onto all connected trackers:`
+                );
                 log(`Connected trackers: ${activeDevices}`);
                 log(`Sensor mode: ${sensorMode}`);
                 log(`FPS mode: ${fpsMode}`);
@@ -940,8 +975,7 @@ function listenToDeviceEvents() {
                     processBatteryData(portData, trackerName);
                     break;
                 case "o":
-                    // ! readd process settings
-                    // Removed due to asynchronous issues (especially when firing multiple "setTrackerSettings()")
+                    // Let the person set the tracker settings manually
                     break;
                 case "i":
                     // Handled by GX6 class
@@ -1345,7 +1379,7 @@ function processTrackerData(data: string, trackerName: string) {
             activeDevices.splice(activeDevices.indexOf(trackerName), 1);
         haritora.emit("disconnect", trackerName);
     } else {
-        log(`Tracker ${trackerName} other data processed: ${data}`);
+        //log(`Tracker ${trackerName} other data processed: ${data}`);
     }
 
     // TODO - Find out what "other data" represents, then add to emitted event.
