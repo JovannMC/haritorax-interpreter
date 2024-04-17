@@ -304,12 +304,7 @@ export default class HaritoraXWireless extends EventEmitter {
             "leftAnkle",
             "leftElbow",
         ];
-        const TRACKERS_GROUP_TWO = [
-            "hip",
-            "chest",
-            "leftKnee",
-            "rightElbow",
-        ];
+        const TRACKERS_GROUP_TWO = ["hip", "chest", "leftKnee", "rightElbow"];
 
         log(gx.getTrackerAssignment().toString());
 
@@ -332,7 +327,6 @@ export default class HaritoraXWireless extends EventEmitter {
             const sensorModeValue = new DataView(
                 sensorModeBuffer.buffer
             ).getInt8(0);
-            log(`Sending sensor mode to ${trackerName}: ${sensorModeValue}`);
             await bluetooth.write(
                 trackerName,
                 settingsService,
@@ -342,7 +336,6 @@ export default class HaritoraXWireless extends EventEmitter {
 
             const fpsModeBuffer = Buffer.from([fpsMode === 50 ? 1 : 2]);
             const fpsModeValue = new DataView(fpsModeBuffer.buffer).getInt8(0);
-            log(`Sending FPS mode to ${trackerName}: ${fpsModeValue}`);
             await bluetooth.write(
                 trackerName,
                 settingsService,
@@ -358,9 +351,6 @@ export default class HaritoraXWireless extends EventEmitter {
             const correctionValue = new DataView(
                 correctionBuffer.buffer
             ).getInt8(0);
-            log(
-                `Sending sensor auto correction to ${trackerName}: ${correctionValue}`
-            );
             await bluetooth.write(
                 trackerName,
                 settingsService,
@@ -370,9 +360,6 @@ export default class HaritoraXWireless extends EventEmitter {
 
             const ankleBuffer = Buffer.from([ankleMotionDetection ? 1 : 0]);
             const ankleValue = new DataView(ankleBuffer.buffer).getInt8(0);
-            log(
-                `Sending ankle motion detection to ${trackerName}: ${ankleValue}`
-            );
             await bluetooth.write(
                 trackerName,
                 settingsService,
@@ -385,6 +372,12 @@ export default class HaritoraXWireless extends EventEmitter {
             log(`FPS mode: ${fpsMode}`);
             log(`Sensor auto correction: ${sensorAutoCorrection}`);
             log(`Ankle motion detection: ${ankleMotionDetection}`);
+
+            log(`Raw hex data calculated to be sent:`);
+            log(`Sensor mode: ${sensorModeValue}`);
+            log(`FPS mode: ${fpsModeValue}`);
+            log(`Sensor auto correction: ${correctionValue}`);
+            log(`Ankle motion detection: ${ankleValue}`);
 
             trackerSettings.set(trackerName, [
                 sensorMode,
@@ -451,7 +444,9 @@ export default class HaritoraXWireless extends EventEmitter {
                     } else {
                         trackerSettingsRaw.set(trackerName, hexValue);
                         log(
-                            `${trackerName} - Data written to serial port ${trackerPort}: ${trackerSettingsBuffer.toString().replace(/\r\n/g, ' ')}`
+                            `${trackerName} - Data written to serial port ${trackerPort}: ${trackerSettingsBuffer
+                                .toString()
+                                .replace(/\r\n/g, " ")}`
                         );
                     }
                 });
@@ -556,7 +551,9 @@ export default class HaritoraXWireless extends EventEmitter {
                         } else {
                             trackerSettingsRaw.set(trackerName, hexValue);
                             log(
-                                `${trackerName} - Data written to serial port ${trackerPort}: ${trackerSettingsBuffer.toString().replace(/\r\n/g, ' ')}`
+                                `${trackerName} - Data written to serial port ${trackerPort}: ${trackerSettingsBuffer
+                                    .toString()
+                                    .replace(/\r\n/g, " ")}`
                             );
                         }
                     });
@@ -1406,17 +1403,20 @@ function processTrackerData(data: string, trackerName: string) {
  * @fires haritora#mag
  **/
 function processMagData(data: string, trackerName: string) {
+    const GREEN_2 = 3;
     const GREEN = 2;
     const YELLOW = 1;
     const RED = 0;
-
     let magStatus;
-
     const buffer = Buffer.from(data, "base64");
     const magData = buffer.readUInt8(0);
 
     switch (magData) {
+        // sometimes 3 is being reported, so we'll just treat it as green
         case GREEN:
+            magStatus = "green";
+            break;
+        case GREEN_2:
             magStatus = "green";
             break;
         case YELLOW:
@@ -1427,6 +1427,7 @@ function processMagData(data: string, trackerName: string) {
             break;
         default:
             magStatus = "unknown";
+            log(`Unknown mag data for ${trackerName}: ${magData}`);
             break;
     }
 

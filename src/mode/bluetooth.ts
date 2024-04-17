@@ -266,7 +266,9 @@ export default class Bluetooth extends EventEmitter {
             characteristicInstance.read((err: any, data: any) => {
                 const characteristicName = characteristics.get(characteristic);
                 if (err) {
-                    error(`Error reading characteristic ${characteristicName}: ${err}`);
+                    error(
+                        `Error reading characteristic ${characteristicName}: ${err}`
+                    );
                     reject(err);
                     return;
                 }
@@ -292,7 +294,7 @@ export default class Bluetooth extends EventEmitter {
         }
 
         log(
-            `Writing to characteristic ${characteristic} of service ${service}`
+            `Writing to characteristic ${characteristic} of service ${service} for device ${localName}`
         );
         const device = this.getDeviceInfo(localName);
         if (!device) {
