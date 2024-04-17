@@ -46,14 +46,14 @@ const trackerSettingsRaw: Map<string, string> = new Map([
 const trackerSettings: Map<string, [number, number, string[], boolean]> =
     new Map([
         // trackerName, [sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection]
-        ["rightKnee", [-1, -1, [], undefined]],
-        ["rightAnkle", [-1, -1, [], undefined]],
-        ["hip", [-1, -1, [], undefined]],
-        ["chest", [-1, -1, [], undefined]],
-        ["leftKnee", [-1, -1, [], undefined]],
-        ["leftAnkle", [-1, -1, [], undefined]],
-        ["leftElbow", [-1, -1, [], undefined]],
-        ["rightElbow", [-1, -1, [], undefined]],
+        ["rightKnee", [2, 50, [], false]],
+        ["rightAnkle", [2, 50, [], false]],
+        ["hip", [2, 50, [], false]],
+        ["chest", [2, 50, [], false]],
+        ["leftKnee", [2, 50, [], false]],
+        ["leftAnkle", [2, 50, [], false]],
+        ["leftElbow", [2, 50, [], false]],
+        ["rightElbow", [2, 50, [], false]],
     ]);
 
 const trackerBattery: Map<string, [number, number, string]> = new Map([
@@ -75,9 +75,6 @@ let sensorModeCharacteristic: string;
 let fpsModeCharacteristic: string;
 let correctionCharacteristic: string;
 let ankleCharacteristic: string;
-
-let batteryDiscovered = false;
-let settingsDiscovered = false;
 
 let activeDevices: string[] = [];
 
@@ -113,25 +110,22 @@ let activeDevices: string[] = [];
  **/
 
 /**
- * The "settings" event which provides info about the tracker settings. Does not support grabbing the data first reported by the tracker and only supports data set by setTrackerSettings() (was removed due to issues)
- * Support: GX6, GX2
+ * The "mag" event which provides the tracker's magnetometer status
+ * Support: GX6, GX2, Bluetooth
  *
- * @event this#settings
+ * @event this#mag
  * @type {object}
  * @property {string} trackerName - The name of the tracker.
- * @property {number} sensorMode - The sensor mode, which controls whether magnetometer is used (1 or 2).
- * @property {number} fpsMode - The posture data transfer rate/FPS (50 or 100).
- * @property {string[]} sensorAutoCorrection - The sensor auto correction mode, multiple or none can be used (accel, gyro, mag).
- * @property {boolean} ankleMotionDetection - Whether ankle motion detection is enabled. (true or false)
+ * @property {string} magStatus - The magnetometer status of the tracker. (green, yellow, red)
  **/
 
 /**
  * The "button" event which provides info about the tracker's button data.
- * Support: GX6, GX2, Bluetooth (partial)
+ * Support: GX6, GX2, Bluetooth
  *
  * @event this#button
  * @type {object}
- * @property {string} trackerName - The name of the tracker. (rightKnee, rightAnkle, hip, chest, leftKnee, leftAnkle, leftElbow, rightElbow)
+ * @property {string} trackerName - The name of the tracker.
  * @property {number} mainButton - Amount of times the main button was pressed.
  * @property {number} subButton - Amount of times the sub button was pressed.
  * @property {boolean} isOn - Whether the tracker is turning on/is on (true) or turning off/is off (false).
@@ -143,10 +137,10 @@ let activeDevices: string[] = [];
  *
  * @event this#battery
  * @type {object}
- * @property {string} trackerName - The name of the tracker. (rightKnee, rightAnkle, hip, chest, leftKnee, leftAnkle, leftElbow, rightElbow)
+ * @property {string} trackerName - The name of the tracker.
  * @property {number} batteryRemaining - The remaining battery percentage of the tracker.
- * @property {number} batteryVoltage - The voltage of the tracker's battery.
- * @property {string} chargeStatus - The charge status of the tracker. (discharging, charging(?), charged(?))
+ * @property {number} batteryVoltage - The voltage of the tracker's battery. (GX only)
+ * @property {string} chargeStatus - The charge status of the tracker. (GX only)
  **/
 
 /**
@@ -188,7 +182,7 @@ let activeDevices: string[] = [];
  * @param {boolean} debugMode - Enable logging of debug messages depending on verbosity. (0 = none, 1 = debug, 2 = debug w/ function info)
  *
  * @example
- * let device = new HaritoraXWireless(true);
+ * let device = new HaritoraXWireless(2);
  **/
 export default class HaritoraXWireless extends EventEmitter {
     constructor(debugMode = 0) {
@@ -279,8 +273,6 @@ export default class HaritoraXWireless extends EventEmitter {
         }
     }
 
-    // TODO: set tracker settings for bluetooth
-
     /**
      * Sets the tracker settings for a specific tracker.
      * Support: GX6, GX2
@@ -307,18 +299,6 @@ export default class HaritoraXWireless extends EventEmitter {
         // !
         // TODO: fix left knee setting for chest, right knee setting for hip (this is making me go crazy)
         // TODO: probably see if you can submit settings one by one (`o0:data` instead of `o0:data o1:data`)
-        const TRACKERS_GROUP_ONE = [
-            "hip",
-            "rightKnee",
-            "leftAnkle",
-            "leftElbow",
-        ];
-        const TRACKERS_GROUP_TWO = [
-            "chest",
-            "rightAnkle",
-            "leftKnee",
-            "rightElbow",
-        ];
 
         let sensorAutoCorrectionBit = 0;
         if (sensorAutoCorrection.includes("accel"))
@@ -385,11 +365,11 @@ export default class HaritoraXWireless extends EventEmitter {
                 ankleBuffer
             );
 
-            log(`Setting the following settings onto tracker ${trackerName}:
-Sensor mode: ${sensorMode}
-FPS mode: ${fpsMode}
-Sensor auto correction: ${sensorAutoCorrection}
-Ankle motion detection: ${ankleMotionDetection}`);
+            log(`Setting the following settings onto tracker ${trackerName}:`);
+            log(`Sensor mode: ${sensorMode}`);
+            log(`FPS mode: ${fpsMode}`);
+            log(`Sensor auto correction: ${sensorAutoCorrection}`);
+            log(`Ankle motion detection: ${ankleMotionDetection}`);
 
             trackerSettings.set(trackerName, [
                 sensorMode,
@@ -408,31 +388,18 @@ Ankle motion detection: ${ankleMotionDetection}`);
             const ankleMotionDetectionBit = ankleMotionDetection ? 1 : 0; // Default to false
 
             let hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
-            let trackerSettingsBuffer = undefined;
 
-            if (TRACKERS_GROUP_ONE.includes(trackerName)) {
-                trackerSettingsBuffer = this.getTrackerSettingsBuffer(
-                    trackerName,
-                    hexValue,
-                    1
-                );
-            } else if (TRACKERS_GROUP_TWO.includes(trackerName)) {
-                trackerSettingsBuffer = this.getTrackerSettingsBuffer(
-                    trackerName,
-                    hexValue,
-                    -1
-                );
-            } else {
-                log(`Invalid tracker name: ${trackerName}`);
-                return;
-            }
+            let trackerSettingsBuffer = this.generateTrackerSettingsBuffer(
+                trackerName,
+                hexValue
+            );
 
-            log(`Setting the following settings onto tracker ${trackerName}:
-Sensor mode: ${sensorMode}
-FPS mode: ${fpsMode}
-Sensor auto correction: ${sensorAutoCorrection}
-Ankle motion detection: ${ankleMotionDetection}
-Raw hex data calculated to be sent: ${hexValue}`);
+            log(`Setting the following settings onto tracker ${trackerName}:`);
+            log(`Sensor mode: ${sensorMode}`);
+            log(`FPS mode: ${fpsMode}`);
+            log(`Sensor auto correction: ${sensorAutoCorrection}`);
+            log(`Ankle motion detection: ${ankleMotionDetection}`);
+            log(`Raw hex data calculated to be sent: ${hexValue}`);
 
             trackerSettings.set(trackerName, [
                 sensorMode,
@@ -466,42 +433,30 @@ Raw hex data calculated to be sent: ${hexValue}`);
             }
         }
 
-        this.emit(
-            "settings",
-            trackerName,
-            sensorMode,
-            fpsMode,
-            sensorAutoCorrection,
-            ankleMotionDetection
-        );
         return true;
     }
 
-    getTrackerSettingsBuffer(
+    generateTrackerSettingsBuffer(
         trackerName: string,
-        hexValue: string,
-        direction: number
-    ) {
-        const entries = Array.from(trackerSettingsRaw.entries());
-        const currentIndex = entries.findIndex(([key]) => key === trackerName);
+        hexValue: string
+    ): Buffer {
+        let trackerPort: string = gx.getTrackerPort(trackerName);
+        let otherTrackerId: string =
+            gx.getTrackerPortId(trackerName) === 0 ? "1" : "0";
+        let otherTrackerName: string = gx.getPartFromInfo(
+            trackerPort,
+            otherTrackerId
+        );
+        let otherHexValue: string = trackerSettingsRaw.get(otherTrackerName);
 
-        if (
-            currentIndex !== -1 &&
-            currentIndex + direction >= 0 &&
-            currentIndex + direction < entries.length
-        ) {
-            const adjacentKey = entries[currentIndex + direction][0];
-            let adjacentValue = trackerSettingsRaw.get(adjacentKey);
-            return Buffer.from(
-                `o0:${direction === 1 ? hexValue : adjacentValue}\r\no1:${
-                    direction === 1 ? adjacentValue : hexValue
-                }\r\n`,
-                "utf-8"
-            );
+        let trackerSettingsString: string;
+        if (gx.getTrackerPortId(trackerName) === 0) {
+            trackerSettingsString = `o0:${hexValue}\r\no1:${otherHexValue}`;
+        } else {
+            trackerSettingsString = `o0:${otherHexValue}\r\no1:${hexValue}`;
         }
 
-        log(`${trackerName} - Calculated hex value: ${hexValue}`);
-        return null;
+        return Buffer.from(trackerSettingsString, "utf-8");
     }
 
     /**
@@ -546,13 +501,13 @@ Raw hex data calculated to be sent: ${hexValue}`);
                     "utf-8"
                 );
 
-                log(`Setting the following settings onto all connected trackers:
-Connected trackers: ${activeDevices}
-Sensor mode: ${sensorMode}
-FPS mode: ${fpsMode}
-Sensor auto correction: ${sensorAutoCorrection}
-Ankle motion detection: ${ankleMotionDetection}
-Raw hex data calculated to be sent: ${hexValue}`);
+                log(`Setting the following settings onto all connected trackers:`);
+                log(`Connected trackers: ${activeDevices}`);
+                log(`Sensor mode: ${sensorMode}`);
+                log(`FPS mode: ${fpsMode}`);
+                log(`Sensor auto correction: ${sensorAutoCorrection}`);
+                log(`Ankle motion detection: ${ankleMotionDetection}`);
+                log(`Raw hex data calculated to be sent: ${hexValue}`);
 
                 for (let trackerName of trackerSettingsRaw.keys()) {
                     let ports = gx.getActivePorts();
@@ -581,14 +536,6 @@ Raw hex data calculated to be sent: ${hexValue}`);
         }
 
         for (let trackerName of trackerSettingsRaw.keys()) {
-            this.emit(
-                "settings",
-                trackerName,
-                sensorMode,
-                fpsMode,
-                sensorAutoCorrection,
-                ankleMotionDetection
-            );
             trackerSettings.set(trackerName, [
                 sensorMode,
                 fpsMode,
@@ -843,17 +790,17 @@ Raw hex data calculated to be sent: ${hexValue}`);
 
                 let ankleMotionDetection = ankleValue === 1;
 
-                log(`Tracker ${trackerName} raw settings:
-                Sensor mode: ${sensorModeValue}
-                FPS mode: ${fpsModeValue}
-                Sensor auto correction: ${correctionValue}
-                Ankle motion detection: ${ankleValue}`);
+                log(`Tracker ${trackerName} raw settings:`);
+                log(`Sensor mode: ${sensorModeValue}`);
+                log(`FPS mode: ${fpsModeValue}`);
+                log(`Sensor auto correction: ${correctionValue}`);
+                log(`Ankle motion detection: ${ankleValue}`);
 
-                log(`Tracker ${trackerName} settings:
-                Sensor mode: ${sensorMode}
-                FPS mode: ${fpsMode}
-                Sensor auto correction: ${sensorAutoCorrection}
-                Ankle motion detection: ${ankleMotionDetection}`);
+                log(`Tracker ${trackerName} settings:`);
+                log(`Sensor mode: ${sensorMode}`);
+                log(`FPS mode: ${fpsMode}`);
+                log(`Sensor auto correction: ${sensorAutoCorrection}`);
+                log(`Ankle motion detection: ${ankleMotionDetection}`);
 
                 return {
                     sensorMode,
@@ -877,11 +824,11 @@ Raw hex data calculated to be sent: ${hexValue}`);
                         sensorAutoCorrection,
                         ankleMotionDetection,
                     ] = trackerSettings.get(trackerName);
-                    log(`Tracker ${trackerName} settings:
-    Sensor mode: ${sensorMode}
-    FPS mode: ${fpsMode}
-    Sensor auto correction: ${sensorAutoCorrection}
-    Ankle motion detection: ${ankleMotionDetection}`);
+                    log(`Tracker ${trackerName} settings:`);
+                    log(`Sensor mode: ${sensorMode}`);
+                    log(`FPS mode: ${fpsMode}`);
+                    log(`Sensor auto correction: ${sensorAutoCorrection}`);
+                    log(`Ankle motion detection: ${ankleMotionDetection}`);
                     return {
                         sensorMode,
                         fpsMode,
@@ -993,6 +940,7 @@ function listenToDeviceEvents() {
                     processBatteryData(portData, trackerName);
                     break;
                 case "o":
+                    // ! readd process settings
                     // Removed due to asynchronous issues (especially when firing multiple "setTrackerSettings()")
                     break;
                 case "i":
@@ -1035,6 +983,15 @@ function listenToDeviceEvents() {
                     break;
                 case "BatteryLevel":
                     processBatteryData(data, localName);
+                    break;
+                case "SensorModeSetting":
+                case "FpsSetting":
+                case "AutoCalibrationSetting":
+                case "TofSetting":
+                    // No need to process, we add the case here but don't do anything because it's not "unknown data".
+                    break;
+                case "Magnetometer":
+                    processMagData(data, localName);
                     break;
                 default:
                     log(
@@ -1105,7 +1062,10 @@ function processIMUData(data: string, trackerName: string) {
 
     // Decode and log the data
     try {
-        const { rotation, gravity, ankle } = decodeIMUPacket(data, trackerName);
+        const { rotation, gravity, ankle, magStatus } = decodeIMUPacket(
+            data,
+            trackerName
+        );
 
         /*log(
             `Tracker ${trackerName} rotation: (${rotation.x.toFixed(
@@ -1120,8 +1080,10 @@ function processIMUData(data: string, trackerName: string) {
             )}, ${gravity.y.toFixed(5)}, ${gravity.z.toFixed(5)})`
         );
         if (ankle) log(`Tracker ${trackerName} ankle: ${ankle}`);*/
+        //log(`Tracker ${trackerName} magnetometer status: ${magStatus}`);
 
         haritora.emit("imu", trackerName, rotation, gravity, ankle);
+        haritora.emit("mag", trackerName, magStatus);
     } catch (err) {
         error(`Error decoding tracker ${trackerName} IMU packet data: ${err}`);
     }
@@ -1142,7 +1104,7 @@ let calibrated: { [key: string]: any } = {};
 let startTimes: { [key: string]: any } = {};
 let initialRotations: { [key: string]: any } = {};
 
-function decodeIMUPacket(data: string, trackerName: string | number) {
+function decodeIMUPacket(data: string, trackerName: string) {
     try {
         if (data.length < 14) {
             throw new Error("Too few bytes to decode IMU packet");
@@ -1163,6 +1125,25 @@ function decodeIMUPacket(data: string, trackerName: string | number) {
         let ankle = undefined;
         if (data.slice(-2) !== "==" && data.length > 14) {
             ankle = buffer.readInt16LE(14);
+        }
+
+        let magStatus = undefined;
+        if (!trackerName.startsWith("HaritoraX")) {
+            const magnetometerData = data.charAt(data.length - 5);
+
+            switch (magnetometerData) {
+                case "A":
+                    magStatus = "red";
+                    break;
+                case "B":
+                    magStatus = "yellow";
+                    break;
+                case "C":
+                    magStatus = "green";
+                    break;
+                default:
+                    magStatus = "unknown";
+            }
         }
 
         const rotation = {
@@ -1294,7 +1275,7 @@ function decodeIMUPacket(data: string, trackerName: string | number) {
             };
         }
 
-        return { rotation, gravity, ankle };
+        return { rotation, gravity, ankle, magStatus };
     } catch (error: any) {
         throw new Error("Error decoding IMU packet: " + error.message);
     }
@@ -1354,7 +1335,7 @@ function calculateRotationDifference(
 
 function processTrackerData(data: string, trackerName: string) {
     /*
-     * Currently unsure what other data a0/a1 could represent other than trying to find the trackers, I see other values for it too reporting every second (mag info?).
+     * Currently unsure what other data a0/a1 could represent other than trying to find the trackers, I see other values for it too reporting every second.
      * This could also be used to report calibration data when running the calibration through the software.
      */
 
@@ -1367,9 +1348,54 @@ function processTrackerData(data: string, trackerName: string) {
         log(`Tracker ${trackerName} other data processed: ${data}`);
     }
 
-    // TODO - Find out what the other data represents, then add to emitted event. Seems to be likely mag data?
+    // TODO - Find out what "other data" represents, then add to emitted event.
     haritora.emit("tracker", trackerName, data);
 }
+
+/**
+ * Processes the magnetometer data received from the Bluetooth tracker.
+ * GX mag status is processed by decodeIMUPacket()
+ * Support: Bluetooth
+ *
+ * @function processMagData
+ * @param {string} data - The data to process.
+ * @param {string} trackerName - The name of the tracker.
+ * @fires haritora#mag
+ **/
+function processMagData(data: string, trackerName: string) {
+    const GREEN = 2;
+    const YELLOW = 1;
+    const RED = 0;
+
+    let magStatus;
+
+    const buffer = Buffer.from(data, "base64");
+    const magData = buffer.readUInt8(0);
+
+    switch (magData) {
+        case GREEN:
+            magStatus = "green";
+            break;
+        case YELLOW:
+            magStatus = "yellow";
+            break;
+        case RED:
+            magStatus = "red";
+            break;
+        default:
+            magStatus = "unknown";
+            break;
+    }
+
+    log(`Tracker ${trackerName} mag status: ${magStatus}`);
+    haritora.emit("mag", trackerName, magStatus);
+}
+
+function processSettingsData(
+    data: string,
+    trackerName: string,
+    characteristic?: string
+) {}
 
 /**
  * Processes the button data received from the tracker by the dongle.

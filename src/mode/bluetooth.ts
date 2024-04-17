@@ -25,9 +25,7 @@ const characteristics = new Map([
     ["2a26", "FirmwareRevision"],
     ["2a28", "SoftwareRevision"],
     ["2a24", "ModelNumber"],
-    // Sensor Service
-    ["00002a1900001000800000805f9b34fb", "Battery"],
-    ["00002a2800001000800000805f9b34fb", "SoftwareRevision"],
+    // Tracker Service
     ["00dbf1c690aa11eda1eb0242ac120002", "Sensor"],
     ["00dbf30690aa11eda1eb0242ac120002", "Magnetometer"],
     ["00dbf45090aa11eda1eb0242ac120002", "MainButton"],
@@ -423,8 +421,6 @@ async function areAllBLEDiscovered(): Promise<boolean> {
     return true;
 }
 
-// Proceed with the read or write operation
-
 function emitData(
     classInstance: Bluetooth,
     localName: any,
@@ -435,8 +431,8 @@ function emitData(
     classInstance.emit(
         "data",
         localName,
-        services.get(service),
-        characteristics.get(characteristic),
+        services.get(service) || service,
+        characteristics.get(characteristic) || characteristic,
         data
     );
 }

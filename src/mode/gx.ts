@@ -10,15 +10,15 @@ const BAUD_RATE = 500000; // from the haritora_setting.json in the HaritoraConfi
 
 const trackerAssignment = new Map([
     // tracker part, [tracker id, port, port id]
-    ["DONGLE", [0, "", ""]],
-    ["chest", [1, "", ""]],
-    ["leftKnee", [2, "", ""]],
-    ["leftAnkle", [3, "", ""]],
-    ["rightKnee", [4, "", ""]],
-    ["rightAnkle", [5, "", ""]],
-    ["hip", [6, "", ""]],
-    ["leftElbow", [7, "", ""]],
-    ["rightElbow", [8, "", ""]],
+    ["DONGLE", ["0", "", ""]],
+    ["chest", ["1", "", ""]],
+    ["leftKnee", ["2", "", ""]],
+    ["leftAnkle", ["3", "", ""]],
+    ["rightKnee", ["4", "", ""]],
+    ["rightAnkle", ["5", "", ""]],
+    ["hip", ["6", "", ""]],
+    ["leftElbow", ["7", "", ""]],
+    ["rightElbow", ["8", "", ""]],
 ]);
 
 const deviceInformation = new Map([
@@ -84,7 +84,7 @@ export default class GX extends EventEmitter {
                         if (value[1] === "") {
                             if (identifier.startsWith("r")) {
                                 const trackerId = parseInt(portData.charAt(4));
-                                if (value[0] == trackerId) {
+                                if (parseInt(value[0]) == trackerId) {
                                     trackerAssignment.set(key, [
                                         trackerId,
                                         port,
@@ -174,15 +174,15 @@ export default class GX extends EventEmitter {
     }
 
     getTrackerId(tracker: string) {
-        const port = trackerAssignment.get(tracker)[0];
-        if (port) {
-            return port;
+        const trackerId: number = parseInt(trackerAssignment.get(tracker)[0]);
+        if (trackerId) {
+            return trackerId;
         }
         return null;
     }
 
     getTrackerPort(tracker: string) {
-        const port = trackerAssignment.get(tracker)[1];
+        const port: string = trackerAssignment.get(tracker)[1];
         if (port) {
             return port;
         }
@@ -190,7 +190,7 @@ export default class GX extends EventEmitter {
     }
 
     getTrackerPortId(tracker: string) {
-        const portId = trackerAssignment.get(tracker)[2];
+        const portId = parseInt(trackerAssignment.get(tracker)[2]);
         if (portId) {
             return portId;
         }

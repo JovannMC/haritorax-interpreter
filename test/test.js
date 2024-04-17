@@ -10,7 +10,7 @@ if (mode === "bt" || mode === "bluetooth") {
         console.log("Active trackers for BT:", device.getActiveTrackers());
     }, 5000);
 
-    setInterval(async () => {
+    /*setInterval(async () => {
         try {
             console.log("Active trackers for BT:", device.getActiveTrackers());
             console.log("Device info:", await device.getDeviceInfo("HaritoraXW-(SERIAL)"));
@@ -19,7 +19,7 @@ if (mode === "bt" || mode === "bluetooth") {
         } catch (error) {
             console.error("Error getting device data:", error);
         }
-    }, 3000);
+    }, 3000);*/
 } else {
     device.startConnection("gx", ["COM4", "COM5", "COM6"]);
 
