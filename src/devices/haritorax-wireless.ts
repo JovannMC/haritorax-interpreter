@@ -451,7 +451,7 @@ export default class HaritoraXWireless extends EventEmitter {
                     } else {
                         trackerSettingsRaw.set(trackerName, hexValue);
                         log(
-                            `${trackerName} - Data written to serial port ${trackerPort}: ${trackerSettingsBuffer.toString()}`
+                            `${trackerName} - Data written to serial port ${trackerPort}: ${trackerSettingsBuffer.toString().replace(/\r\n/g, ' ')}`
                         );
                     }
                 });
@@ -556,7 +556,7 @@ export default class HaritoraXWireless extends EventEmitter {
                         } else {
                             trackerSettingsRaw.set(trackerName, hexValue);
                             log(
-                                `${trackerName} - Data written to serial port ${trackerPort}: ${trackerSettingsBuffer.toString()}`
+                                `${trackerName} - Data written to serial port ${trackerPort}: ${trackerSettingsBuffer.toString().replace(/\r\n/g, ' ')}`
                             );
                         }
                     });
@@ -1433,12 +1433,6 @@ function processMagData(data: string, trackerName: string) {
     log(`Tracker ${trackerName} mag status: ${magStatus}`);
     haritora.emit("mag", trackerName, magStatus);
 }
-
-function processSettingsData(
-    data: string,
-    trackerName: string,
-    characteristic?: string
-) {}
 
 /**
  * Processes the button data received from the tracker by the dongle.
