@@ -1,6 +1,6 @@
 "use strict";
 
-import noble from "@abandonware/noble";
+import noble, { Peripheral, Service, Characteristic } from "@abandonware/noble";
 import { EventEmitter } from "events";
 
 let bluetooth: Bluetooth = undefined;
@@ -39,9 +39,8 @@ const characteristics = new Map([
     //["ef843b5490a911eda1eb0242ac120002", "Something"], unsure what this is, reports randomly like battery level
 ]);
 
-let activeDevices: any[] = [];
-let activeServices: any[] = [];
-let activeCharacteristics: any[] = [];
+type ActiveDevice = [string, Peripheral, Service[], Characteristic[]];
+let activeDevices: ActiveDevice[] = [];
 
 let allowReconnect = true;
 
@@ -83,27 +82,20 @@ export default class Bluetooth extends EventEmitter {
         }
     }
 
-    onDiscover(peripheral: {
-        connect?: any;
-        discoverServices?: any;
-        on?: any;
-        advertisement?: any;
-    }) {
+    onDiscover(peripheral: Peripheral) {
         const {
             advertisement: { localName },
         } = peripheral;
         if (
             localName &&
             localName.startsWith("HaritoraX") &&
-            !activeDevices.includes(peripheral)
+            !activeDevices.find((device) => device[1] === peripheral)
         ) {
             log(`Found device: ${localName}`);
-            // I do not have any device other than the wireless device, so I cannot test this
             if (localName.startsWith("HaritoraX-"))
                 log(
                     "HaritoraX (1.0/1.1/1.1b) detected. Device is not fully supported and you may experience issues."
                 );
-            activeDevices.push(peripheral);
 
             peripheral.connect((err: any) => {
                 if (err) {
@@ -112,6 +104,9 @@ export default class Bluetooth extends EventEmitter {
                 }
                 log(`Connected to ${localName}`);
                 this.emit("connect", peripheral);
+
+                const activeServices: any[] = [];
+                const activeCharacteristics: any[] = [];
 
                 peripheral.discoverServices(
                     null,
@@ -132,7 +127,6 @@ export default class Bluetooth extends EventEmitter {
                                 ) => void;
                                 uuid: any;
                             }) => {
-                                //log(`Discovered service ${service.uuid}`);
                                 activeServices.push(service);
                                 service.discoverCharacteristics(
                                     [],
@@ -155,7 +149,6 @@ export default class Bluetooth extends EventEmitter {
                                                     arg0: (err: any) => void
                                                 ) => void;
                                             }) => {
-                                                //log(`Discovered characteristic: ${characteristic.uuid}`);
                                                 activeCharacteristics.push(
                                                     characteristic
                                                 );
@@ -186,6 +179,12 @@ export default class Bluetooth extends EventEmitter {
                                 );
                             }
                         );
+                        activeDevices.push([
+                            localName,
+                            peripheral,
+                            activeServices,
+                            activeCharacteristics,
+                        ]);
                     }
                 );
             });
@@ -194,12 +193,13 @@ export default class Bluetooth extends EventEmitter {
                 if (!allowReconnect) return;
                 log(`Disconnected from ${localName}`);
                 this.emit("disconnect", peripheral);
-                const index = activeDevices.indexOf(peripheral);
+                const index = activeDevices.findIndex(
+                    (device) => device[1] === peripheral
+                );
                 if (index !== -1) {
                     activeDevices.splice(index, 1);
                 }
 
-                // search again
                 setTimeout(() => {
                     noble.startScanning([], true);
                 }, 3000);
@@ -211,7 +211,7 @@ export default class Bluetooth extends EventEmitter {
         try {
             noble.stopScanning();
             for (let device of activeDevices) {
-                device.disconnect();
+                device[1].disconnect();
             }
         } catch (err) {
             error(`Error while closing bluetooth connection: ${err}`);
@@ -227,7 +227,7 @@ export default class Bluetooth extends EventEmitter {
     }
 
     async read(
-        localName: any,
+        localName: string,
         service: string,
         characteristic: string
     ): Promise<any> {
@@ -240,22 +240,24 @@ export default class Bluetooth extends EventEmitter {
 
         log(`Reading characteristic ${characteristic} of service ${service}`);
 
-        const device = this.getDeviceInfo(localName);
+        const device = activeDevices.find(
+            (device: ActiveDevice) => device[0] === localName
+        );
         if (!device) {
             error(`Device ${localName} not found`);
             throw new Error(`Device ${localName} not found`);
         }
 
-        const serviceInstance = activeServices.find(
-            (s: { uuid: string }) => s.uuid === service
+        const serviceInstance = device[2].find(
+            (s: Service) => s.uuid === service
         );
         if (!serviceInstance) {
             error(`Service ${service} not found`);
             throw new Error(`Service ${service} not found`);
         }
 
-        const characteristicInstance = activeCharacteristics.find(
-            (c: { uuid: string }) => c.uuid === characteristic
+        const characteristicInstance = device[3].find(
+            (c: Characteristic) => c.uuid === characteristic
         );
         if (!characteristicInstance) {
             error(`Characteristic ${characteristic} not found`);
@@ -281,7 +283,7 @@ export default class Bluetooth extends EventEmitter {
     }
 
     async write(
-        localName: any,
+        localName: string,
         service: string,
         characteristic: string,
         data: any
@@ -296,22 +298,24 @@ export default class Bluetooth extends EventEmitter {
         log(
             `Writing to characteristic ${characteristic} of service ${service} for device ${localName}`
         );
-        const device = this.getDeviceInfo(localName);
+        const device = activeDevices.find(
+            (device: ActiveDevice) => device[0] === localName
+        );
         if (!device) {
             error(`Device ${localName} not found`);
             throw new Error(`Device ${localName} not found`);
         }
 
-        const serviceInstance = activeServices.find(
-            (s: { uuid: string }) => s.uuid === service
+        const serviceInstance = device[2].find(
+            (s: Service) => s.uuid === service
         );
         if (!serviceInstance) {
             error(`Service ${service} not found`);
             throw new Error(`Service ${service} not found`);
         }
 
-        const characteristicInstance = activeCharacteristics.find(
-            (c: { uuid: string }) => c.uuid === characteristic
+        const characteristicInstance = device[3].find(
+            (c: Characteristic) => c.uuid === characteristic
         );
         if (!characteristicInstance) {
             error(`Characteristic ${characteristic} not found`);
@@ -346,20 +350,12 @@ export default class Bluetooth extends EventEmitter {
         return activeDevices;
     }
 
-    getActiveServices() {
-        return activeServices;
-    }
-
-    getActiveCharacteristics() {
-        return activeCharacteristics;
-    }
-
     getAllowReconnect() {
         return allowReconnect;
     }
 
     getActiveTrackers() {
-        return activeDevices.map((device) => device.advertisement.localName);
+        return activeDevices.map((device) => device[0]);
     }
 
     getServiceUUID(name: string) {
@@ -382,7 +378,7 @@ export default class Bluetooth extends EventEmitter {
 
     getDeviceInfo(localName: any) {
         for (let device of activeDevices) {
-            if (device.advertisement.localName === localName) {
+            if (device[0] === localName) {
                 return device;
             }
         }
@@ -403,7 +399,9 @@ const importantCharacteristics = [
 async function areAllBLEDiscovered(): Promise<boolean> {
     for (const serviceUuid of importantServices) {
         if (
-            !activeServices.find((service: any) => service.uuid === serviceUuid)
+            !activeDevices.find((device: any) =>
+                device[2].find((service: any) => service.uuid === serviceUuid)
+            )
         ) {
             return false;
         }
@@ -411,9 +409,11 @@ async function areAllBLEDiscovered(): Promise<boolean> {
 
     for (const characteristicUuid of importantCharacteristics) {
         if (
-            !activeCharacteristics.find(
-                (characteristic: any) =>
-                    characteristic.uuid === characteristicUuid
+            !activeDevices.find((device: any) =>
+                device[3].find(
+                    (characteristic: any) =>
+                        characteristic.uuid === characteristicUuid
+                )
             )
         ) {
             return false;

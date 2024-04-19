@@ -289,14 +289,13 @@ export default class HaritoraXWireless extends EventEmitter {
      * trackers.setTrackerSettings("rightAnkle", 1, 100, ['accel', 'gyro'], true);
      **/
 
-    async setTrackerSettings(
+    setTrackerSettings(
         trackerName: string,
         sensorMode: number,
         fpsMode: number,
         sensorAutoCorrection: string[],
         ankleMotionDetection: boolean
     ) {
-        // ! fix left knee setting for chest, right knee setting for hip (this is making me go insane, i think there's just a legit limitation. thanks shiftall!)
         // elbows untested, might not work
         const TRACKERS_GROUP_ONE = [
             "rightAnkle",
@@ -327,7 +326,7 @@ export default class HaritoraXWireless extends EventEmitter {
             const sensorModeValue = new DataView(
                 sensorModeBuffer.buffer
             ).getInt8(0);
-            await bluetooth.write(
+            bluetooth.write(
                 trackerName,
                 settingsService,
                 sensorModeCharacteristic,
@@ -336,7 +335,7 @@ export default class HaritoraXWireless extends EventEmitter {
 
             const fpsModeBuffer = Buffer.from([fpsMode === 50 ? 1 : 2]);
             const fpsModeValue = new DataView(fpsModeBuffer.buffer).getInt8(0);
-            await bluetooth.write(
+            bluetooth.write(
                 trackerName,
                 settingsService,
                 fpsModeCharacteristic,
@@ -351,7 +350,7 @@ export default class HaritoraXWireless extends EventEmitter {
             const correctionValue = new DataView(
                 correctionBuffer.buffer
             ).getInt8(0);
-            await bluetooth.write(
+            bluetooth.write(
                 trackerName,
                 settingsService,
                 correctionCharacteristic,
@@ -360,7 +359,7 @@ export default class HaritoraXWireless extends EventEmitter {
 
             const ankleBuffer = Buffer.from([ankleMotionDetection ? 1 : 0]);
             const ankleValue = new DataView(ankleBuffer.buffer).getInt8(0);
-            await bluetooth.write(
+            bluetooth.write(
                 trackerName,
                 settingsService,
                 ankleCharacteristic,
@@ -501,13 +500,12 @@ export default class HaritoraXWireless extends EventEmitter {
      * trackers.setAllTrackerSettings(2, 50, ['mag'], false);
      **/
 
-    async setAllTrackerSettings(
+    setAllTrackerSettings(
         sensorMode: number,
         fpsMode: number,
         sensorAutoCorrection: string[],
         ankleMotionDetection: boolean
     ) {
-        // TODO: add bt
         if (gxEnabled) {
             try {
                 const sensorModeBit =
@@ -566,7 +564,7 @@ export default class HaritoraXWireless extends EventEmitter {
 
         if (bluetoothEnabled) {
             for (let trackerName of bluetooth.getActiveTrackers()) {
-                await this.setTrackerSettings(
+                this.setTrackerSettings(
                     trackerName,
                     sensorMode,
                     fpsMode,
@@ -621,63 +619,50 @@ export default class HaritoraXWireless extends EventEmitter {
         } else if (trackerName.startsWith("HaritoraX")) {
             let trackerObject = bluetooth
                 .getActiveDevices()
-                .find(
-                    (device) => device.advertisement.localName === trackerName
-                );
+                .find((device) => device[0] === trackerName);
             if (!trackerObject) {
                 log(`Tracker ${trackerName} not found`);
                 return null;
             }
 
-            const readPromises = [];
+            // grab services from trackerObject, get all characteristics
+            let characteristics = trackerObject[3];
+            let versionCharacteristic = characteristics.find(
+                (characteristic) => characteristic.uuid === VERSION_UUID
+            );
+            let modelCharacteristic = characteristics.find(
+                (characteristic) => characteristic.uuid === MODEL_UUID
+            );
+            let serialCharacteristic = characteristics.find(
+                (characteristic) => characteristic.uuid === SERIAL_UUID
+            );
 
-            for (let service of trackerObject.services) {
-                if (service.uuid !== SERVICE_UUID) continue;
-                for (let characteristic of service.characteristics) {
-                    const promise = new Promise<void>((resolve, reject) => {
-                        characteristic.read(
-                            (
-                                err: any,
-                                data: { toString: (arg0: string) => any }
-                            ) => {
-                                if (err) {
-                                    reject(
-                                        `Error reading characteristic for ${trackerName}: ${err}`
-                                    );
-                                } else {
-                                    switch (characteristic.uuid) {
-                                        case VERSION_UUID:
-                                            version = data.toString("utf-8");
-                                            break;
-                                        case MODEL_UUID:
-                                            model = data.toString("utf-8");
-                                            break;
-                                        case SERIAL_UUID:
-                                            serial = data.toString("utf-8");
-                                            break;
-                                    }
-                                    resolve();
-                                }
-                            }
-                        );
+            // Create a TextDecoder instance
+            const decoder = new TextDecoder("utf-8");
 
-                        setTimeout(
-                            () =>
-                                reject(
-                                    `Read operation for ${trackerName} timed out`
-                                ),
-                            TIMEOUT
-                        );
-                    });
-                    readPromises.push(promise);
-                }
-            }
+            // Get buffers
+            let versionBuffer = await bluetooth.read(
+                trackerName,
+                SERVICE_UUID,
+                versionCharacteristic.uuid
+            );
 
-            try {
-                await Promise.all(readPromises);
-            } catch (err) {
-                error(`Error getting device info for ${trackerName}: ${err}`);
-            }
+            let modelBuffer = await bluetooth.read(
+                trackerName,
+                SERVICE_UUID,
+                modelCharacteristic.uuid
+            );
+
+            let serialBuffer = await bluetooth.read(
+                trackerName,
+                SERVICE_UUID,
+                serialCharacteristic.uuid
+            );
+
+            // Convert to UTF-8 string
+            version = decoder.decode(versionBuffer);
+            serial = decoder.decode(serialBuffer);
+            model = decoder.decode(modelBuffer);
         }
 
         log(`Tracker ${trackerName} info: ${version}, ${model}, ${serial}`);

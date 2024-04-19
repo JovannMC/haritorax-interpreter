@@ -6,8 +6,9 @@ let device = new HaritoraXWireless(2);
 if (mode === "bt" || mode === "bluetooth") {
     device.startConnection("bluetooth");
 
-    setInterval(() => {
+    setInterval(async () => {
         console.log("Active trackers for BT:", device.getActiveTrackers());
+        console.log("Info: ", await device.getDeviceInfo("HaritoraXW-(SERIAL)"));
     }, 5000);
 
     /*setInterval(async () => {
