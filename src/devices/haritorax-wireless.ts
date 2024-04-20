@@ -1092,7 +1092,7 @@ function processIMUData(data: string, trackerName: string) {
             trackerName
         );
 
-        /*log(
+        log(
             `Tracker ${trackerName} rotation: (${rotation.x.toFixed(
                 5
             )}, ${rotation.y.toFixed(5)}, ${rotation.z.toFixed(
@@ -1104,8 +1104,8 @@ function processIMUData(data: string, trackerName: string) {
                 5
             )}, ${gravity.y.toFixed(5)}, ${gravity.z.toFixed(5)})`
         );
-        if (ankle) log(`Tracker ${trackerName} ankle: ${ankle}`);*/
-        //log(`Tracker ${trackerName} magnetometer status: ${magStatus}`);
+        if (ankle) log(`Tracker ${trackerName} ankle: ${ankle}`);
+        log(`Tracker ${trackerName} magnetometer status: ${magStatus}`);
 
         haritora.emit("imu", trackerName, rotation, gravity, ankle);
         haritora.emit("mag", trackerName, magStatus);
@@ -1131,7 +1131,7 @@ let initialRotations: { [key: string]: any } = {};
 
 function decodeIMUPacket(data: string, trackerName: string) {
     try {
-        if (data.length < 14) {
+        if (data.length < 16) {
             throw new Error("Too few bytes to decode IMU packet");
         }
 
@@ -1149,7 +1149,7 @@ function decodeIMUPacket(data: string, trackerName: string) {
 
         let ankle = undefined;
         if (data.slice(-2) !== "==" && data.length > 14) {
-            ankle = buffer.readInt16LE(14);
+            ankle = buffer.readInt16LE(buffer.length - 2);
         }
 
         let magStatus = undefined;
@@ -1161,14 +1161,19 @@ function decodeIMUPacket(data: string, trackerName: string) {
                     magStatus = "red";
                     break;
                 case "B":
-                    magStatus = "yellow";
+                    magStatus = "red";
                     break;
                 case "C":
+                    magStatus = "yellow";
+                    break;
+                case "D":
                     magStatus = "green";
                     break;
                 default:
                     magStatus = "unknown";
+                    break;
             }
+            console.log(`magStatus: ${magStatus} (${magnetometerData})`);
         }
 
         const rotation = {
@@ -1297,6 +1302,7 @@ function decodeIMUPacket(data: string, trackerName: string) {
                 },
                 gravity,
                 ankle,
+                magStatus,
             };
         }
 
@@ -1388,9 +1394,9 @@ function processTrackerData(data: string, trackerName: string) {
  * @fires haritora#mag
  **/
 function processMagData(data: string, trackerName: string) {
-    const GREEN_2 = 3;
-    const GREEN = 2;
-    const YELLOW = 1;
+    const GREEN = 3;
+    const YELLOW = 2;
+    const RED_2 = 1;
     const RED = 0;
     let magStatus;
     const buffer = Buffer.from(data, "base64");
@@ -1401,13 +1407,13 @@ function processMagData(data: string, trackerName: string) {
         case GREEN:
             magStatus = "green";
             break;
-        case GREEN_2:
-            magStatus = "green";
-            break;
         case YELLOW:
             magStatus = "yellow";
             break;
         case RED:
+            magStatus = "red";
+            break;
+        case RED_2:
             magStatus = "red";
             break;
         default:
