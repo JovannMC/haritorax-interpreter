@@ -1137,7 +1137,7 @@ let initialRotations: { [key: string]: any } = {};
 
 function decodeIMUPacket(data: string, trackerName: string) {
     try {
-        if (data.length < 16) {
+        if (data.length < 14) {
             throw new Error("Too few bytes to decode IMU packet");
         }
 
