@@ -7,6 +7,7 @@ import GX from "../mode/gx.js";
 import Bluetooth from "../mode/bluetooth.js";
 
 let debug = 0;
+let printTrackerIMUData = false;
 
 let gx: GX;
 let bluetooth: Bluetooth;
@@ -180,16 +181,19 @@ let activeDevices: string[] = [];
  * set settings for all/individual trackers, and emits events for: IMU data, tracker data, button data, battery data, and settings data.
  *
  * @param {boolean} debugMode - Enable logging of debug messages depending on verbosity. (0 = none, 1 = debug, 2 = debug w/ function info)
+ * @param {boolean} printTrackerIMUProcessing - Print the tracker IMU processing data (processIMUData()). (true or false)
  *
  * @example
  * let device = new HaritoraXWireless(2);
  **/
 export default class HaritoraXWireless extends EventEmitter {
-    constructor(debugMode = 0) {
+    constructor(debugMode = 0, printTrackerIMUProcessing = false) {
         super();
         debug = debugMode;
+        printTrackerIMUData = printTrackerIMUProcessing;
         haritora = this;
         log(`Set debug mode for HaritoraXWireless: ${debug}`);
+        log(`Print tracker IMU processing: ${printTrackerIMUData}`);
     }
 
     /**
@@ -1092,20 +1096,22 @@ function processIMUData(data: string, trackerName: string) {
             trackerName
         );
 
-        log(
-            `Tracker ${trackerName} rotation: (${rotation.x.toFixed(
-                5
-            )}, ${rotation.y.toFixed(5)}, ${rotation.z.toFixed(
-                5
-            )}, ${rotation.w.toFixed(5)})`
-        );
-        log(
-            `Tracker ${trackerName} gravity: (${gravity.x.toFixed(
-                5
-            )}, ${gravity.y.toFixed(5)}, ${gravity.z.toFixed(5)})`
-        );
-        if (ankle) log(`Tracker ${trackerName} ankle: ${ankle}`);
-        log(`Tracker ${trackerName} magnetometer status: ${magStatus}`);
+        if (printTrackerIMUData) {
+            log(
+                `Tracker ${trackerName} rotation: (${rotation.x.toFixed(
+                    5
+                )}, ${rotation.y.toFixed(5)}, ${rotation.z.toFixed(
+                    5
+                )}, ${rotation.w.toFixed(5)})`
+            );
+            log(
+                `Tracker ${trackerName} gravity: (${gravity.x.toFixed(
+                    5
+                )}, ${gravity.y.toFixed(5)}, ${gravity.z.toFixed(5)})`
+            );
+            if (ankle) log(`Tracker ${trackerName} ankle: ${ankle}`);
+            log(`Tracker ${trackerName} magnetometer status: ${magStatus}`);
+        }
 
         haritora.emit("imu", trackerName, rotation, gravity, ankle);
         haritora.emit("mag", trackerName, magStatus);
