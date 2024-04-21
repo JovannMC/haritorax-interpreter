@@ -4,7 +4,7 @@
 
 A node.js package that allows you to communicate and interact with the HaritoraX FBT trackers to interpret the data how you want it. No HaritoraConfigurator software needed!
 
-Check out the Haritora-GX6 proof-of-concept repository here: https://github.com/JovannMC/haritora-gx6-poc
+Check out the Haritora-GX(6/2) proof-of-concept repository here: https://github.com/JovannMC/haritora-gx-poc
 
 ## Installation
 
@@ -34,7 +34,7 @@ Will write actual documentation at some point, for now refer to the source code,
 ```js
 import { HaritoraXWireless } from "haritorax-interpreter";
 
-let device = new HaritoraXWireless(2); // enable debug mode w/ function & line info
+let device = new HaritoraXWireless(2, true); // enable debug mode w/ function & line info, allow printing of processIMUData() logs (lots of spam!)
 device.startConnection("gx", ["COM4", "COM5", "COM6", "COM7"]); // start connecting to dongles via GX dongles, with the ports COM4, COM5, COM6, and COM7
 
 device.on("imu", (trackerName, rotation, gravity, ankle) => {
