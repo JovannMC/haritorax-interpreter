@@ -1083,12 +1083,6 @@ function processIMUData(data: string, trackerName: string) {
         haritora.emit("connect", trackerName);
     }
 
-    // Check if the data is valid
-    if (!data || data.length < 14) {
-        error(`Invalid IMU packet for tracker ${trackerName}: ${data}`);
-        return false;
-    }
-
     // Decode and log the data
     try {
         const { rotation, gravity, ankle, magStatus } = decodeIMUPacket(
@@ -1153,10 +1147,7 @@ function decodeIMUPacket(data: string, trackerName: string) {
         const gravityRawY = buffer.readInt16LE(10);
         const gravityRawZ = buffer.readInt16LE(12);
 
-        let ankle = undefined;
-        if (data.slice(-2) !== "==" && data.length > 14) {
-            ankle = buffer.readInt16LE(buffer.length - 2);
-        }
+        let ankle = data.slice(-2) !== "==" ? buffer.readInt16LE(buffer.length - 2) : undefined;
 
         let magStatus = undefined;
         if (!trackerName.startsWith("HaritoraX")) {
