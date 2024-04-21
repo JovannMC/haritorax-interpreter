@@ -97,6 +97,8 @@ export default class Bluetooth extends EventEmitter {
                     "HaritoraX (1.0/1.1/1.1b) detected. Device is not fully supported and you may experience issues."
                 );
 
+            activeDevices.push([localName, peripheral, [], []]);
+
             peripheral.connect((err: any) => {
                 if (err) {
                     error(`Error connecting to ${localName}: ${err}`);
