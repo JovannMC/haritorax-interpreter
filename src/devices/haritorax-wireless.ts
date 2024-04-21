@@ -1173,7 +1173,6 @@ function decodeIMUPacket(data: string, trackerName: string) {
                     magStatus = "unknown";
                     break;
             }
-            console.log(`magStatus: ${magStatus} (${magnetometerData})`);
         }
 
         const rotation = {
