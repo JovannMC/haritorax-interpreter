@@ -591,7 +591,7 @@ export default class HaritoraXWireless extends EventEmitter {
 
     /**
      * Returns device info for the specified tracker or dongle.
-     * Support: GX, Bluetooth
+     * Support: GX6, GX2, Bluetooth
      *
      * @function getDeviceInfo
      * @returns {object} - The device info (version, model, serial)
@@ -991,7 +991,6 @@ function listenToDeviceEvents() {
         error(message);
     });
 
-    // TODO: magnetometer, add settings
     bluetooth.on(
         "data",
         (
@@ -1108,7 +1107,7 @@ function processIMUData(data: string, trackerName: string) {
                 )}, ${gravity.y.toFixed(5)}, ${gravity.z.toFixed(5)})`
             );
             if (ankle) log(`Tracker ${trackerName} ankle: ${ankle}`);
-            log(`Tracker ${trackerName} magnetometer status: ${magStatus}`);
+            if (magStatus) log(`Tracker ${trackerName} magnetometer status: ${magStatus}`);
         }
 
         haritora.emit("imu", trackerName, rotation, gravity, ankle);
@@ -1291,7 +1290,7 @@ function decodeIMUPacket(data: string, trackerName: string) {
                 driftCorrection.yaw
             );
 
-            log("Applied fix");
+            log("Applied drift fix");
 
             return {
                 rotation: {
@@ -1403,7 +1402,6 @@ function processMagData(data: string, trackerName: string) {
     const magData = buffer.readUInt8(0);
 
     switch (magData) {
-        // sometimes 3 is being reported, so we'll just treat it as green
         case GREEN:
             magStatus = "green";
             break;
