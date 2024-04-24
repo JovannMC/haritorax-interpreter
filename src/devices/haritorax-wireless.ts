@@ -1054,8 +1054,12 @@ function listenToDeviceEvents() {
     });
 
     bluetooth.on("connect", (peripheral) => {
-        haritora.emit("connect", peripheral.advertisement.localName);
-        log(`Connected to ${peripheral.advertisement.localName}`);
+        const trackerName = peripheral.advertisement.localName;
+        if (trackerName && !activeDevices.includes(trackerName)) {
+            activeDevices.push(trackerName);
+            haritora.emit("connect", trackerName);
+            log(`Connected to ${peripheral.advertisement.localName}`);
+        }
     });
 
     bluetooth.on("disconnect", (peripheral) => {

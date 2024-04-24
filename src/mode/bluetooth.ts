@@ -89,7 +89,7 @@ export default class Bluetooth extends EventEmitter {
         if (
             localName &&
             localName.startsWith("HaritoraX") &&
-            !activeDevices.find((device) => device[1] === peripheral)
+            (!activeDevices.find((device) => device[1] === peripheral) || !activeDevices.find((device) => device[0] === localName))
         ) {
             log(`Found device: ${localName}`);
             if (localName.startsWith("HaritoraX-"))
