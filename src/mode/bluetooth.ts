@@ -89,7 +89,8 @@ export default class Bluetooth extends EventEmitter {
         if (
             localName &&
             localName.startsWith("HaritoraX") &&
-            (!activeDevices.find((device) => device[1] === peripheral) || !activeDevices.find((device) => device[0] === localName))
+            (!activeDevices.find((device) => device[1] === peripheral) ||
+                !activeDevices.find((device) => device[0] === localName))
         ) {
             log(`Found device: ${localName}`);
             if (localName.startsWith("HaritoraX-"))
@@ -181,12 +182,24 @@ export default class Bluetooth extends EventEmitter {
                                 );
                             }
                         );
-                        activeDevices.push([
-                            localName,
-                            peripheral,
-                            activeServices,
-                            activeCharacteristics,
-                        ]);
+                        const deviceIndex = activeDevices.findIndex(
+                            (device) => device[0] === localName
+                        );
+                        if (deviceIndex !== -1) {
+                            activeDevices[deviceIndex] = [
+                                localName,
+                                peripheral,
+                                activeServices,
+                                activeCharacteristics,
+                            ];
+                        } else {
+                            activeDevices.push([
+                                localName,
+                                peripheral,
+                                activeServices,
+                                activeCharacteristics,
+                            ]);
+                        }
                     }
                 );
             });

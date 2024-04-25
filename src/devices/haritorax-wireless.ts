@@ -1107,7 +1107,8 @@ function processIMUData(data: string, trackerName: string) {
                 )}, ${gravity.y.toFixed(5)}, ${gravity.z.toFixed(5)})`
             );
             if (ankle) log(`Tracker ${trackerName} ankle: ${ankle}`);
-            if (magStatus) log(`Tracker ${trackerName} magnetometer status: ${magStatus}`);
+            if (magStatus)
+                log(`Tracker ${trackerName} magnetometer status: ${magStatus}`);
         }
 
         haritora.emit("imu", trackerName, rotation, gravity, ankle);
@@ -1150,7 +1151,10 @@ function decodeIMUPacket(data: string, trackerName: string) {
         const gravityRawY = buffer.readInt16LE(10);
         const gravityRawZ = buffer.readInt16LE(12);
 
-        let ankle = data.slice(-2) !== "==" ? buffer.readInt16LE(buffer.length - 2) : undefined;
+        let ankle =
+            data.slice(-2) !== "=="
+                ? buffer.readInt16LE(buffer.length - 2)
+                : undefined;
 
         let magStatus = undefined;
         if (!trackerName.startsWith("HaritoraX")) {
