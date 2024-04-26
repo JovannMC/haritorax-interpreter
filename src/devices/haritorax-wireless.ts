@@ -201,33 +201,20 @@ export default class HaritoraXWireless extends EventEmitter {
      *
      * @param {string} connectionMode - Connect to the trackers with the specified mode (GX6 or bluetooth).
      * @param {string[]} [portNames] - The port names to connect to. (GX6 only)
-     * @returns {boolean} - Whether the connection was successfully started. (Bluetooth only)
      *
      * @example
      * device.startConnection("gx");
      **/
-    async startConnection(connectionMode: string, portNames?: string[]) {
+    startConnection(connectionMode: string, portNames?: string[]) {
         gx = new GX(debug);
         bluetooth = new Bluetooth(debug);
-        listenToDeviceEvents();
 
         if (connectionMode === "gx") {
-            let connectionStarted = gx.startConnection(portNames);
-            if (connectionStarted) {
-                gxEnabled = true;
-                return true;
-            } else {
-                error("Error starting GX connection");
-                return false;
-            }
+            gx.startConnection(portNames);
+            gxEnabled = true;
         } else if (connectionMode === "bluetooth") {
-            let connectionStarted = bluetooth.startConnection();
-            if (connectionStarted) {
-                bluetoothEnabled = true;
-            } else {
-                error("Error starting Bluetooth connection");
-                return false;
-            }
+            bluetooth.startConnection();
+            bluetoothEnabled = true;
 
             settingsService = bluetooth.getServiceUUID("Setting Service");
             batteryService = bluetooth.getServiceUUID("Battery Service");
@@ -241,10 +228,9 @@ export default class HaritoraXWireless extends EventEmitter {
                 "AutoCalibrationSetting"
             );
             ankleCharacteristic = bluetooth.getCharacteristicUUID("TofSetting");
-            return true;
         }
-        error("Invalid connection mode");
-        return false;
+
+        listenToDeviceEvents();
     }
 
     /**
@@ -265,7 +251,6 @@ export default class HaritoraXWireless extends EventEmitter {
         }
 
         activeDevices = [];
-        return true;
     }
 
     /**
@@ -277,7 +262,7 @@ export default class HaritoraXWireless extends EventEmitter {
      * @param {number} fpsMode - The posture data transfer rate/FPS (50 or 100).
      * @param {string[]} sensorAutoCorrection - The sensor auto correction mode, multiple or none can be used (accel, gyro, mag).
      * @param {boolean} ankleMotionDetection - Whether ankle motion detection is enabled. (true or false)
-     * @returns {boolean} - Whether the settings were successfully sent to the tracker.
+     * @returns {boolean} Whether the settings were successfully sent to the tracker.
      * @fires this#settings
      *
      * @example
@@ -488,7 +473,7 @@ export default class HaritoraXWireless extends EventEmitter {
      * @param {number} fpsMode - The posture data transfer rate/FPS (50 or 100).
      * @param {string[]} sensorAutoCorrection - The sensor auto correction mode, multiple or none can be used (accel, gyro, mag).
      * @param {boolean} ankleMotionDetection - Whether ankle motion detection is enabled. (true or false)
-     * @returns {boolean} - Whether the settings were successfully sent to all trackers.
+     * @returns {boolean} Whether the settings were successfully sent to all trackers.
      * @fires this#settings
      *
      * @example
@@ -585,7 +570,7 @@ export default class HaritoraXWireless extends EventEmitter {
      * Support: GX6, GX2, Bluetooth
      *
      * @function getDeviceInfo
-     * @returns {object} - The device info (version, model, serial)
+     * @returns {object} The device info (version, model, serial)
      * @fires this#info
      **/
 
@@ -600,7 +585,6 @@ export default class HaritoraXWireless extends EventEmitter {
         const VERSION_UUID = "2a28";
         const MODEL_UUID = "2a24";
         const SERIAL_UUID = "2a25";
-        const TIMEOUT = 3000;
 
         // Global
         let serial = undefined;
@@ -632,7 +616,6 @@ export default class HaritoraXWireless extends EventEmitter {
                 (characteristic) => characteristic.uuid === SERIAL_UUID
             );
 
-            // Create a TextDecoder instance
             const decoder = new TextDecoder("utf-8");
 
             // Get buffers
@@ -670,7 +653,7 @@ export default class HaritoraXWireless extends EventEmitter {
      * Support: GX6, GX2, Bluetooth
      *
      * @function getBatteryInfo
-     * @returns {object} - The battery info (batteryRemaining, batteryVoltage, chargeStatus)
+     * @returns {object} The battery info (batteryRemaining, batteryVoltage, chargeStatus)
      * @fires this#battery
      **/
 
@@ -728,7 +711,7 @@ export default class HaritoraXWireless extends EventEmitter {
      * Support: GX6, GX2, Bluetooth
      *
      * @function getActiveTrackers
-     * @returns {array} - The active trackers.
+     * @returns {array} The active trackers.
      **/
 
     getActiveTrackers() {
@@ -749,7 +732,7 @@ export default class HaritoraXWireless extends EventEmitter {
      *
      * @function getTrackerSettings
      * @param {string} trackerName
-     * @returns {Object} - The tracker settings (sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection)
+     * @returns {Object} The tracker settings (sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection)
      **/
     async getTrackerSettings(
         trackerName: string,
@@ -837,33 +820,26 @@ export default class HaritoraXWireless extends EventEmitter {
             log(
                 `Getting tracker settings for ${trackerName} (GX/no BLE reading)`
             );
-            try {
-                if (trackerSettings.has(trackerName)) {
-                    let [
-                        sensorMode,
-                        fpsMode,
-                        sensorAutoCorrection,
-                        ankleMotionDetection,
-                    ] = trackerSettings.get(trackerName);
-                    log(`Tracker ${trackerName} settings:`);
-                    log(`Sensor mode: ${sensorMode}`);
-                    log(`FPS mode: ${fpsMode}`);
-                    log(`Sensor auto correction: ${sensorAutoCorrection}`);
-                    log(`Ankle motion detection: ${ankleMotionDetection}`);
-                    return {
-                        sensorMode,
-                        fpsMode,
-                        sensorAutoCorrection,
-                        ankleMotionDetection,
-                    };
-                } else {
-                    log(`Tracker ${trackerName} settings not found`);
-                    return null;
-                }
-            } catch (err) {
-                error(
-                    `Error getting tracker settings for ${trackerName}: ${err}`
-                );
+            if (trackerSettings.has(trackerName)) {
+                let [
+                    sensorMode,
+                    fpsMode,
+                    sensorAutoCorrection,
+                    ankleMotionDetection,
+                ] = trackerSettings.get(trackerName);
+                log(`Tracker ${trackerName} settings:`);
+                log(`Sensor mode: ${sensorMode}`);
+                log(`FPS mode: ${fpsMode}`);
+                log(`Sensor auto correction: ${sensorAutoCorrection}`);
+                log(`Ankle motion detection: ${ankleMotionDetection}`);
+                return {
+                    sensorMode,
+                    fpsMode,
+                    sensorAutoCorrection,
+                    ankleMotionDetection,
+                };
+            } else {
+                log(`Tracker ${trackerName} settings not found`);
                 return null;
             }
         }
@@ -875,20 +851,15 @@ export default class HaritoraXWireless extends EventEmitter {
      *
      * @function getTrackerSettingsRaw
      * @param {string} trackerName
-     * @returns {Map} - The tracker settings map
+     * @returns {Map} The tracker settings map
      **/
     getTrackerSettingsRaw(trackerName: string) {
-        try {
-            if (trackerSettingsRaw.has(trackerName)) {
-                let hexValue = trackerSettingsRaw.get(trackerName);
-                log(`Tracker ${trackerName} raw hex settings: ${hexValue}`);
-                return hexValue;
-            } else {
-                log(`Tracker ${trackerName} raw hex settings not found`);
-                return null;
-            }
-        } catch (err) {
-            error(`Error getting tracker settings for ${trackerName}: ${err}`);
+        if (trackerSettingsRaw.has(trackerName)) {
+            let hexValue = trackerSettingsRaw.get(trackerName);
+            log(`Tracker ${trackerName} raw hex settings: ${hexValue}`);
+            return hexValue;
+        } else {
+            log(`Tracker ${trackerName} raw hex settings not found`);
             return null;
         }
     }
@@ -899,21 +870,16 @@ export default class HaritoraXWireless extends EventEmitter {
      *
      * @function getTrackerButtons
      * @param {string} trackerName
-     * @returns {Map} - The tracker button map
+     * @returns {Map} The tracker button map
      **/
     getTrackerButtons(trackerName: string) {
-        try {
-            if (trackerButtons.has(trackerName)) {
-                let [mainButton, subButton] = trackerButtons.get(trackerName);
-                log(`Tracker ${trackerName} main button: ${mainButton}`);
-                log(`Tracker ${trackerName} sub button: ${subButton}`);
-                return { mainButton, subButton };
-            } else {
-                log(`Tracker ${trackerName} buttons not found`);
-                return null;
-            }
-        } catch (err) {
-            error(`Error getting tracker buttons for ${trackerName}: ${err}`);
+        if (trackerButtons.has(trackerName)) {
+            let [mainButton, subButton] = trackerButtons.get(trackerName);
+            log(`Tracker ${trackerName} main button: ${mainButton}`);
+            log(`Tracker ${trackerName} sub button: ${subButton}`);
+            return { mainButton, subButton };
+        } else {
+            log(`Tracker ${trackerName} buttons not found`);
             return null;
         }
     }
@@ -924,15 +890,16 @@ export default class HaritoraXWireless extends EventEmitter {
      *
      * @function getConnectionModeActive
      * @param {string} connectionMode
-     * @returns {boolean} - Whether the connection mode is active or not
+     * @returns {boolean} Whether the connection mode is active or not
      **/
     getConnectionModeActive(connectionMode: string) {
-        if (connectionMode === "gx") {
-            return gxEnabled;
-        } else if (connectionMode === "bluetooth") {
-            return bluetoothEnabled;
-        } else {
-            return null;
+        switch (connectionMode) {
+            case "gx":
+                return gxEnabled;
+            case "bluetooth":
+                return bluetoothEnabled;
+            default:
+                return null;
         }
     }
 }
@@ -1073,7 +1040,9 @@ function listenToDeviceEvents() {
 function processIMUData(data: string, trackerName: string) {
     // If tracker isn't in activeDevices, add it and emit "connect" event
     if (trackerName && !activeDevices.includes(trackerName)) {
-        log(`Tracker ${trackerName} isn't in active devices, adding and emitting connect event`)
+        log(
+            `Tracker ${trackerName} isn't in active devices, adding and emitting connect event`
+        );
         activeDevices.push(trackerName);
         haritora.emit("connect", trackerName);
     }
