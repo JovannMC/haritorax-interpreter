@@ -212,7 +212,7 @@ export default class HaritoraXWireless extends EventEmitter {
         listenToDeviceEvents();
 
         if (connectionMode === "gx") {
-            let connectionStarted = await gx.startConnection(portNames);
+            let connectionStarted = gx.startConnection(portNames);
             if (connectionStarted) {
                 gxEnabled = true;
                 return true;
@@ -221,7 +221,7 @@ export default class HaritoraXWireless extends EventEmitter {
                 return false;
             }
         } else if (connectionMode === "bluetooth") {
-            let connectionStarted = await bluetooth.startConnection();
+            let connectionStarted = bluetooth.startConnection();
             if (connectionStarted) {
                 bluetoothEnabled = true;
             } else {
@@ -255,26 +255,17 @@ export default class HaritoraXWireless extends EventEmitter {
      * @example
      * device.stopConnection("gx");
      **/
-    async stopConnection(connectionMode: string) {
+    stopConnection(connectionMode: string) {
         if (connectionMode === "gx" && gxEnabled) {
-            let connectionStopped = await gx.stopConnection();
-            if (connectionStopped) {
-                gxEnabled = false;
-                return true;
-            } else {
-                error("Error stopping GX6 connection");
-                return false;
-            }
+            gx.stopConnection();
+            gxEnabled = false;
         } else if (connectionMode === "bluetooth" && bluetoothEnabled) {
-            let connectionStopped = await bluetooth.stopConnection();
-            if (connectionStopped) {
-                bluetoothEnabled = false;
-                return true;
-            } else {
-                error("Error stopping Bluetooth connection");
-                return false;
-            }
+            bluetooth.stopConnection();
+            bluetoothEnabled = false;
         }
+
+        activeDevices = [];
+        return true;
     }
 
     /**
@@ -1082,6 +1073,7 @@ function listenToDeviceEvents() {
 function processIMUData(data: string, trackerName: string) {
     // If tracker isn't in activeDevices, add it and emit "connect" event
     if (trackerName && !activeDevices.includes(trackerName)) {
+        log(`Tracker ${trackerName} isn't in active devices, adding and emitting connect event`)
         activeDevices.push(trackerName);
         haritora.emit("connect", trackerName);
     }

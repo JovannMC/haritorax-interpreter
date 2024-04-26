@@ -226,6 +226,7 @@ export default class Bluetooth extends EventEmitter {
         try {
             noble.stopScanning();
             for (let device of activeDevices) {
+                log(`Disconnecting from BT device ${device[0]}`);
                 device[1].disconnect();
             }
         } catch (err) {

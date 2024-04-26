@@ -152,6 +152,7 @@ export default class GX extends EventEmitter {
         try {
             for (let port in activePorts) {
                 if (activePorts[port].isOpen) {
+                    log(`Closing COM port: ${port}`)
                     activePorts[port].close();
                     activePorts[port].destroy();
                 }
