@@ -48,8 +48,8 @@ export default class HaritoraX11b extends EventEmitter {
         gx.stopConnection();
     }
 
-    parseData(data: string) {
-        processIMUData(data, "CUSTOM");
+    parseData(data: string, trackerName: string) {
+        return processIMUData(data, trackerName);
     }
 
 }
@@ -70,7 +70,7 @@ export default class HaritoraX11b extends EventEmitter {
 function processIMUData(data: string, trackerName: string) {
     // Decode and log the data
     try {
-        const { rotation, gravity, ankle, magStatus } = decodeIMUPacket(
+        const { rotation, gravity } = decodeIMUPacket(
             data,
             trackerName
         );
@@ -88,13 +88,9 @@ function processIMUData(data: string, trackerName: string) {
                     5
                 )}, ${gravity.y.toFixed(5)}, ${gravity.z.toFixed(5)})`
             );
-            if (ankle) log(`Tracker ${trackerName} ankle: ${ankle}`);
-            if (magStatus)
-                log(`Tracker ${trackerName} magnetometer status: ${magStatus}`);
         }
 
-        haritora.emit("imu", trackerName, rotation, gravity, ankle);
-        haritora.emit("mag", trackerName, magStatus);
+        haritora.emit("imu", trackerName, rotation, gravity);
     } catch (err) {
         error(`Error decoding tracker ${trackerName} IMU packet data: ${err}`);
     }
@@ -129,37 +125,13 @@ function decodeIMUPacket(data: string, trackerName: string) {
         const rotationZ = buffer.readInt16LE(4);
         const rotationW = buffer.readInt16LE(6);
 
-        const gravityRawX = buffer.readInt16LE(8);
-        const gravityRawY = buffer.readInt16LE(10);
-        const gravityRawZ = buffer.readInt16LE(12);
+        const gravityRawX = buffer.readInt8(8);
+        const gravityRawY = buffer.readInt8(10);
+        const gravityRawZ = buffer.readInt8(12);
 
-        let ankle =
-            data.slice(-2) !== "=="
-                ? buffer.readInt16LE(buffer.length - 2)
-                : undefined;
-
-        let magStatus = undefined;
-        if (!trackerName.startsWith("HaritoraX")) {
-            const magnetometerData = data.charAt(data.length - 5);
-
-            switch (magnetometerData) {
-                case "A":
-                    magStatus = "red";
-                    break;
-                case "B":
-                    magStatus = "red";
-                    break;
-                case "C":
-                    magStatus = "yellow";
-                    break;
-                case "D":
-                    magStatus = "green";
-                    break;
-                default:
-                    magStatus = "unknown";
-                    break;
-            }
-        }
+        // no idea if this is right lol
+        const ankleMotion1 = buffer.readInt16LE(buffer.length - 4);
+        const ankleMotion2 = buffer.readInt16LE(buffer.length - 2);
 
         const rotation = {
             x: (rotationX / 180.0) * 0.01,
@@ -285,13 +257,11 @@ function decodeIMUPacket(data: string, trackerName: string) {
                     z: rotationDriftCorrected.z,
                     w: rotationDriftCorrected.w,
                 },
-                gravity,
-                ankle,
-                magStatus,
+                gravity
             };
         }
 
-        return { rotation, gravity, ankle, magStatus };
+        return { rotation, gravity };
     } catch (error: any) {
         throw new Error("Error decoding IMU packet: " + error.message);
     }
