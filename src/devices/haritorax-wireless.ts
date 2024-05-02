@@ -1120,7 +1120,7 @@ function processIMUData(data: string, trackerName: string) {
         }
 
         haritora.emit("imu", trackerName, rotation, gravity, ankle);
-        haritora.emit("mag", trackerName, magStatus);
+        if (!trackerName.startsWith("HaritoraX")) haritora.emit("mag", trackerName, magStatus);
     } catch (err) {
         error(`Error decoding tracker ${trackerName} IMU packet data: ${err}`);
     }
