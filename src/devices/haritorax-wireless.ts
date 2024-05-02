@@ -686,16 +686,18 @@ export default class HaritoraXWireless extends EventEmitter {
                 [batteryRemaining, batteryVoltage, chargeStatus] =
                     trackerBattery.get(trackerName);
             } else {
-                if (gxEnabled) {
-                    log(`Tracker ${trackerName} battery info not found`);
-                    return null;
-                } else if (trackerName.startsWith("HaritoraX")) {
+                if (trackerName.startsWith("HaritoraX")) {
                     log(`Reading battery info for ${trackerName}...`);
-                    batteryRemaining = await bluetooth.read(
+                    let buffer = await bluetooth.read(
                         trackerName,
                         batteryService,
                         batteryLevelCharacteristic
                     );
+                    let dataView = new DataView(buffer);
+                    batteryRemaining = dataView.getInt8(0);
+                } else {
+                    log(`Tracker ${trackerName} battery info not found`);
+                    return null;
                 }
             }
         } catch (err) {
