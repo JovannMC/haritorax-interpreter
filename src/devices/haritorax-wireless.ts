@@ -923,6 +923,7 @@ export default class HaritoraXWireless extends EventEmitter {
                     trackerService,
                     magnetometerCharacteristic
                 );
+                this.emit("mag", trackerName, magStatus);
                 return processMagData(magStatus, trackerName);
             } else {
                 log(`Tracker ${trackerName} magnetometer status not found`);
