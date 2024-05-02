@@ -69,8 +69,22 @@ const trackerBattery: Map<string, [number, number, string]> = new Map([
     ["rightElbow", [0, 0, ""]],
 ]);
 
+const trackerMag: Map<string, string> = new Map([
+    // trackerName, magStatus
+    ["rightKnee", ""],
+    ["rightAnkle", ""],
+    ["hip", ""],
+    ["chest", ""],
+    ["leftKnee", ""],
+    ["leftAnkle", ""],
+    ["leftElbow", ""],
+    ["rightElbow", ""],
+]);
+
+let trackerService: string;
 let settingsService: string;
 let batteryService: string;
+let magnetometerCharacteristic: string;
 let batteryLevelCharacteristic: string;
 let sensorModeCharacteristic: string;
 let fpsModeCharacteristic: string;
@@ -216,8 +230,11 @@ export default class HaritoraXWireless extends EventEmitter {
             bluetooth.startConnection();
             bluetoothEnabled = true;
 
+            trackerService = bluetooth.getServiceUUID("Tracker Service");
             settingsService = bluetooth.getServiceUUID("Setting Service");
             batteryService = bluetooth.getServiceUUID("Battery Service");
+            magnetometerCharacteristic =
+                bluetooth.getCharacteristicUUID("Magnetometer");
             batteryLevelCharacteristic =
                 bluetooth.getCharacteristicUUID("BatteryLevel");
             sensorModeCharacteristic =
@@ -885,6 +902,36 @@ export default class HaritoraXWireless extends EventEmitter {
     }
 
     /**
+     * Get the tracker's magnetometer status
+     * Support: GX6, GX2, Bluetooth
+     *
+     * @function getTrackerMag
+     * @param {string} trackerName
+     * @returns {string} The tracker's magnetometer status
+     */
+    async getTrackerMag(trackerName: string) {
+        if (trackerMag.has(trackerName)) {
+            let magStatus = trackerMag.get(trackerName);
+            log(`Tracker ${trackerName} magnetometer status: ${magStatus}`);
+            this.emit("mag", trackerName, magStatus);
+            return magStatus;
+        } else {
+            if (trackerName.startsWith("HaritoraX")) {
+                // Read from BLE
+                let magStatus = await bluetooth.read(
+                    trackerName,
+                    trackerService,
+                    magnetometerCharacteristic
+                );
+                return processMagData(magStatus, trackerName);
+            } else {
+                log(`Tracker ${trackerName} magnetometer status not found`);
+                return null;
+            }
+        }
+    }
+
+    /**
      * Check whether the connection mode is active or not.
      * Support: GX6, GX2, Bluetooth
      *
@@ -1015,7 +1062,7 @@ function listenToDeviceEvents() {
         if (trackerName && !activeDevices.includes(trackerName)) {
             activeDevices.push(trackerName);
             haritora.emit("connect", trackerName);
-            log(`Connected to ${peripheral.advertisement.localName}`);
+            log(`(haritorax-wireless) Connected to ${peripheral.advertisement.localName}`);
         }
     });
 
@@ -1138,6 +1185,8 @@ function decodeIMUPacket(data: string, trackerName: string) {
                     magStatus = "unknown";
                     break;
             }
+
+            trackerMag.set(trackerName, magStatus);
         }
 
         const rotation = {
@@ -1386,7 +1435,9 @@ function processMagData(data: string, trackerName: string) {
     }
 
     log(`Tracker ${trackerName} mag status: ${magStatus}`);
+    trackerMag.set(trackerName, magStatus);
     haritora.emit("mag", trackerName, magStatus);
+    return magStatus;
 }
 
 /**
