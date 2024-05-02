@@ -534,19 +534,18 @@ export default class HaritoraXWireless extends EventEmitter {
                 log(`Ankle motion detection: ${ankleMotionDetection}`);
                 log(`Raw hex data calculated to be sent: ${hexValue}`);
 
-                for (let trackerName of trackerSettingsRaw.keys()) {
-                    let ports = gx.getActivePorts();
-                    let trackerPort = gx.getTrackerPort(trackerName);
-
-                    ports[trackerPort].write(trackerSettingsBuffer, (err) => {
+                for (let port in gx.getActivePorts()) {
+                    gx.getActivePorts()[port].write(trackerSettingsBuffer, (err) => {
                         if (err) {
                             error(
-                                `${trackerName} - Error writing data to serial port ${trackerPort}: ${err}`
+                                `Error writing data to serial port ${port}: ${err}`
                             );
                         } else {
-                            trackerSettingsRaw.set(trackerName, hexValue);
+                            for (let trackerName of activeDevices) {
+                                trackerSettingsRaw.set(trackerName, hexValue);
+                            }
                             log(
-                                `${trackerName} - Data written to serial port ${trackerPort}: ${trackerSettingsBuffer
+                                `Data written to serial port ${port}: ${trackerSettingsBuffer
                                     .toString()
                                     .replace(/\r\n/g, " ")}`
                             );
