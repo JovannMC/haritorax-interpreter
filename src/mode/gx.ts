@@ -73,7 +73,10 @@ export default class GX extends EventEmitter {
             });
 
             parser.on("data", (data) => {
-                this.emit("data", data);
+                const splitData = data.toString().split(/:(.+)/);
+                const identifier = splitData[0].toLowerCase();
+                const portData = splitData[1];
+                this.emit("data", identifier, portData);
             });
 
             serial.on("close", () => {

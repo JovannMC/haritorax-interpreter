@@ -1,4 +1,4 @@
-"use strict"
+"use strict";
 
 import { Buffer } from "buffer";
 import { EventEmitter } from "events";
@@ -23,6 +23,25 @@ export default class HaritoraX11b extends EventEmitter {
     }
 
     /**
+     * Get the active trackers.
+     * Support: GX6, GX2, Bluetooth
+     *
+     * @function getActiveTrackers
+     * @returns {array} The active trackers.
+     **/
+
+    getActiveTrackers() {
+        return [
+            "leftKnee",
+            "rightKnee",
+            "chest",
+            "hip",
+            "rightAnkle",
+            "leftAnkle",
+        ];
+    }
+
+    /**
      * Starts the connection to the trackers with the specified mode.
      *
      * @param {string} connectionMode - Connect to the trackers with the specified mode (GX6 or bluetooth).
@@ -32,9 +51,9 @@ export default class HaritoraX11b extends EventEmitter {
      * device.startConnection("gx");
      **/
     async startConnection(portNames?: string[]) {
-        log("Starting connection to the trackers.")
+        log("Starting connection to the trackers.");
         gx = new GX(debug);
-        gx.startConnection(["COM6"]);
+        gx.startConnection(portNames);
         await new Promise((resolve) => setTimeout(resolve, 500));
         const trackerNames = [
             "leftKnee",
@@ -45,7 +64,7 @@ export default class HaritoraX11b extends EventEmitter {
             "leftAnkle",
         ];
         trackerNames.forEach((trackerName) => {
-            this.emit("connect", trackerName)
+            this.emit("connect", trackerName);
         });
         await new Promise((resolve) => setTimeout(resolve, 1000));
         startEventListeners();
@@ -60,7 +79,7 @@ export default class HaritoraX11b extends EventEmitter {
      * device.stopConnection("gx");
      **/
     stopConnection() {
-        log("Stopping connection to the trackers.")
+        log("Stopping connection to the trackers.");
         gx.stopConnection();
     }
 
@@ -68,51 +87,71 @@ export default class HaritoraX11b extends EventEmitter {
         const buffer = Buffer.from(data, "base64");
         return processIMUData(buffer, trackerName);
     }
-
 }
 
 function startEventListeners() {
     gx.on(
         "data",
         (
-            data: string
+            identifier: string,
+            portData: string
         ) => {
-            const trackerNames = [
-                "leftKnee",
-                "rightKnee",
-                "chest",
-                "hip",
-                "rightAnkle",
-                "leftAnkle",
-            ];
-    
-            const buffer = Buffer.from(data, 'base64');
+            switch (identifier[0]) {
+                case "x":
+                    const trackerNames = [
+                        "leftKnee",
+                        "rightKnee",
+                        "chest",
+                        "hip",
+                        "rightAnkle",
+                        "leftAnkle",
+                    ];
 
-            // Ensure the buffer length is as expected: 14 bytes * 6 trackers = 84 bytes
-            if (buffer.length === 84) {
-                trackerNames.forEach((trackerName, index) => {
-                    const start = index * 14; // 14 bytes per tracker
-                    const trackerBuffer = buffer.slice(start, start + 14);
-                    
-                    // Now `trackerBuffer` contains the 14 bytes for the current tracker
-                    // You can then decode and process each tracker's data from `trackerBuffer`
-                    processIMUData(trackerBuffer, trackerName);
-                });
-            } else {
-                error(`Unexpected data length: buffer.length`);
+                    const buffer = Buffer.from(portData, "base64");
+
+                    // Ensure the buffer length is as expected: 14 bytes * 6 trackers = 84 bytes
+                    if (buffer.length === 84) {
+                        trackerNames.forEach((trackerName, index) => {
+                            const start = index * 14; // 14 bytes per tracker
+                            const trackerBuffer = buffer.slice(
+                                start,
+                                start + 14
+                            );
+                            processIMUData(trackerBuffer, trackerName);
+                            // Now `trackerBuffer` contains the 14 bytes for the current tracker
+                            // You can then decode and process each tracker's data from `trackerBuffer`
+                            log(`Tracker ${trackerName} data: ${portData}`);
+                        });
+                    } else {
+                        //const buffer = Buffer.from(portData, "base64");
+                        //processIMUData(buffer, "leftAnkle");
+                        //log(`Tracker data: ${portData}`);
+                        error(
+                            `Unexpected data length: ${buffer.length} -- ${portData}`
+                        );
+                        return;
+                    }
+                    break;
+                case "a":
+                case "r":
+                case "v":
+                case "o":
+                case "i":
+                    // Handled by GX6 class
+                    break;
+                default:
+                    log(
+                        `Unknown data: ${portData}`
+                    );
             }
         }
     );
 }
 
-
 function processIMUData(data: Buffer, trackerName: string) {
     // Decode and log the data
     try {
-        const { rotation, gravity } = decodeIMUPacket(
-            data,
-            trackerName
-        );
+        const { rotation, gravity } = decodeIMUPacket(data, trackerName);
 
         if (printTrackerIMUData) {
             log(
@@ -295,7 +334,7 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
                     z: rotationDriftCorrected.z,
                     w: rotationDriftCorrected.w,
                 },
-                gravity
+                gravity,
             };
         }
 
