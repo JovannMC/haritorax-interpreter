@@ -8,7 +8,9 @@ if (mode === "bt" || mode === "bluetooth") {
 
     setInterval(async () => {
         console.log("Active trackers for BT:", device.getActiveTrackers());
-        console.log("Info: ", await device.getDeviceInfo("HaritoraXW-(SERIAL)"));
+        console.log("Info: ", await device.getDeviceInfo("HaritoraXW-A35EM5"));
+        console.log("Mag: ", await device.getTrackerMag("HaritoraXW-A35EM5"));
+        console.log("Battery: ", await device.getBatteryInfo("HaritoraXW-A35EM5"));
     }, 5000);
 
     /*setInterval(async () => {
@@ -34,6 +36,7 @@ if (mode === "bt" || mode === "bluetooth") {
             console.log("Active trackers for GX:", device.getActiveTrackers());
             console.log("Device info:", await device.getDeviceInfo("rightAnkle"));
             console.log("Device battery:", await device.getBatteryInfo("rightAnkle"));
+            console.log("Device magnetometer:", await device.getTrackerMag("rightAnkle"));
         } catch (error) {
             console.error("Error getting device data:", error);
         }

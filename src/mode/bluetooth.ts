@@ -105,7 +105,7 @@ export default class Bluetooth extends EventEmitter {
                     error(`Error connecting to ${localName}: ${err}`);
                     return;
                 }
-                log(`Connected to ${localName}`);
+                log(`(bluetooth) Connected to ${localName}`);
                 this.emit("connect", peripheral);
 
                 const activeServices: any[] = [];

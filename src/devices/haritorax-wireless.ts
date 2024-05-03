@@ -69,8 +69,22 @@ const trackerBattery: Map<string, [number, number, string]> = new Map([
     ["rightElbow", [0, 0, ""]],
 ]);
 
+const trackerMag: Map<string, string> = new Map([
+    // trackerName, magStatus
+    ["rightKnee", ""],
+    ["rightAnkle", ""],
+    ["hip", ""],
+    ["chest", ""],
+    ["leftKnee", ""],
+    ["leftAnkle", ""],
+    ["leftElbow", ""],
+    ["rightElbow", ""],
+]);
+
+let trackerService: string;
 let settingsService: string;
 let batteryService: string;
+let magnetometerCharacteristic: string;
 let batteryLevelCharacteristic: string;
 let sensorModeCharacteristic: string;
 let fpsModeCharacteristic: string;
@@ -216,8 +230,11 @@ export default class HaritoraXWireless extends EventEmitter {
             bluetooth.startConnection();
             bluetoothEnabled = true;
 
+            trackerService = bluetooth.getServiceUUID("Tracker Service");
             settingsService = bluetooth.getServiceUUID("Setting Service");
             batteryService = bluetooth.getServiceUUID("Battery Service");
+            magnetometerCharacteristic =
+                bluetooth.getCharacteristicUUID("Magnetometer");
             batteryLevelCharacteristic =
                 bluetooth.getCharacteristicUUID("BatteryLevel");
             sensorModeCharacteristic =
@@ -517,19 +534,18 @@ export default class HaritoraXWireless extends EventEmitter {
                 log(`Ankle motion detection: ${ankleMotionDetection}`);
                 log(`Raw hex data calculated to be sent: ${hexValue}`);
 
-                for (let trackerName of trackerSettingsRaw.keys()) {
-                    let ports = gx.getActivePorts();
-                    let trackerPort = gx.getTrackerPort(trackerName);
-
-                    ports[trackerPort].write(trackerSettingsBuffer, (err) => {
+                for (let port in gx.getActivePorts()) {
+                    gx.getActivePorts()[port].write(trackerSettingsBuffer, (err) => {
                         if (err) {
                             error(
-                                `${trackerName} - Error writing data to serial port ${trackerPort}: ${err}`
+                                `Error writing data to serial port ${port}: ${err}`
                             );
                         } else {
-                            trackerSettingsRaw.set(trackerName, hexValue);
+                            for (let trackerName of activeDevices) {
+                                trackerSettingsRaw.set(trackerName, hexValue);
+                            }
                             log(
-                                `${trackerName} - Data written to serial port ${trackerPort}: ${trackerSettingsBuffer
+                                `Data written to serial port ${port}: ${trackerSettingsBuffer
                                     .toString()
                                     .replace(/\r\n/g, " ")}`
                             );
@@ -669,16 +685,18 @@ export default class HaritoraXWireless extends EventEmitter {
                 [batteryRemaining, batteryVoltage, chargeStatus] =
                     trackerBattery.get(trackerName);
             } else {
-                if (gxEnabled) {
-                    log(`Tracker ${trackerName} battery info not found`);
-                    return null;
-                } else if (trackerName.startsWith("HaritoraX")) {
+                if (trackerName.startsWith("HaritoraX")) {
                     log(`Reading battery info for ${trackerName}...`);
-                    batteryRemaining = await bluetooth.read(
+                    let buffer = await bluetooth.read(
                         trackerName,
                         batteryService,
                         batteryLevelCharacteristic
                     );
+                    let dataView = new DataView(buffer);
+                    batteryRemaining = dataView.getInt8(0);
+                } else {
+                    log(`Tracker ${trackerName} battery info not found`);
+                    return null;
                 }
             }
         } catch (err) {
@@ -885,6 +903,37 @@ export default class HaritoraXWireless extends EventEmitter {
     }
 
     /**
+     * Get the tracker's magnetometer status
+     * Support: GX6, GX2, Bluetooth
+     *
+     * @function getTrackerMag
+     * @param {string} trackerName
+     * @returns {string} The tracker's magnetometer status
+     */
+    async getTrackerMag(trackerName: string) {
+        if (trackerMag.has(trackerName)) {
+            let magStatus = trackerMag.get(trackerName);
+            log(`Tracker ${trackerName} magnetometer status: ${magStatus}`);
+            this.emit("mag", trackerName, magStatus);
+            return magStatus;
+        } else {
+            if (trackerName.startsWith("HaritoraX")) {
+                // Read from BLE
+                let magStatus = await bluetooth.read(
+                    trackerName,
+                    trackerService,
+                    magnetometerCharacteristic
+                );
+                this.emit("mag", trackerName, magStatus);
+                return processMagData(magStatus, trackerName);
+            } else {
+                log(`Tracker ${trackerName} magnetometer status not found`);
+                return null;
+            }
+        }
+    }
+
+    /**
      * Check whether the connection mode is active or not.
      * Support: GX6, GX2, Bluetooth
      *
@@ -1015,7 +1064,7 @@ function listenToDeviceEvents() {
         if (trackerName && !activeDevices.includes(trackerName)) {
             activeDevices.push(trackerName);
             haritora.emit("connect", trackerName);
-            log(`Connected to ${peripheral.advertisement.localName}`);
+            log(`(haritorax-wireless) Connected to ${peripheral.advertisement.localName}`);
         }
     });
 
@@ -1073,7 +1122,7 @@ function processIMUData(data: string, trackerName: string) {
         }
 
         haritora.emit("imu", trackerName, rotation, gravity, ankle);
-        haritora.emit("mag", trackerName, magStatus);
+        if (!trackerName.startsWith("HaritoraX")) haritora.emit("mag", trackerName, magStatus);
     } catch (err) {
         error(`Error decoding tracker ${trackerName} IMU packet data: ${err}`);
     }
@@ -1138,6 +1187,8 @@ function decodeIMUPacket(data: string, trackerName: string) {
                     magStatus = "unknown";
                     break;
             }
+
+            trackerMag.set(trackerName, magStatus);
         }
 
         const rotation = {
@@ -1386,7 +1437,9 @@ function processMagData(data: string, trackerName: string) {
     }
 
     log(`Tracker ${trackerName} mag status: ${magStatus}`);
+    trackerMag.set(trackerName, magStatus);
     haritora.emit("mag", trackerName, magStatus);
+    return magStatus;
 }
 
 /**
