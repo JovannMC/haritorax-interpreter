@@ -43,7 +43,7 @@ export default class GX extends EventEmitter {
         super();
         debug = debugMode;
         gx = this;
-        console.log(`(haritorax-interpreter) - Debug mode for GX: ${debug}`);
+        log(`(haritorax-interpreter) - Debug mode for GX: ${debug}`);
     }
 
     startConnection(portNames: string[]) {
@@ -68,80 +68,16 @@ export default class GX extends EventEmitter {
             activePorts[port] = serial;
 
             serial.on("open", () => {
+                log(`Opened COM port: ${port}`);
                 this.emit("connected", port);
             });
 
             parser.on("data", (data) => {
-                const splitData = data.toString().split(/:(.+)/);
-                const identifier = splitData[0].toLowerCase();
-                const portId = identifier.match(/\d/)
-                    ? identifier.match(/\d/)[0]
-                    : "DONGLE";
-                const portData = splitData[1];
-
-                if (!trackersAssigned) {
-                    for (let [key, value] of trackerAssignment.entries()) {
-                        if (value[1] === "") {
-                            if (identifier.startsWith("r")) {
-                                const trackerId = parseInt(portData.charAt(4));
-                                if (parseInt(value[0]) == trackerId) {
-                                    trackerAssignment.set(key, [
-                                        trackerId,
-                                        port,
-                                        portId,
-                                    ]);
-                                    log(
-                                        ` Setting ${key} to port ${port} with port ID ${portId}`
-                                    );
-                                }
-                            } else if (identifier.startsWith("i")) {
-                                const info = JSON.parse(portData);
-                                const version = info["version"];
-                                const model = info["model"];
-                                const serial = info["serial no"];
-
-                                deviceInformation.set(key, [
-                                    version,
-                                    model,
-                                    serial,
-                                ]);
-                            }
-                        }
-                    }
-
-                    if (
-                        Array.from(trackerAssignment.values()).every(
-                            (value) => value[1] !== ""
-                        )
-                    ) {
-                        trackersAssigned = true;
-                        log(
-                            `All trackers have been assigned: ${Array.from(
-                                trackerAssignment.entries()
-                            )}`
-                        );
-                    }
-                }
-
-                let trackerName = null;
-                for (let [key, value] of trackerAssignment.entries()) {
-                    if (value[1] === port && value[2] === portId) {
-                        trackerName = key;
-                        break;
-                    }
-                }
-
-                this.emit(
-                    "data",
-                    trackerName,
-                    port,
-                    portId,
-                    identifier,
-                    portData
-                );
+                this.emit("data", data);
             });
 
             serial.on("close", () => {
+                log(`Closed COM port: ${port}`);
                 this.emit("disconnected", port);
             });
         });
@@ -152,7 +88,7 @@ export default class GX extends EventEmitter {
         try {
             for (let port in activePorts) {
                 if (activePorts[port].isOpen) {
-                    log(`Closing COM port: ${port}`)
+                    log(`Closing COM port: ${port}`);
                     activePorts[port].close();
                     activePorts[port].destroy();
                 }

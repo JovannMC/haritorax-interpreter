@@ -20,15 +20,22 @@ fs.readFile("data.txt", "utf8", function (err, data) {
             "leftankle",
         ];
 
-        const bytesPerTracker = 14;
-        const base64CharsPerByte = 4 / 3;
-        const base64CharsPerTracker = bytesPerTracker * base64CharsPerByte;
+        // Assuming `lines[i]` contains the base64 encoded string for all trackers
+        const data = lines[i]; // The base64 string
+        const buffer = Buffer.from(data, 'base64');
 
-        trackerNames.forEach((trackerName, index) => {
-            const start = index * base64CharsPerTracker;
-            const end = start + base64CharsPerTracker;
-            const trackerData = lines[i].substring(start, end);
-            device.parseData(trackerData, trackerName);
-        });
+        // Ensure the buffer length is as expected: 14 bytes * 6 trackers = 84 bytes
+        if (buffer.length === 84) {
+            trackerNames.forEach((trackerName, index) => {
+                const start = index * 14; // 14 bytes per tracker
+                const trackerBuffer = buffer.slice(start, start + 14);
+                
+                // Now `trackerBuffer` contains the 14 bytes for the current tracker
+                // You can then decode and process each tracker's data from `trackerBuffer`
+                device.parseData(trackerBuffer, trackerName);
+            });
+        } else {
+            console.error("Unexpected data length:", buffer.length);
+        }
     }
 });

@@ -31,9 +31,24 @@ export default class HaritoraX11b extends EventEmitter {
      * @example
      * device.startConnection("gx");
      **/
-    startConnection(portNames?: string[]) {
+    async startConnection(portNames?: string[]) {
+        log("Starting connection to the trackers.")
         gx = new GX(debug);
-        gx.startConnection(portNames);
+        gx.startConnection(["COM6"]);
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const trackerNames = [
+            "leftKnee",
+            "rightKnee",
+            "chest",
+            "hip",
+            "rightAnkle",
+            "leftAnkle",
+        ];
+        trackerNames.forEach((trackerName) => {
+            this.emit("connect", trackerName)
+        });
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        startEventListeners();
     }
 
     /**
@@ -45,29 +60,53 @@ export default class HaritoraX11b extends EventEmitter {
      * device.stopConnection("gx");
      **/
     stopConnection() {
+        log("Stopping connection to the trackers.")
         gx.stopConnection();
     }
 
     parseData(data: string, trackerName: string) {
-        return processIMUData(data, trackerName);
+        const buffer = Buffer.from(data, "base64");
+        return processIMUData(buffer, trackerName);
     }
 
 }
 
-/*gx.on(
-    "data",
-    (
-        trackerName: string,
-        port: string,
-        portId: string,
-        identifier: string,
-        portData: string
-    ) => {
-        processIMUData(portData, trackerName);
-    }
-);*/
+function startEventListeners() {
+    gx.on(
+        "data",
+        (
+            data: string
+        ) => {
+            const trackerNames = [
+                "leftKnee",
+                "rightKnee",
+                "chest",
+                "hip",
+                "rightAnkle",
+                "leftAnkle",
+            ];
+    
+            const buffer = Buffer.from(data, 'base64');
 
-function processIMUData(data: string, trackerName: string) {
+            // Ensure the buffer length is as expected: 14 bytes * 6 trackers = 84 bytes
+            if (buffer.length === 84) {
+                trackerNames.forEach((trackerName, index) => {
+                    const start = index * 14; // 14 bytes per tracker
+                    const trackerBuffer = buffer.slice(start, start + 14);
+                    
+                    // Now `trackerBuffer` contains the 14 bytes for the current tracker
+                    // You can then decode and process each tracker's data from `trackerBuffer`
+                    processIMUData(trackerBuffer, trackerName);
+                });
+            } else {
+                error(`Unexpected data length: buffer.length`);
+            }
+        }
+    );
+}
+
+
+function processIMUData(data: Buffer, trackerName: string) {
     // Decode and log the data
     try {
         const { rotation, gravity } = decodeIMUPacket(
@@ -111,7 +150,7 @@ let calibrated: { [key: string]: any } = {};
 let startTimes: { [key: string]: any } = {};
 let initialRotations: { [key: string]: any } = {};
 
-function decodeIMUPacket(data: string, trackerName: string) {
+function decodeIMUPacket(data: Buffer, trackerName: string) {
     try {
         if (data.length < 14) {
             throw new Error("Too few bytes to decode IMU packet");
@@ -119,19 +158,18 @@ function decodeIMUPacket(data: string, trackerName: string) {
 
         const elapsedTime = Date.now() - startTimes[trackerName];
 
-        const buffer = Buffer.from(data, "base64");
-        const rotationX = buffer.readInt16LE(0);
-        const rotationY = buffer.readInt16LE(2);
-        const rotationZ = buffer.readInt16LE(4);
-        const rotationW = buffer.readInt16LE(6);
+        const rotationX = data.readInt16LE(0);
+        const rotationY = data.readInt16LE(2);
+        const rotationZ = data.readInt16LE(4);
+        const rotationW = data.readInt16LE(6);
 
-        const gravityRawX = buffer.readInt8(8);
-        const gravityRawY = buffer.readInt8(10);
-        const gravityRawZ = buffer.readInt8(12);
+        const gravityRawX = data.readInt16LE(8);
+        const gravityRawY = data.readInt16LE(10);
+        const gravityRawZ = data.readInt16LE(12);
 
         // no idea if this is right lol
-        const ankleMotion1 = buffer.readInt16LE(buffer.length - 4);
-        const ankleMotion2 = buffer.readInt16LE(buffer.length - 2);
+        const ankleMotion1 = data.readInt16LE(data.length - 4);
+        const ankleMotion2 = data.readInt16LE(data.length - 2);
 
         const rotation = {
             x: (rotationX / 180.0) * 0.01,
