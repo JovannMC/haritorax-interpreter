@@ -247,6 +247,11 @@ export default class Bluetooth extends EventEmitter {
         service: string,
         characteristic: string
     ): Promise<any> {
+        if (!activeDevices.find((device: ActiveDevice) => device[0] === localName)) {
+            error(`Device ${localName} not found`);
+            return null;
+        }
+
         while (!(await areAllBLEDiscovered())) {
             log(
                 "Waiting for all services and characteristics to be discovered..."
