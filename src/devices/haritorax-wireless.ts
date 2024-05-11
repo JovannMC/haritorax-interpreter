@@ -263,12 +263,14 @@ export default class HaritoraXWireless extends EventEmitter {
         if (connectionMode === "gx" && gxEnabled) {
             gx.stopConnection();
             gxEnabled = false;
+            activeDevices = [];
         } else if (connectionMode === "bluetooth" && bluetoothEnabled) {
             bluetooth.stopConnection();
             bluetoothEnabled = false;
+            activeDevices = [];
+        } else {
+            log(`Connection mode ${connectionMode} not active`);
         }
-
-        activeDevices = [];
     }
 
     /**
@@ -1086,14 +1088,15 @@ function listenToDeviceEvents() {
             activeDevices.push(trackerName);
             haritora.emit("connect", trackerName);
             log(
-                `(haritorax-wireless) Connected to ${peripheral.advertisement.localName}`
+                `(haritorax-wireless) Connected to ${trackerName}`
             );
         }
     });
 
     bluetooth.on("disconnect", (peripheral) => {
-        haritora.emit("disconnect", peripheral.advertisement.localName);
-        log(`Disconnected from ${peripheral.advertisement.localName}`);
+        const trackerName = peripheral.advertisement.localName;
+        haritora.emit("disconnect", trackerName);
+        log(`Disconnected from ${trackerName}`);
     });
 }
 
@@ -1111,7 +1114,7 @@ function listenToDeviceEvents() {
 
 function processIMUData(data: string, trackerName: string) {
     // If tracker isn't in activeDevices, add it and emit "connect" event
-    if (trackerName && !activeDevices.includes(trackerName)) {
+    if (trackerName && !activeDevices.includes(trackerName) && (gxEnabled || bluetoothEnabled)) {
         log(
             `Tracker ${trackerName} isn't in active devices, adding and emitting connect event`
         );
@@ -1470,7 +1473,7 @@ function processMagData(data: string, trackerName: string) {
 
 /**
  * Processes the button data received from the tracker by the dongle.
- * The data contains the information about the main and sub buttons on the tracker.
+ * The data contains the information about the main and sub buttons on the tracker along with which one was pressed/updated.
  * Support: GX6, GX2, Bluetooth
  *
  * @function processButtonData
