@@ -14,6 +14,7 @@ let bluetooth: Bluetooth;
 let gxEnabled = false;
 let bluetoothEnabled = false;
 let haritora: HaritoraXWireless;
+let canSendButtonData = false;
 
 const SENSOR_MODE_1 = 1;
 const SENSOR_MODE_2 = 0;
@@ -142,9 +143,9 @@ let activeDevices: string[] = [];
  * @type {object}
  * @property {string} trackerName - The name of the tracker.
  * @property {number} buttonPressed - Which button was pressed (main, sub).
+ * @property {boolean} isOn - Whether the tracker is turning on/is on (true) or turning off/is off (false).
  * @property {number} mainButton - Amount of times the main button was pressed.
  * @property {number} subButton - Amount of times the sub button was pressed.
- * @property {boolean} isOn - Whether the tracker is turning on/is on (true) or turning off/is off (false).
  **/
 
 /**
@@ -227,9 +228,13 @@ export default class HaritoraXWireless extends EventEmitter {
         if (connectionMode === "gx") {
             gx.startConnection(portNames);
             gxEnabled = true;
+            setTimeout(() => {
+                canSendButtonData = true;
+            }, 1000);
         } else if (connectionMode === "bluetooth") {
             bluetooth.startConnection();
             bluetoothEnabled = true;
+            canSendButtonData = true;
 
             trackerService = bluetooth.getServiceUUID("Tracker Service");
             settingsService = bluetooth.getServiceUUID("Setting Service");
@@ -1087,9 +1092,7 @@ function listenToDeviceEvents() {
         if (trackerName && !activeDevices.includes(trackerName)) {
             activeDevices.push(trackerName);
             haritora.emit("connect", trackerName);
-            log(
-                `(haritorax-wireless) Connected to ${trackerName}`
-            );
+            log(`(haritorax-wireless) Connected to ${trackerName}`);
         }
     });
 
@@ -1114,7 +1117,11 @@ function listenToDeviceEvents() {
 
 function processIMUData(data: string, trackerName: string) {
     // If tracker isn't in activeDevices, add it and emit "connect" event
-    if (trackerName && !activeDevices.includes(trackerName) && (gxEnabled || bluetoothEnabled)) {
+    if (
+        trackerName &&
+        !activeDevices.includes(trackerName) &&
+        (gxEnabled || bluetoothEnabled)
+    ) {
         log(
             `Tracker ${trackerName} isn't in active devices, adding and emitting connect event`
         );
@@ -1488,13 +1495,15 @@ function processButtonData(
     trackerName: string,
     characteristic?: string
 ) {
+    if (!canSendButtonData) return;
+
     const MAIN_BUTTON_INDEX = 0;
     const SUB_BUTTON_INDEX = 1;
     const TRACKER_OFF = false;
     const TRACKER_ON = true;
 
     let currentButtons = trackerButtons.get(trackerName) || [0, 0];
-    let buttonState = undefined;
+    let isOn = undefined;
     let buttonPressed = undefined;
 
     try {
@@ -1506,7 +1515,7 @@ function processButtonData(
                 currentButtons[SUB_BUTTON_INDEX] += 1;
                 buttonPressed = "sub";
             }
-            buttonState = TRACKER_ON; // Tracker is always on when connected via bluetooth, because need to be connected to read button data
+            isOn = TRACKER_ON; // Tracker is always on when connected via bluetooth, because need to be connected to read button data
         } else if (gxEnabled) {
             let newMainButtonState = parseInt(data[6], 16);
             let newSubButtonState = parseInt(data[9], 16);
@@ -1534,11 +1543,11 @@ function processButtonData(
             ) {
                 log(`Tracker ${trackerName} is off/turning off...`);
                 log(`Raw data: ${data}`);
-                buttonState = TRACKER_OFF;
+                isOn = TRACKER_OFF;
             } else {
                 log(`Tracker ${trackerName} is on/turning on...`);
                 log(`Raw data: ${data}`);
-                buttonState = TRACKER_ON;
+                isOn = TRACKER_ON;
             }
         }
     } catch (err) {
@@ -1551,9 +1560,9 @@ function processButtonData(
         "button",
         trackerName,
         buttonPressed,
+        isOn,
         currentButtons[MAIN_BUTTON_INDEX],
-        currentButtons[SUB_BUTTON_INDEX],
-        buttonState
+        currentButtons[SUB_BUTTON_INDEX]
     );
 
     log(`Tracker ${trackerName} button press: ${buttonPressed}`);
