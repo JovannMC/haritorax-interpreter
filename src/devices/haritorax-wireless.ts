@@ -141,6 +141,7 @@ let activeDevices: string[] = [];
  * @event this#button
  * @type {object}
  * @property {string} trackerName - The name of the tracker.
+ * @property {number} buttonPressed - Which button was pressed (main, sub).
  * @property {number} mainButton - Amount of times the main button was pressed.
  * @property {number} subButton - Amount of times the sub button was pressed.
  * @property {boolean} isOn - Whether the tracker is turning on/is on (true) or turning off/is off (false).
@@ -1433,7 +1434,7 @@ function processTrackerData(data: string, trackerName: string) {
  **/
 function processMagData(data: string, trackerName: string) {
     if (!data) return null;
-    
+
     const GREEN = 3;
     const YELLOW = 2;
     const RED_2 = 1;
@@ -1491,18 +1492,35 @@ function processButtonData(
 
     let currentButtons = trackerButtons.get(trackerName) || [0, 0];
     let buttonState = undefined;
+    let buttonPressed = undefined;
 
     try {
         if (trackerName && trackerName.startsWith("HaritoraX")) {
             if (characteristic === "MainButton") {
                 currentButtons[MAIN_BUTTON_INDEX] += 1;
+                buttonPressed = "main";
             } else if (characteristic === "SecondaryButton") {
                 currentButtons[SUB_BUTTON_INDEX] += 1;
+                buttonPressed = "sub";
             }
             buttonState = TRACKER_ON; // Tracker is always on when connected via bluetooth, because need to be connected to read button data
         } else if (gxEnabled) {
-            currentButtons[MAIN_BUTTON_INDEX] = parseInt(data[6], 16);
-            currentButtons[SUB_BUTTON_INDEX] = parseInt(data[9], 16);
+            let newMainButtonState = parseInt(data[6], 16);
+            let newSubButtonState = parseInt(data[9], 16);
+
+            if (currentButtons[MAIN_BUTTON_INDEX] !== newMainButtonState) {
+                currentButtons[MAIN_BUTTON_INDEX] = newMainButtonState;
+                if (newMainButtonState !== 0) {
+                    buttonPressed = "main";
+                }
+            }
+
+            if (currentButtons[SUB_BUTTON_INDEX] !== newSubButtonState) {
+                currentButtons[SUB_BUTTON_INDEX] = newSubButtonState;
+                if (newSubButtonState !== 0) {
+                    buttonPressed = "sub";
+                }
+            }
 
             if (
                 data[0] === "0" ||
@@ -1529,11 +1547,13 @@ function processButtonData(
     haritora.emit(
         "button",
         trackerName,
+        buttonPressed,
         currentButtons[MAIN_BUTTON_INDEX],
         currentButtons[SUB_BUTTON_INDEX],
         buttonState
     );
 
+    log(`Tracker ${trackerName} button press: ${buttonPressed}`);
     log(
         `Tracker ${trackerName} main button: ${currentButtons[MAIN_BUTTON_INDEX]}`
     );
