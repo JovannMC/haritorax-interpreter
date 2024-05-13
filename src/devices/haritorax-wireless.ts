@@ -14,6 +14,7 @@ let bluetooth: Bluetooth;
 let gxEnabled = false;
 let bluetoothEnabled = false;
 let haritora: HaritoraXWireless;
+let canSendButtonData = false;
 
 const SENSOR_MODE_1 = 1;
 const SENSOR_MODE_2 = 0;
@@ -141,9 +142,10 @@ let activeDevices: string[] = [];
  * @event this#button
  * @type {object}
  * @property {string} trackerName - The name of the tracker.
+ * @property {number} buttonPressed - Which button was pressed (main, sub).
+ * @property {boolean} isOn - Whether the tracker is turning on/is on (true) or turning off/is off (false).
  * @property {number} mainButton - Amount of times the main button was pressed.
  * @property {number} subButton - Amount of times the sub button was pressed.
- * @property {boolean} isOn - Whether the tracker is turning on/is on (true) or turning off/is off (false).
  **/
 
 /**
@@ -226,9 +228,13 @@ export default class HaritoraXWireless extends EventEmitter {
         if (connectionMode === "gx") {
             gx.startConnection(portNames);
             gxEnabled = true;
+            setTimeout(() => {
+                canSendButtonData = true;
+            }, 1000);
         } else if (connectionMode === "bluetooth") {
             bluetooth.startConnection();
             bluetoothEnabled = true;
+            canSendButtonData = true;
 
             trackerService = bluetooth.getServiceUUID("Tracker Service");
             settingsService = bluetooth.getServiceUUID("Setting Service");
@@ -262,12 +268,14 @@ export default class HaritoraXWireless extends EventEmitter {
         if (connectionMode === "gx" && gxEnabled) {
             gx.stopConnection();
             gxEnabled = false;
+            activeDevices = [];
         } else if (connectionMode === "bluetooth" && bluetoothEnabled) {
             bluetooth.stopConnection();
             bluetoothEnabled = false;
+            activeDevices = [];
+        } else {
+            log(`Connection mode ${connectionMode} not active`);
         }
-
-        activeDevices = [];
     }
 
     /**
@@ -535,22 +543,28 @@ export default class HaritoraXWireless extends EventEmitter {
                 log(`Raw hex data calculated to be sent: ${hexValue}`);
 
                 for (let port in gx.getActivePorts()) {
-                    gx.getActivePorts()[port].write(trackerSettingsBuffer, (err) => {
-                        if (err) {
-                            error(
-                                `Error writing data to serial port ${port}: ${err}`
-                            );
-                        } else {
-                            for (let trackerName of activeDevices) {
-                                trackerSettingsRaw.set(trackerName, hexValue);
+                    gx.getActivePorts()[port].write(
+                        trackerSettingsBuffer,
+                        (err) => {
+                            if (err) {
+                                error(
+                                    `Error writing data to serial port ${port}: ${err}`
+                                );
+                            } else {
+                                for (let trackerName of activeDevices) {
+                                    trackerSettingsRaw.set(
+                                        trackerName,
+                                        hexValue
+                                    );
+                                }
+                                log(
+                                    `Data written to serial port ${port}: ${trackerSettingsBuffer
+                                        .toString()
+                                        .replace(/\r\n/g, " ")}`
+                                );
                             }
-                            log(
-                                `Data written to serial port ${port}: ${trackerSettingsBuffer
-                                    .toString()
-                                    .replace(/\r\n/g, " ")}`
-                            );
                         }
-                    });
+                    );
                 }
             } catch (err) {
                 error(`Error sending tracker settings:\n ${err}`);
@@ -654,9 +668,11 @@ export default class HaritoraXWireless extends EventEmitter {
             );
 
             // Convert to UTF-8 string
-            version = decoder.decode(versionBuffer);
-            serial = decoder.decode(serialBuffer);
-            model = decoder.decode(modelBuffer);
+            if (versionBuffer && modelBuffer && serialBuffer) {
+                version = decoder.decode(versionBuffer);
+                serial = decoder.decode(serialBuffer);
+                model = decoder.decode(modelBuffer);
+            }
         }
 
         log(`Tracker ${trackerName} info: ${version}, ${model}, ${serial}`);
@@ -692,8 +708,9 @@ export default class HaritoraXWireless extends EventEmitter {
                         batteryService,
                         batteryLevelCharacteristic
                     );
+                    if (!buffer) return null;
                     let dataView = new DataView(buffer);
-                    batteryRemaining = dataView.getInt8(0);
+                    batteryRemaining = dataView.getUint8(0);
                 } else {
                     log(`Tracker ${trackerName} battery info not found`);
                     return null;
@@ -768,34 +785,45 @@ export default class HaritoraXWireless extends EventEmitter {
         ) {
             log(`Forcing BLE reading for ${trackerName}`);
             try {
-                const sensorModeValue = new DataView(
-                    await bluetooth.read(
-                        trackerName,
-                        settingsService,
-                        sensorModeCharacteristic
-                    )
-                ).getInt8(0);
-                const fpsModeValue = new DataView(
-                    await bluetooth.read(
-                        trackerName,
-                        settingsService,
-                        fpsModeCharacteristic
-                    )
-                ).getInt8(0);
-                const correctionValue = new DataView(
-                    await bluetooth.read(
-                        trackerName,
-                        settingsService,
-                        correctionCharacteristic
-                    )
-                ).getInt8(0);
-                const ankleValue = new DataView(
-                    await bluetooth.read(
-                        trackerName,
-                        settingsService,
-                        ankleCharacteristic
-                    )
-                ).getInt8(0);
+                // Attempt to read the sensor mode value
+                const sensorModeRead = await bluetooth.read(
+                    trackerName,
+                    settingsService,
+                    sensorModeCharacteristic
+                );
+                const sensorModeValue = sensorModeRead
+                    ? new DataView(sensorModeRead).getInt8(0)
+                    : null;
+
+                // Attempt to read the fps mode value
+                const fpsModeRead = await bluetooth.read(
+                    trackerName,
+                    settingsService,
+                    fpsModeCharacteristic
+                );
+                const fpsModeValue = fpsModeRead
+                    ? new DataView(fpsModeRead).getInt8(0)
+                    : null;
+
+                // Attempt to read the correction value
+                const correctionRead = await bluetooth.read(
+                    trackerName,
+                    settingsService,
+                    correctionCharacteristic
+                );
+                const correctionValue = correctionRead
+                    ? new DataView(correctionRead).getInt8(0)
+                    : null;
+
+                // Attempt to read the ankle value
+                const ankleRead = await bluetooth.read(
+                    trackerName,
+                    settingsService,
+                    ankleCharacteristic
+                );
+                const ankleValue = ankleRead
+                    ? new DataView(ankleRead).getInt8(0)
+                    : null;
 
                 let sensorMode;
                 if (sensorModeValue === 5) sensorMode = 1;
@@ -1064,13 +1092,14 @@ function listenToDeviceEvents() {
         if (trackerName && !activeDevices.includes(trackerName)) {
             activeDevices.push(trackerName);
             haritora.emit("connect", trackerName);
-            log(`(haritorax-wireless) Connected to ${peripheral.advertisement.localName}`);
+            log(`(haritorax-wireless) Connected to ${trackerName}`);
         }
     });
 
     bluetooth.on("disconnect", (peripheral) => {
-        haritora.emit("disconnect", peripheral.advertisement.localName);
-        log(`Disconnected from ${peripheral.advertisement.localName}`);
+        const trackerName = peripheral.advertisement.localName;
+        haritora.emit("disconnect", trackerName);
+        log(`Disconnected from ${trackerName}`);
     });
 }
 
@@ -1088,7 +1117,11 @@ function listenToDeviceEvents() {
 
 function processIMUData(data: string, trackerName: string) {
     // If tracker isn't in activeDevices, add it and emit "connect" event
-    if (trackerName && !activeDevices.includes(trackerName)) {
+    if (
+        trackerName &&
+        !activeDevices.includes(trackerName) &&
+        (gxEnabled || bluetoothEnabled)
+    ) {
         log(
             `Tracker ${trackerName} isn't in active devices, adding and emitting connect event`
         );
@@ -1122,7 +1155,8 @@ function processIMUData(data: string, trackerName: string) {
         }
 
         haritora.emit("imu", trackerName, rotation, gravity, ankle);
-        if (!trackerName.startsWith("HaritoraX")) haritora.emit("mag", trackerName, magStatus);
+        if (!trackerName.startsWith("HaritoraX"))
+            haritora.emit("mag", trackerName, magStatus);
     } catch (err) {
         error(`Error decoding tracker ${trackerName} IMU packet data: ${err}`);
     }
@@ -1409,6 +1443,8 @@ function processTrackerData(data: string, trackerName: string) {
  * @fires haritora#mag
  **/
 function processMagData(data: string, trackerName: string) {
+    if (!data) return null;
+
     const GREEN = 3;
     const YELLOW = 2;
     const RED_2 = 1;
@@ -1444,7 +1480,7 @@ function processMagData(data: string, trackerName: string) {
 
 /**
  * Processes the button data received from the tracker by the dongle.
- * The data contains the information about the main and sub buttons on the tracker.
+ * The data contains the information about the main and sub buttons on the tracker along with which one was pressed/updated.
  * Support: GX6, GX2, Bluetooth
  *
  * @function processButtonData
@@ -1459,25 +1495,44 @@ function processButtonData(
     trackerName: string,
     characteristic?: string
 ) {
+    if (!canSendButtonData) return;
+
     const MAIN_BUTTON_INDEX = 0;
     const SUB_BUTTON_INDEX = 1;
     const TRACKER_OFF = false;
     const TRACKER_ON = true;
 
     let currentButtons = trackerButtons.get(trackerName) || [0, 0];
-    let buttonState = undefined;
+    let isOn = undefined;
+    let buttonPressed = undefined;
 
     try {
         if (trackerName && trackerName.startsWith("HaritoraX")) {
             if (characteristic === "MainButton") {
                 currentButtons[MAIN_BUTTON_INDEX] += 1;
+                buttonPressed = "main";
             } else if (characteristic === "SecondaryButton") {
                 currentButtons[SUB_BUTTON_INDEX] += 1;
+                buttonPressed = "sub";
             }
-            buttonState = TRACKER_ON; // Tracker is always on when connected via bluetooth, because need to be connected to read button data
+            isOn = TRACKER_ON; // Tracker is always on when connected via bluetooth, because need to be connected to read button data
         } else if (gxEnabled) {
-            currentButtons[MAIN_BUTTON_INDEX] = parseInt(data[6], 16);
-            currentButtons[SUB_BUTTON_INDEX] = parseInt(data[9], 16);
+            let newMainButtonState = parseInt(data[6], 16);
+            let newSubButtonState = parseInt(data[9], 16);
+
+            if (currentButtons[MAIN_BUTTON_INDEX] !== newMainButtonState) {
+                currentButtons[MAIN_BUTTON_INDEX] = newMainButtonState;
+                if (newMainButtonState !== 0) {
+                    buttonPressed = "main";
+                }
+            }
+
+            if (currentButtons[SUB_BUTTON_INDEX] !== newSubButtonState) {
+                currentButtons[SUB_BUTTON_INDEX] = newSubButtonState;
+                if (newSubButtonState !== 0) {
+                    buttonPressed = "sub";
+                }
+            }
 
             if (
                 data[0] === "0" ||
@@ -1488,11 +1543,11 @@ function processButtonData(
             ) {
                 log(`Tracker ${trackerName} is off/turning off...`);
                 log(`Raw data: ${data}`);
-                buttonState = TRACKER_OFF;
+                isOn = TRACKER_OFF;
             } else {
                 log(`Tracker ${trackerName} is on/turning on...`);
                 log(`Raw data: ${data}`);
-                buttonState = TRACKER_ON;
+                isOn = TRACKER_ON;
             }
         }
     } catch (err) {
@@ -1504,11 +1559,13 @@ function processButtonData(
     haritora.emit(
         "button",
         trackerName,
+        buttonPressed,
+        isOn,
         currentButtons[MAIN_BUTTON_INDEX],
-        currentButtons[SUB_BUTTON_INDEX],
-        buttonState
+        currentButtons[SUB_BUTTON_INDEX]
     );
 
+    log(`Tracker ${trackerName} button press: ${buttonPressed}`);
     log(
         `Tracker ${trackerName} main button: ${currentButtons[MAIN_BUTTON_INDEX]}`
     );

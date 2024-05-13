@@ -8,9 +8,9 @@ if (mode === "bt" || mode === "bluetooth") {
 
     setInterval(async () => {
         console.log("Active trackers for BT:", device.getActiveTrackers());
-        console.log("Info: ", await device.getDeviceInfo("HaritoraXW-A35EM5"));
-        console.log("Mag: ", await device.getTrackerMag("HaritoraXW-A35EM5"));
-        console.log("Battery: ", await device.getBatteryInfo("HaritoraXW-A35EM5"));
+        console.log("Info: ", await device.getDeviceInfo("HaritoraXW-(SERIAL)"));
+        console.log("Mag: ", await device.getTrackerMag("HaritoraXW-(SERIAL)"));
+        console.log("Battery: ", await device.getBatteryInfo("HaritoraXW-(SERIAL)"));
     }, 5000);
 
     /*setInterval(async () => {
