@@ -1,10 +1,10 @@
-const { HaritoraXWireless } = require("../dist/index.js");
+const { HaritoraX } = require("../dist/index.js");
 
 let mode = process.argv[2] || "gx";
-let device = new HaritoraXWireless(2);
+let device = new HaritoraX(2);
 
 if (mode === "bt" || mode === "bluetooth") {
-    device.startConnection("bluetooth");
+    device.startConnection("wireless", "bluetooth");
 
     setInterval(async () => {
         console.log("Active trackers for BT:", device.getActiveTrackers());
@@ -24,11 +24,11 @@ if (mode === "bt" || mode === "bluetooth") {
         }
     }, 3000);*/
 } else {
-    device.startConnection("gx", ["COM4", "COM5", "COM6"]);
+    device.startConnection("wireless", "com", ["COM4", "COM5", "COM6"]);
 
     device.on("connect", (trackerName) => {
         console.log(`Connected to tracker ${trackerName}`);
-        console.log(`Active trackers for GX:`, device.getActiveTrackers());
+        console.log(`Active trackers for COM:`, device.getActiveTrackers());
     });
 
     setInterval(async () => {

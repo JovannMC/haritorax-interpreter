@@ -3,17 +3,17 @@
 import { Buffer } from "buffer";
 import { EventEmitter } from "events";
 import Quaternion from "quaternion";
-import GX from "../mode/gx.js";
-import Bluetooth from "../mode/bluetooth.js";
+import COM from "./mode/com.js";
+import Bluetooth from "./mode/bluetooth.js";
 
 let debug = 0;
 let printTrackerIMUData = false;
 
-let gx: GX;
+let com: COM;
 let bluetooth: Bluetooth;
-let gxEnabled = false;
+let comEnabled = false;
 let bluetoothEnabled = false;
-let haritora: HaritoraXWireless;
+let main: HaritoraX;
 let canSendButtonData = false;
 
 const SENSOR_MODE_1 = 1;
@@ -191,47 +191,46 @@ let activeDevices: string[] = [];
  **/
 
 /**
- * The HaritoraXWireless class.
- *
- * This class represents a HaritoraX wireless device. It provides methods to start/stop a connection,
- * set settings for all/individual trackers, and emits events for: IMU data, tracker data, button data, battery data, and settings data.
- *
+ * The HaritoraX class.
+ * This class provides methods and events to connect to the HaritoraX trackers, interpret the data, and interact with the trackers.
+ *  
  * @param {boolean} debugMode - Enable logging of debug messages depending on verbosity. (0 = none, 1 = debug, 2 = debug w/ function info)
  * @param {boolean} printTrackerIMUProcessing - Print the tracker IMU processing data (processIMUData()). (true or false)
  *
  * @example
  * let device = new HaritoraXWireless(2);
  **/
-export default class HaritoraXWireless extends EventEmitter {
+export default class HaritoraX extends EventEmitter {
     constructor(debugMode = 0, printTrackerIMUProcessing = false) {
         super();
         debug = debugMode;
         printTrackerIMUData = printTrackerIMUProcessing;
-        haritora = this;
-        log(`Set debug mode for HaritoraXWireless: ${debug}`);
+        main = this;
+        log(`Set debug mode: ${debug}`);
         log(`Print tracker IMU processing: ${printTrackerIMUData}`);
     }
 
     /**
      * Starts the connection to the trackers with the specified mode.
      *
-     * @param {string} connectionMode - Connect to the trackers with the specified mode (GX6 or bluetooth).
-     * @param {string[]} [portNames] - The port names to connect to. (GX6 only)
+     * @param {string} trackerModel - Type of trackers that will be connected (wireless, wired)
+     * @param {string} connectionMode - Connect to the trackers with the specified mode (COM or bluetooth).
+     * @param {string[]} [portNames] - The port names to connect to. (COM only)
      *
      * @example
-     * device.startConnection("gx");
+     * device.startConnection("COM");
      **/
-    startConnection(connectionMode: string, portNames?: string[]) {
-        gx = new GX(debug);
+    startConnection(trackerModel: string, connectionMode: string, portNames?: string[]) {
+        com = new COM(debug);
         bluetooth = new Bluetooth(debug);
 
-        if (connectionMode === "gx") {
-            gx.startConnection(portNames);
-            gxEnabled = true;
+        if (connectionMode === "com" && (trackerModel === "wireless" || trackerModel === "wired")) {
+            com.startConnection(trackerModel, portNames);
+            comEnabled = true;
             setTimeout(() => {
                 canSendButtonData = true;
-            }, 1000);
-        } else if (connectionMode === "bluetooth") {
+            }, 1500);
+        } else if (connectionMode === "bluetooth" && trackerModel === "wireless") {
             bluetooth.startConnection();
             bluetoothEnabled = true;
             canSendButtonData = true;
@@ -251,6 +250,8 @@ export default class HaritoraXWireless extends EventEmitter {
                 "AutoCalibrationSetting"
             );
             ankleCharacteristic = bluetooth.getCharacteristicUUID("TofSetting");
+        } else {
+            log(`Connection mode ${connectionMode} not supported for ${trackerModel}, or tracker model not supported`);
         }
 
         listenToDeviceEvents();
@@ -259,16 +260,17 @@ export default class HaritoraXWireless extends EventEmitter {
     /**
      * Stops the connection to the trackers with the specified mode.
      *
-     * @param {string} connectionMode - Disconnect from the trackers with the specified mode (gx6 or bluetooth).
+     * @param {string} connectionMode - Disconnect from the trackers with the specified mode (com or bluetooth).
      *
      * @example
-     * device.stopConnection("gx");
+     * device.stopConnection("com");
      **/
     stopConnection(connectionMode: string) {
-        if (connectionMode === "gx" && gxEnabled) {
-            gx.stopConnection();
-            gxEnabled = false;
+        if (connectionMode === "com" && comEnabled) {
+            com.stopConnection();
+            comEnabled = false;
             activeDevices = [];
+            canSendButtonData = false;
         } else if (connectionMode === "bluetooth" && bluetoothEnabled) {
             bluetooth.stopConnection();
             bluetoothEnabled = false;
@@ -310,7 +312,7 @@ export default class HaritoraXWireless extends EventEmitter {
         ];
         const TRACKERS_GROUP_TWO = ["hip", "chest", "leftKnee", "rightElbow"];
 
-        log(gx.getTrackerAssignment().toString());
+        log(com.getTrackerAssignment().toString());
 
         let sensorAutoCorrectionBit = 0;
         if (sensorAutoCorrection.includes("accel"))
@@ -437,10 +439,10 @@ export default class HaritoraXWireless extends EventEmitter {
                 log(
                     `Sending tracker settings to ${trackerName}: ${trackerSettingsBuffer.toString()}`
                 );
-                let ports = gx.getActivePorts();
-                let trackerPort = gx.getTrackerPort(trackerName);
+                let ports = com.getActivePorts();
+                let trackerPort = com.getTrackerPort(trackerName);
 
-                ports[trackerPort].write(trackerSettingsBuffer, (err) => {
+                ports[trackerPort].write(trackerSettingsBuffer, (err: any) => {
                     if (err) {
                         error(
                             `${trackerName} - Error writing data to serial port ${trackerPort}: ${err}`
@@ -511,7 +513,7 @@ export default class HaritoraXWireless extends EventEmitter {
         sensorAutoCorrection: string[],
         ankleMotionDetection: boolean
     ) {
-        if (gxEnabled) {
+        if (comEnabled) {
             try {
                 const sensorModeBit =
                     sensorMode === 1 ? SENSOR_MODE_1 : SENSOR_MODE_2; // Default to mode 2
@@ -542,10 +544,10 @@ export default class HaritoraXWireless extends EventEmitter {
                 log(`Ankle motion detection: ${ankleMotionDetection}`);
                 log(`Raw hex data calculated to be sent: ${hexValue}`);
 
-                for (let port in gx.getActivePorts()) {
-                    gx.getActivePorts()[port].write(
+                for (let port in com.getActivePorts()) {
+                    com.getActivePorts()[port].write(
                         trackerSettingsBuffer,
-                        (err) => {
+                        (err: any) => {
                             if (err) {
                                 error(
                                     `Error writing data to serial port ${port}: ${err}`
@@ -621,10 +623,10 @@ export default class HaritoraXWireless extends EventEmitter {
         let model = undefined;
         let version = undefined;
 
-        if (trackerName === "(DONGLE)" || gxEnabled) {
-            serial = gx.getDeviceInformation(trackerName)[SERIAL_INDEX];
-            model = gx.getDeviceInformation(trackerName)[MODEL_INDEX];
-            version = gx.getDeviceInformation(trackerName)[VERSION_INDEX];
+        if (trackerName === "(DONGLE)" || comEnabled) {
+            serial = com.getDeviceInformation(trackerName)[SERIAL_INDEX];
+            model = com.getDeviceInformation(trackerName)[MODEL_INDEX];
+            version = com.getDeviceInformation(trackerName)[VERSION_INDEX];
         } else if (trackerName.startsWith("HaritoraX")) {
             let trackerObject = bluetooth
                 .getActiveDevices()
@@ -750,9 +752,9 @@ export default class HaritoraXWireless extends EventEmitter {
      **/
 
     getActiveTrackers() {
-        if (gxEnabled && bluetoothEnabled) {
+        if (comEnabled && bluetoothEnabled) {
             return activeDevices.concat(bluetooth.getActiveTrackers());
-        } else if (gxEnabled) {
+        } else if (comEnabled) {
             return activeDevices;
         } else if (bluetoothEnabled) {
             return bluetooth.getActiveTrackers();
@@ -971,8 +973,8 @@ export default class HaritoraXWireless extends EventEmitter {
      **/
     getConnectionModeActive(connectionMode: string) {
         switch (connectionMode) {
-            case "gx":
-                return gxEnabled;
+            case "com":
+                return comEnabled;
             case "bluetooth":
                 return bluetoothEnabled;
             default:
@@ -982,12 +984,12 @@ export default class HaritoraXWireless extends EventEmitter {
 }
 
 function listenToDeviceEvents() {
-    gx.on(
+    com.on(
         "data",
         (
             trackerName: string,
             port: string,
-            portId: string,
+            _portId: string,
             identifier: string,
             portData: string
         ) => {
@@ -1018,11 +1020,11 @@ function listenToDeviceEvents() {
         }
     );
 
-    gx.on("log", (message: string) => {
+    com.on("log", (message: string) => {
         log(message);
     });
 
-    gx.on("logError", (message: string) => {
+    com.on("logError", (message: string) => {
         error(message);
     });
 
@@ -1091,14 +1093,14 @@ function listenToDeviceEvents() {
         const trackerName = peripheral.advertisement.localName;
         if (trackerName && !activeDevices.includes(trackerName)) {
             activeDevices.push(trackerName);
-            haritora.emit("connect", trackerName);
+            main.emit("connect", trackerName);
             log(`(haritorax-wireless) Connected to ${trackerName}`);
         }
     });
 
     bluetooth.on("disconnect", (peripheral) => {
         const trackerName = peripheral.advertisement.localName;
-        haritora.emit("disconnect", trackerName);
+        main.emit("disconnect", trackerName);
         log(`Disconnected from ${trackerName}`);
     });
 }
@@ -1120,13 +1122,13 @@ function processIMUData(data: string, trackerName: string) {
     if (
         trackerName &&
         !activeDevices.includes(trackerName) &&
-        (gxEnabled || bluetoothEnabled)
+        (comEnabled || bluetoothEnabled)
     ) {
         log(
             `Tracker ${trackerName} isn't in active devices, adding and emitting connect event`
         );
         activeDevices.push(trackerName);
-        haritora.emit("connect", trackerName);
+        main.emit("connect", trackerName);
     }
 
     // Decode and log the data
@@ -1154,9 +1156,9 @@ function processIMUData(data: string, trackerName: string) {
                 log(`Tracker ${trackerName} magnetometer status: ${magStatus}`);
         }
 
-        haritora.emit("imu", trackerName, rotation, gravity, ankle);
+        main.emit("imu", trackerName, rotation, gravity, ankle);
         if (!trackerName.startsWith("HaritoraX"))
-            haritora.emit("mag", trackerName, magStatus);
+            main.emit("mag", trackerName, magStatus);
     } catch (err) {
         error(`Error decoding tracker ${trackerName} IMU packet data: ${err}`);
     }
@@ -1423,13 +1425,13 @@ function processTrackerData(data: string, trackerName: string) {
         //log(`Searching for tracker ${trackerName}...`);
         if (activeDevices.includes(trackerName))
             activeDevices.splice(activeDevices.indexOf(trackerName), 1);
-        haritora.emit("disconnect", trackerName);
+        main.emit("disconnect", trackerName);
     } else {
         //log(`Tracker ${trackerName} other data processed: ${data}`);
     }
 
     // TODO - Find out what "other data" represents, then add to emitted event.
-    haritora.emit("tracker", trackerName, data);
+    main.emit("tracker", trackerName, data);
 }
 
 /**
@@ -1474,7 +1476,7 @@ function processMagData(data: string, trackerName: string) {
 
     log(`Tracker ${trackerName} mag status: ${magStatus}`);
     trackerMag.set(trackerName, magStatus);
-    haritora.emit("mag", trackerName, magStatus);
+    main.emit("mag", trackerName, magStatus);
     return magStatus;
 }
 
@@ -1516,7 +1518,7 @@ function processButtonData(
                 buttonPressed = "sub";
             }
             isOn = TRACKER_ON; // Tracker is always on when connected via bluetooth, because need to be connected to read button data
-        } else if (gxEnabled) {
+        } else if (comEnabled) {
             let newMainButtonState = parseInt(data[6], 16);
             let newSubButtonState = parseInt(data[9], 16);
 
@@ -1556,7 +1558,7 @@ function processButtonData(
     }
 
     trackerButtons.set(trackerName, currentButtons);
-    haritora.emit(
+    main.emit(
         "button",
         trackerName,
         buttonPressed,
@@ -1610,7 +1612,7 @@ function processBatteryData(data: string, trackerName: string) {
                 `Error converting battery data to hex for ${trackerName}: ${data}`
             );
         }
-    } else if (gxEnabled) {
+    } else if (comEnabled) {
         try {
             const batteryInfo = JSON.parse(data);
             log(
@@ -1632,7 +1634,7 @@ function processBatteryData(data: string, trackerName: string) {
     }
 
     trackerBattery.set(trackerName, batteryData);
-    haritora.emit("battery", trackerName, ...batteryData);
+    main.emit("battery", trackerName, ...batteryData);
 }
 
 function log(message: string) {
@@ -1640,7 +1642,7 @@ function log(message: string) {
     if (debug === 1) {
         emittedMessage = `(haritorax-interpreter) - ${message}`;
         console.log(emittedMessage);
-        haritora.emit("log", emittedMessage);
+        main.emit("log", emittedMessage);
     } else if (debug === 2) {
         const stack = new Error().stack;
         const callerLine = stack.split("\n")[2];
@@ -1649,7 +1651,7 @@ function log(message: string) {
 
         emittedMessage = `(haritorax-interpreter) - ${callerName} (line ${lineNumber}) || ${message}`;
         console.log(emittedMessage);
-        haritora.emit("log", emittedMessage);
+        main.emit("log", emittedMessage);
     }
 }
 
@@ -1658,7 +1660,7 @@ function error(message: string) {
     if (debug === 1) {
         emittedError = `(haritorax-interpreter) - ${message}`;
         console.error(emittedError);
-        haritora.emit("logError", emittedError);
+        main.emit("logError", emittedError);
     } else if (debug === 2) {
         const stack = new Error().stack;
         const callerLine = stack.split("\n")[2];
@@ -1667,8 +1669,8 @@ function error(message: string) {
 
         emittedError = `(haritorax-interpreter) - ${callerName} (line ${lineNumber}) || ${message}`;
         console.error(emittedError);
-        haritora.emit("logError", emittedError);
+        main.emit("logError", emittedError);
     }
 }
 
-export { HaritoraXWireless };
+export { HaritoraX };

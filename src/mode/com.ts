@@ -3,11 +3,12 @@
 import { SerialPort, ReadlineParser } from "serialport";
 import { EventEmitter } from "events";
 
-let gx: GX = undefined;
+let main: COM = undefined;
 let debug = 0;
 
 const BAUD_RATE = 500000; // from the haritora_setting.json in the HaritoraConfigurator
 
+// For HaritoraX Wireless
 const trackerAssignment = new Map([
     // tracker part, [tracker id, port, port id]
     ["DONGLE", ["0", "", ""]],
@@ -21,6 +22,7 @@ const trackerAssignment = new Map([
     ["rightElbow", ["8", "", ""]],
 ]);
 
+// For HaritoraX Wireless
 const deviceInformation = new Map([
     // deviceName, [version, model, serial]
     ["DONGLE", ["", "", ""]],
@@ -38,15 +40,15 @@ const deviceInformation = new Map([
 let activePorts: ActivePorts = {};
 let trackersAssigned = false;
 
-export default class GX extends EventEmitter {
+export default class COM extends EventEmitter {
     constructor(debugMode = 0) {
         super();
         debug = debugMode;
-        gx = this;
-        log(`(haritorax-interpreter) - Debug mode for GX: ${debug}`);
+        main = this;
+        console.log(`(haritorax-interpreter) - Debug mode for GX: ${debug}`);
     }
 
-    startConnection(portNames: string[]) {
+    startConnection(trackerModel: string, portNames: string[]) {
         portNames.forEach((port) => {
             let serial = undefined;
             try {
@@ -68,19 +70,92 @@ export default class GX extends EventEmitter {
             activePorts[port] = serial;
 
             serial.on("open", () => {
-                log(`Opened COM port: ${port}`);
                 this.emit("connected", port);
             });
 
             parser.on("data", (data) => {
-                const splitData = data.toString().split(/:(.+)/);
-                const identifier = splitData[0].toLowerCase();
-                const portData = splitData[1];
-                this.emit("data", identifier, portData);
+                let trackerName = null;
+                let identifier = null;
+                let portId = null;
+                let portData = null;
+
+                if (trackerModel === "wireless") {
+                    const splitData = data.toString().split(/:(.+)/);
+                    identifier = splitData[0].toLowerCase();
+                    portId = identifier.match(/\d/)
+                        ? identifier.match(/\d/)[0]
+                        : "DONGLE";
+                    portData = splitData[1];
+
+                    if (!trackersAssigned) {
+                        for (let [key, value] of trackerAssignment.entries()) {
+                            if (value[1] === "") {
+                                if (identifier.startsWith("r")) {
+                                    const trackerId = parseInt(
+                                        portData.charAt(4)
+                                    );
+                                    if (parseInt(value[0]) == trackerId) {
+                                        trackerAssignment.set(key, [
+                                            trackerId,
+                                            port,
+                                            portId,
+                                        ]);
+                                        log(
+                                            ` Setting ${key} to port ${port} with port ID ${portId}`
+                                        );
+                                    }
+                                } else if (identifier.startsWith("i")) {
+                                    const info = JSON.parse(portData);
+                                    const version = info["version"];
+                                    const model = info["model"];
+                                    const serial = info["serial no"];
+
+                                    deviceInformation.set(key, [
+                                        version,
+                                        model,
+                                        serial,
+                                    ]);
+                                }
+                            }
+                        }
+
+                        if (
+                            Array.from(trackerAssignment.values()).every(
+                                (value) => value[1] !== ""
+                            )
+                        ) {
+                            trackersAssigned = true;
+                            log(
+                                `All trackers have been assigned: ${Array.from(
+                                    trackerAssignment.entries()
+                                )}`
+                            );
+                        }
+                    }
+
+                    for (let [key, value] of trackerAssignment.entries()) {
+                        if (value[1] === port && value[2] === portId) {
+                            trackerName = key;
+                            break;
+                        }
+                    }
+                } else if (trackerModel === "wired") {
+                    const splitData = data.toString().split(/:(.+)/);
+                    identifier = splitData[0].toLowerCase();
+                    portData = splitData[1];
+                }
+
+                this.emit(
+                    "data",
+                    trackerName,
+                    port,
+                    portId,
+                    identifier,
+                    portData
+                );
             });
 
             serial.on("close", () => {
-                log(`Closed COM port: ${port}`);
                 this.emit("disconnected", port);
             });
         });
@@ -167,11 +242,11 @@ export default class GX extends EventEmitter {
  */
 
 function log(message: string) {
-    gx.emit("log", message);
+    main.emit("log", message);
 }
 
 function error(message: string) {
-    gx.emit("logError", message);
+    main.emit("logError", message);
 }
 
 /*
@@ -182,4 +257,4 @@ interface ActivePorts {
     [key: string]: SerialPort;
 }
 
-export { GX };
+export { COM };
