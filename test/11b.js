@@ -1,6 +1,6 @@
-const { HaritoraX11b } = require("../dist/index.js");
+const { HaritoraX } = require("../dist/index.js");
 
-let device = new HaritoraX11b(2, true);
+let device = new HaritoraX("wired", 2, true);
 
 const fs = require("fs");
 
@@ -12,12 +12,12 @@ fs.readFile("data.txt", "utf8", function (err, data) {
     let lines = data.split("\n");
     for (let i = 0; i < lines.length; i++) {
         const trackerNames = [
-            "leftknee",
-            "rightknee",
+            "leftKnee",
+            "rightKnee",
             "chest",
             "hip",
-            "rightankle",
-            "leftankle",
+            "rightAnkle",
+            "leftAnkle",
         ];
 
         // Assuming `lines[i]` contains the base64 encoded string for all trackers
@@ -32,7 +32,7 @@ fs.readFile("data.txt", "utf8", function (err, data) {
                 
                 // Now `trackerBuffer` contains the 14 bytes for the current tracker
                 // You can then decode and process each tracker's data from `trackerBuffer`
-                device.parseData(trackerBuffer, trackerName);
+                device.parseIMUData(trackerBuffer, trackerName);
             });
         } else {
             console.error("Unexpected data length:", buffer.length);

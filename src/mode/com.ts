@@ -39,16 +39,17 @@ const deviceInformation = new Map([
 // Stores the ports that are currently active as objects for access later
 let activePorts: ActivePorts = {};
 let trackersAssigned = false;
+let trackerModelEnabled: String;
 
 export default class COM extends EventEmitter {
-    constructor(debugMode = 0) {
+    constructor(trackerModelEnabled: string, debugMode = 0) {
         super();
         debug = debugMode;
         main = this;
         console.log(`(haritorax-interpreter) - Debug mode for GX: ${debug}`);
     }
 
-    startConnection(trackerModel: string, portNames: string[]) {
+    startConnection(portNames: string[]) {
         portNames.forEach((port) => {
             let serial = undefined;
             try {
@@ -79,7 +80,7 @@ export default class COM extends EventEmitter {
                 let portId = null;
                 let portData = null;
 
-                if (trackerModel === "wireless") {
+                if (trackerModelEnabled === "wireless") {
                     const splitData = data.toString().split(/:(.+)/);
                     identifier = splitData[0].toLowerCase();
                     portId = identifier.match(/\d/)
@@ -139,7 +140,7 @@ export default class COM extends EventEmitter {
                             break;
                         }
                     }
-                } else if (trackerModel === "wired") {
+                } else if (trackerModelEnabled === "wired") {
                     const splitData = data.toString().split(/:(.+)/);
                     identifier = splitData[0].toLowerCase();
                     portData = splitData[1];
@@ -178,6 +179,10 @@ export default class COM extends EventEmitter {
 
         this.emit("disconnected");
         return true;
+    }
+
+    getActiveTrackerModel() {
+        return trackerModelEnabled;
     }
 
     getTrackerAssignment() {
