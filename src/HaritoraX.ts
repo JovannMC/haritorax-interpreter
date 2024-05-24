@@ -250,11 +250,13 @@ export default class HaritoraX extends EventEmitter {
             comEnabled = true;
             setTimeout(() => {
                 canSendButtonData = true;
-            }, 1500);
+            }, 500);
         } else if (connectionMode === "bluetooth" && trackerModelEnabled === "wireless") {
             bluetooth.startConnection();
             bluetoothEnabled = true;
-            canSendButtonData = true;
+            setTimeout(() => {
+                canSendButtonData = true;
+            }, 500);
 
             trackerService = bluetooth.getServiceUUID("Tracker Service");
             settingsService = bluetooth.getServiceUUID("Setting Service");
@@ -975,7 +977,6 @@ function listenToDeviceEvents() {
                         processIMUData(Buffer.from(portData, "base64"), trackerName);
                         break;
                     case "t":
-                        // example data: t:{"id":"button2", "type":"click", "start_time":6937744, "option":""}
                         processButtonData(portData, trackerName);
                         break;
                     case "v":
@@ -1134,33 +1135,38 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
         const gravityRawY = data.readInt16LE(10);
         const gravityRawZ = data.readInt16LE(12);
 
-        let bufferData = data.toString("utf-8");
-
-        let ankle = bufferData.slice(-2) !== "==" ? data.readInt16LE(data.length - 2) : undefined;
-
+        // TODO: implement ankle and mag for wired trackers
+        let ankle = null;
         let magStatus = undefined;
-        if (!trackerName.startsWith("HaritoraX")) {
-            const magnetometerData = bufferData.charAt(data.length - 5);
 
-            switch (magnetometerData) {
-                case "A":
-                    magStatus = "red";
-                    break;
-                case "B":
-                    magStatus = "red";
-                    break;
-                case "C":
-                    magStatus = "yellow";
-                    break;
-                case "D":
-                    magStatus = "green";
-                    break;
-                default:
-                    magStatus = "unknown";
-                    break;
+        if (trackerModelEnabled === "wireless") {
+            let bufferData = data.toString("utf-8");
+
+            ankle = bufferData.slice(-2) !== "==" ? data.readInt16LE(data.length - 2) : undefined;
+
+            if (!trackerName.startsWith("HaritoraX")) {
+                const magnetometerData = bufferData.charAt(data.length - 5);
+
+                switch (magnetometerData) {
+                    case "A":
+                        magStatus = "red";
+                        break;
+                    case "B":
+                        magStatus = "red";
+                        break;
+                    case "C":
+                        magStatus = "yellow";
+                        break;
+                    case "D":
+                        magStatus = "green";
+                        break;
+                    default:
+                        magStatus = "unknown";
+                        break;
+                }
+
+                trackerMag.set(trackerName, magStatus);
             }
-
-            trackerMag.set(trackerName, magStatus);
         }
 
         const rotation = {
@@ -1429,36 +1435,50 @@ function processButtonData(data: string, trackerName: string, characteristic?: s
             }
             isOn = TRACKER_ON; // Tracker is always on when connected via bluetooth, because need to be connected to read button data
         } else if (comEnabled) {
-            let newMainButtonState = parseInt(data[6], 16);
-            let newSubButtonState = parseInt(data[9], 16);
+            if (trackerModelEnabled === "wireless") {
+                let newMainButtonState = parseInt(data[6], 16);
+                let newSubButtonState = parseInt(data[9], 16);
 
-            if (currentButtons[MAIN_BUTTON_INDEX] !== newMainButtonState) {
-                currentButtons[MAIN_BUTTON_INDEX] = newMainButtonState;
-                if (newMainButtonState !== 0) {
-                    buttonPressed = "main";
+                if (currentButtons[MAIN_BUTTON_INDEX] !== newMainButtonState) {
+                    currentButtons[MAIN_BUTTON_INDEX] = newMainButtonState;
+                    if (newMainButtonState !== 0) {
+                        buttonPressed = "main";
+                    }
                 }
-            }
 
-            if (currentButtons[SUB_BUTTON_INDEX] !== newSubButtonState) {
-                currentButtons[SUB_BUTTON_INDEX] = newSubButtonState;
-                if (newSubButtonState !== 0) {
+                if (currentButtons[SUB_BUTTON_INDEX] !== newSubButtonState) {
+                    currentButtons[SUB_BUTTON_INDEX] = newSubButtonState;
+                    if (newSubButtonState !== 0) {
+                        buttonPressed = "sub";
+                    }
+                }
+
+                if (
+                    data[0] === "0" ||
+                    data[7] === "f" ||
+                    data[8] === "f" ||
+                    data[10] === "f" ||
+                    data[11] === "f"
+                ) {
+                    log(`Tracker ${trackerName} is off/turning off...`);
+                    log(`Raw data: ${data}`);
+                    isOn = TRACKER_OFF;
+                } else {
+                    log(`Tracker ${trackerName} is on/turning on...`);
+                    log(`Raw data: ${data}`);
+                    isOn = TRACKER_ON;
+                }
+            } else if (trackerModelEnabled === "wired") {
+                // example data: t:{"id":"button2", "type":"click", "start_time":6937744, "option":""}
+                // TODO: do more testing with wired trackers, find different types of clicks and what "start_time" and "option" mean
+                const buttonData = JSON.parse(data);
+                if (buttonData.id === "button1") {
+                    currentButtons[MAIN_BUTTON_INDEX] += 1;
+                    buttonPressed = "main";
+                } else if (buttonData.id === "button2") {
+                    currentButtons[SUB_BUTTON_INDEX] += 1;
                     buttonPressed = "sub";
                 }
-            }
-
-            if (
-                data[0] === "0" ||
-                data[7] === "f" ||
-                data[8] === "f" ||
-                data[10] === "f" ||
-                data[11] === "f"
-            ) {
-                log(`Tracker ${trackerName} is off/turning off...`);
-                log(`Raw data: ${data}`);
-                isOn = TRACKER_OFF;
-            } else {
-                log(`Tracker ${trackerName} is on/turning on...`);
-                log(`Raw data: ${data}`);
                 isOn = TRACKER_ON;
             }
         }

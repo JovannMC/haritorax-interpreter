@@ -42,10 +42,11 @@ let trackersAssigned = false;
 let trackerModelEnabled: String;
 
 export default class COM extends EventEmitter {
-    constructor(trackerModelEnabled: string, debugMode = 0) {
+    constructor(trackerModel: string, debugMode = 0) {
         super();
         debug = debugMode;
         main = this;
+        trackerModelEnabled = trackerModel;
         console.log(`(haritorax-interpreter) - Debug mode for GX: ${debug}`);
     }
 
