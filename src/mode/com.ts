@@ -83,24 +83,16 @@ export default class COM extends EventEmitter {
                 if (trackerModelEnabled === "wireless") {
                     const splitData = data.toString().split(/:(.+)/);
                     identifier = splitData[0].toLowerCase();
-                    portId = identifier.match(/\d/)
-                        ? identifier.match(/\d/)[0]
-                        : "DONGLE";
+                    portId = identifier.match(/\d/) ? identifier.match(/\d/)[0] : "DONGLE";
                     portData = splitData[1];
 
                     if (!trackersAssigned) {
                         for (let [key, value] of trackerAssignment.entries()) {
                             if (value[1] === "") {
                                 if (identifier.startsWith("r")) {
-                                    const trackerId = parseInt(
-                                        portData.charAt(4)
-                                    );
+                                    const trackerId = parseInt(portData.charAt(4));
                                     if (parseInt(value[0]) == trackerId) {
-                                        trackerAssignment.set(key, [
-                                            trackerId,
-                                            port,
-                                            portId,
-                                        ]);
+                                        trackerAssignment.set(key, [trackerId, port, portId]);
                                         log(
                                             ` Setting ${key} to port ${port} with port ID ${portId}`
                                         );
@@ -111,19 +103,13 @@ export default class COM extends EventEmitter {
                                     const model = info["model"];
                                     const serial = info["serial no"];
 
-                                    deviceInformation.set(key, [
-                                        version,
-                                        model,
-                                        serial,
-                                    ]);
+                                    deviceInformation.set(key, [version, model, serial]);
                                 }
                             }
                         }
 
                         if (
-                            Array.from(trackerAssignment.values()).every(
-                                (value) => value[1] !== ""
-                            )
+                            Array.from(trackerAssignment.values()).every((value) => value[1] !== "")
                         ) {
                             trackersAssigned = true;
                             log(
@@ -146,14 +132,7 @@ export default class COM extends EventEmitter {
                     portData = splitData[1];
                 }
 
-                this.emit(
-                    "data",
-                    trackerName,
-                    port,
-                    portId,
-                    identifier,
-                    portData
-                );
+                this.emit("data", trackerName, port, portId, identifier, portData);
             });
 
             serial.on("close", () => {

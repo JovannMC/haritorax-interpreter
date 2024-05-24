@@ -111,106 +111,86 @@ export default class Bluetooth extends EventEmitter {
                 const activeServices: any[] = [];
                 const activeCharacteristics: any[] = [];
 
-                peripheral.discoverServices(
-                    null,
-                    (err: any, services: any[]) => {
-                        if (err) {
-                            error(`Error discovering services: ${err}`);
-                            return;
-                        }
-
-                        services.forEach(
-                            (service: {
-                                discoverCharacteristics: (
-                                    arg0: any[],
-                                    arg1: (
-                                        error: any,
-                                        characteristics: any
-                                    ) => void
-                                ) => void;
-                                uuid: any;
-                            }) => {
-                                activeServices.push(service);
-                                service.discoverCharacteristics(
-                                    [],
-                                    (err: any, characteristics: any[]) => {
-                                        if (err) {
-                                            error(
-                                                `Error discovering characteristics of service ${service.uuid}: ${err}`
-                                            );
-                                            return;
-                                        }
-
-                                        characteristics.forEach(
-                                            (characteristic: {
-                                                on: (
-                                                    arg0: string,
-                                                    arg1: (data: any) => void
-                                                ) => void;
-                                                uuid: any;
-                                                subscribe: (
-                                                    arg0: (err: any) => void
-                                                ) => void;
-                                            }) => {
-                                                activeCharacteristics.push(
-                                                    characteristic
-                                                );
-                                                characteristic.on(
-                                                    "data",
-                                                    (data: any) => {
-                                                        emitData(
-                                                            this,
-                                                            localName,
-                                                            service.uuid,
-                                                            characteristic.uuid,
-                                                            data
-                                                        );
-                                                    }
-                                                );
-                                                characteristic.subscribe(
-                                                    (err: any) => {
-                                                        if (err) {
-                                                            error(
-                                                                `Error subscribing to characteristic ${characteristic.uuid} of service ${service.uuid}: ${err}`
-                                                            );
-                                                        }
-                                                    }
-                                                );
-                                            }
-                                        );
-                                    }
-                                );
-                            }
-                        );
-                        const deviceIndex = activeDevices.findIndex(
-                            (device) => device[0] === localName
-                        );
-                        if (deviceIndex !== -1) {
-                            activeDevices[deviceIndex] = [
-                                localName,
-                                peripheral,
-                                activeServices,
-                                activeCharacteristics,
-                            ];
-                        } else {
-                            activeDevices.push([
-                                localName,
-                                peripheral,
-                                activeServices,
-                                activeCharacteristics,
-                            ]);
-                        }
+                peripheral.discoverServices(null, (err: any, services: any[]) => {
+                    if (err) {
+                        error(`Error discovering services: ${err}`);
+                        return;
                     }
-                );
+
+                    services.forEach(
+                        (service: {
+                            discoverCharacteristics: (
+                                arg0: any[],
+                                arg1: (error: any, characteristics: any) => void
+                            ) => void;
+                            uuid: any;
+                        }) => {
+                            activeServices.push(service);
+                            service.discoverCharacteristics(
+                                [],
+                                (err: any, characteristics: any[]) => {
+                                    if (err) {
+                                        error(
+                                            `Error discovering characteristics of service ${service.uuid}: ${err}`
+                                        );
+                                        return;
+                                    }
+
+                                    characteristics.forEach(
+                                        (characteristic: {
+                                            on: (arg0: string, arg1: (data: any) => void) => void;
+                                            uuid: any;
+                                            subscribe: (arg0: (err: any) => void) => void;
+                                        }) => {
+                                            activeCharacteristics.push(characteristic);
+                                            characteristic.on("data", (data: any) => {
+                                                emitData(
+                                                    this,
+                                                    localName,
+                                                    service.uuid,
+                                                    characteristic.uuid,
+                                                    data
+                                                );
+                                            });
+                                            characteristic.subscribe((err: any) => {
+                                                if (err) {
+                                                    error(
+                                                        `Error subscribing to characteristic ${characteristic.uuid} of service ${service.uuid}: ${err}`
+                                                    );
+                                                }
+                                            });
+                                        }
+                                    );
+                                }
+                            );
+                        }
+                    );
+                    const deviceIndex = activeDevices.findIndex(
+                        (device) => device[0] === localName
+                    );
+                    if (deviceIndex !== -1) {
+                        activeDevices[deviceIndex] = [
+                            localName,
+                            peripheral,
+                            activeServices,
+                            activeCharacteristics,
+                        ];
+                    } else {
+                        activeDevices.push([
+                            localName,
+                            peripheral,
+                            activeServices,
+                            activeCharacteristics,
+                        ]);
+                    }
+                });
             });
 
             peripheral.on("disconnect", () => {
                 if (!allowReconnect) return;
                 log(`Disconnected from ${localName}`);
                 this.emit("disconnect", peripheral);
-                const index = activeDevices.findIndex(
-                    (device) => device[1] === peripheral
-                );
+                const index = activeDevices.findIndex((device) => device[1] === peripheral);
                 if (index !== -1) {
                     activeDevices.splice(index, 1);
                 }
@@ -242,36 +222,26 @@ export default class Bluetooth extends EventEmitter {
         return true;
     }
 
-    async read(
-        localName: string,
-        service: string,
-        characteristic: string
-    ): Promise<any> {
+    async read(localName: string, service: string, characteristic: string): Promise<any> {
         if (!activeDevices.find((device: ActiveDevice) => device[0] === localName)) {
             error(`Device ${localName} not found`);
             return null;
         }
 
         while (!(await areAllBLEDiscovered())) {
-            log(
-                "Waiting for all services and characteristics to be discovered..."
-            );
+            log("Waiting for all services and characteristics to be discovered...");
             await new Promise((resolve) => setTimeout(resolve, 1000));
         }
 
         log(`Reading characteristic ${characteristic} of service ${service}`);
 
-        const device = activeDevices.find(
-            (device: ActiveDevice) => device[0] === localName
-        );
+        const device = activeDevices.find((device: ActiveDevice) => device[0] === localName);
         if (!device) {
             error(`Device ${localName} not found`);
             throw new Error(`Device ${localName} not found`);
         }
 
-        const serviceInstance = device[2].find(
-            (s: Service) => s.uuid === service
-        );
+        const serviceInstance = device[2].find((s: Service) => s.uuid === service);
         if (!serviceInstance) {
             error(`Service ${service} not found`);
             throw new Error(`Service ${service} not found`);
@@ -289,9 +259,7 @@ export default class Bluetooth extends EventEmitter {
             characteristicInstance.read((err: any, data: any) => {
                 const characteristicName = characteristics.get(characteristic);
                 if (err) {
-                    error(
-                        `Error reading characteristic ${characteristicName}: ${err}`
-                    );
+                    error(`Error reading characteristic ${characteristicName}: ${err}`);
                     reject(err);
                     return;
                 }
@@ -310,26 +278,20 @@ export default class Bluetooth extends EventEmitter {
         data: any
     ): Promise<void> {
         while (!(await areAllBLEDiscovered())) {
-            log(
-                "Waiting for all services and characteristics to be discovered..."
-            );
+            log("Waiting for all services and characteristics to be discovered...");
             await new Promise((resolve) => setTimeout(resolve, 1000));
         }
 
         log(
             `Writing to characteristic ${characteristic} of service ${service} for device ${localName}`
         );
-        const device = activeDevices.find(
-            (device: ActiveDevice) => device[0] === localName
-        );
+        const device = activeDevices.find((device: ActiveDevice) => device[0] === localName);
         if (!device) {
             error(`Device ${localName} not found`);
             throw new Error(`Device ${localName} not found`);
         }
 
-        const serviceInstance = device[2].find(
-            (s: Service) => s.uuid === service
-        );
+        const serviceInstance = device[2].find((s: Service) => s.uuid === service);
         if (!serviceInstance) {
             error(`Service ${service} not found`);
             throw new Error(`Service ${service} not found`);
@@ -346,9 +308,7 @@ export default class Bluetooth extends EventEmitter {
         return new Promise((resolve, reject) => {
             characteristicInstance.write(data, false, (err: any) => {
                 if (err) {
-                    error(
-                        `Error writing to characteristic ${characteristic}: ${err}`
-                    );
+                    error(`Error writing to characteristic ${characteristic}: ${err}`);
                     reject(err);
                     return;
                 }
@@ -431,10 +391,7 @@ async function areAllBLEDiscovered(): Promise<boolean> {
     for (const characteristicUuid of importantCharacteristics) {
         if (
             !activeDevices.find((device: any) =>
-                device[3].find(
-                    (characteristic: any) =>
-                        characteristic.uuid === characteristicUuid
-                )
+                device[3].find((characteristic: any) => characteristic.uuid === characteristicUuid)
             )
         ) {
             return false;
