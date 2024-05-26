@@ -976,8 +976,9 @@ function listenToDeviceEvents() {
                         processWiredData(portData);
                         break;
                     case "s":
-                    // settings and tracker info
+                    // settings and tracker info, for now we will only use this for mag status
                     // example: s:{"imu_mode":1, "imu_num":6, "magf_status":"020200", "speed_mode":2, "dcal_flags":"04", "detected":"04004C6C"}
+                        processMagData(portData, trackerName);
                     case "t":
                         processButtonData(portData, trackerName);
                         break;
@@ -1402,8 +1403,44 @@ function processMagData(data: string, trackerName: string) {
     const RED_2 = 1;
     const RED = 0;
     let magStatus;
-    const buffer = Buffer.from(data, "base64");
-    const magData = buffer.readUInt8(0);
+    let magData;
+
+    if (trackerModelEnabled === "wireless") {
+        try {
+            const buffer = Buffer.from(data, "base64");
+            magData = buffer.readUInt8(0);
+        } catch (err) {
+            error(`Error processing mag data for ${trackerName}: ${err}`);
+            return null;
+        }
+    } else if (trackerModelEnabled === "wired") {
+        // we receive a JSON, so we need to get value of "magf_status"
+        // example: {"imu_mode":1, "imu_num":5, "magf_status":"33333333", "speed_mode":2, "dcal_flags":"04", "detected":"04004C4C"}
+        // each digit represents a tracker, so loop through each digit and get the value
+        let trackerNames = ["chest", "leftKnee", "leftAnkle", "rightKnee", "rightAnkle"];
+        try {
+            const jsonData = JSON.parse(data);
+            const magStatusData = jsonData.magf_status;
+    
+            // Adjust trackerNames based on the length of magStatusData
+            if (magStatusData.length === 6) {
+                trackerNames.push("hip");
+            } else if (magStatusData.length === 7) {
+                trackerNames.push("leftElbow");
+                trackerNames.push("rightElbow");
+            } else if (magStatusData.length === 8) {
+                trackerNames.push("hip");
+                trackerNames.push("leftElbow");
+                trackerNames.push("rightElbow");
+            }
+    
+            magData = parseInt(magStatusData[trackerNames.indexOf(trackerName)]);
+        } catch (err) {
+            error(`Error processing mag data for ${trackerName}: ${err}`);
+            return null;
+        }
+    }
+    
 
     switch (magData) {
         case GREEN:
@@ -1420,7 +1457,6 @@ function processMagData(data: string, trackerName: string) {
             break;
         default:
             magStatus = "unknown";
-            log(`Unknown mag data for ${trackerName}: ${magData}`);
             break;
     }
 
