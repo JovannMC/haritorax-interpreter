@@ -973,9 +973,11 @@ function listenToDeviceEvents() {
             } else if (trackerModelEnabled === "wired") {
                 switch (identifier[0]) {
                     case "P":
-                        // TODO: process imu data for wired trackers
-                        processIMUData(Buffer.from(portData, "base64"), trackerName);
+                        processWiredData(portData);
                         break;
+                    case "s":
+                    // settings and tracker info
+                    // example: s:{"imu_mode":1, "imu_num":6, "magf_status":"020200", "speed_mode":2, "dcal_flags":"04", "detected":"04004C6C"}
                     case "t":
                         processButtonData(portData, trackerName);
                         break;
@@ -1054,6 +1056,33 @@ function listenToDeviceEvents() {
 
     bluetooth.on("logError", (message: string) => {
         error(message);
+    });
+}
+
+function processWiredData(data: string) {
+    // Default 5 (base) trackers
+    let trackerNames = ["chest", "leftKnee", "leftAnkle", "rightKnee", "rightAnkle"];
+
+    const buffer = Buffer.from(data, "base64");
+
+    if (buffer.length === 84) {
+        // 5 (base) + 1 (hip) = 6 trackers
+        trackerNames.push("hip");
+    } else if (buffer.length === 100) {
+        // 5 (base) + 2 (elbows) = 7 trackers
+        trackerNames.push("leftElbow");
+        trackerNames.push("rightElbow");
+    } else if (buffer.length === 116) {
+        // 5 (base) + 1 (hip) + 2 (elbows) = 8 trackers
+        trackerNames.push("hip");
+        trackerNames.push("leftElbow");
+        trackerNames.push("rightElbow");
+    }
+
+    trackerNames.forEach((trackerName, index) => {
+        const start = index * 14; // 14 bytes per tracker
+        const trackerBuffer = buffer.slice(start, start + 14);
+        processIMUData(trackerBuffer, trackerName);
     });
 }
 
@@ -1364,6 +1393,7 @@ function processTrackerData(data: string, trackerName: string) {
  * @param {string} trackerName - The name of the tracker.
  * @fires haritora#mag
  **/
+
 function processMagData(data: string, trackerName: string) {
     if (!data) return null;
 
