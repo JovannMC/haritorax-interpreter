@@ -968,11 +968,15 @@ function listenToDeviceEvents() {
                         // Handled by GX6 class
                         break;
                     default:
-                        log(`${port} - Unknown data from ${trackerName}: ${portData}`);
+                        log(`${port} - Unknown data from ${trackerName} (identifier: ${identifier}): ${portData}`);
                 }
             } else if (trackerModelEnabled === "wired") {
                 switch (identifier[0]) {
-                    case "P":
+                    // for whatever reason, it seems like they use different letters for different number of trackers
+                    // x = 5 trackers, p = 6 trackers (specifically hip)
+                    // unknown if same applies to 8 trackers (5+1+2) or 7 trackers (5+2)
+                    case "x":
+                    case "p":
                         processWiredData(portData);
                         break;
                     case "s":
@@ -987,7 +991,7 @@ function listenToDeviceEvents() {
                         processBatteryData(portData, trackerName);
                         break;
                     default:
-                        log(`${port} - Unknown data from ${trackerName}: ${portData}`);
+                        log(`${port} - Unknown data from ${trackerName} (identifier: ${identifier}): ${portData}`);
                 }
             }
         }
