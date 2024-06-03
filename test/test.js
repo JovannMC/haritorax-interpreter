@@ -1,7 +1,7 @@
 const { HaritoraX } = require("../dist/index.js");
 
 let mode = process.argv[2] || "gx";
-let device = new HaritoraX("wireless", 2);
+let device = new HaritoraX("wireless", 2, true);
 
 if (mode === "bt" || mode === "bluetooth") {
     device.startConnection("bluetooth");
