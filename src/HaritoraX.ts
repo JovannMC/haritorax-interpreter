@@ -1297,23 +1297,11 @@ function processMagData(data: string, trackerName: string) {
     } else if (trackerModelEnabled === "wired") {
         // we receive a JSON, so we need to get value of "magf_status"
         // example: {"imu_mode":1, "imu_num":5, "magf_status":"33333333", "speed_mode":2, "dcal_flags":"04", "detected":"04004C4C"}
-        // each digit represents a tracker, so loop through each digit and get the value
-        let trackerNames = ["chest", "leftKnee", "leftAnkle", "rightKnee", "rightAnkle"];
+        // each digit represents a tracker, so grab the value of the tracker we want
         try {
+            let trackerNames = ["chest", "leftKnee", "leftAnkle", "rightKnee", "rightAnkle", "hip", "leftElbow", "rightElbow"];
             const jsonData = JSON.parse(data);
             const magStatusData = jsonData.magf_status;
-    
-            // Adjust trackerNames based on the length of magStatusData
-            if (magStatusData.length === 6) {
-                trackerNames.push("hip");
-            } else if (magStatusData.length === 7) {
-                trackerNames.push("leftElbow");
-                trackerNames.push("rightElbow");
-            } else if (magStatusData.length === 8) {
-                trackerNames.push("hip");
-                trackerNames.push("leftElbow");
-                trackerNames.push("rightElbow");
-            }
     
             magData = parseInt(magStatusData[trackerNames.indexOf(trackerName)]);
         } catch (err) {
@@ -1321,7 +1309,6 @@ function processMagData(data: string, trackerName: string) {
             return null;
         }
     }
-    
 
     switch (magData) {
         case GREEN:
