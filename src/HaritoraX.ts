@@ -1174,12 +1174,11 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
         let magStatus = undefined;
 
         if (trackerModelEnabled === "wireless") {
-            let bufferData = data.toString("utf-8");
-
+            let bufferData = data.toString("base64");
             ankle = bufferData.slice(-2) !== "==" ? data.readInt16LE(data.length - 2) : undefined;
 
             if (!trackerName.startsWith("HaritoraX")) {
-                const magnetometerData = bufferData.charAt(data.length - 5);
+                const magnetometerData = bufferData.charAt(bufferData.length - 5);
 
                 switch (magnetometerData) {
                     case "A":
