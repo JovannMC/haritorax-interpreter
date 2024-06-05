@@ -2,7 +2,6 @@
 
 import { Buffer } from "buffer";
 import { EventEmitter } from "events";
-import Quaternion from "quaternion";
 import COM from "./mode/com.js";
 import Bluetooth from "./mode/bluetooth.js";
 
@@ -923,7 +922,7 @@ export default class HaritoraX extends EventEmitter {
     }
 
     getActiveTrackerModel() {
-        return com.getActiveTrackerModel();
+        return trackerModelEnabled;
     }
 
     /**
