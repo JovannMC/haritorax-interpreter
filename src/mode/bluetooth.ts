@@ -56,7 +56,7 @@ export default class Bluetooth extends EventEmitter {
     startConnection() {
         log("Connected to bluetooth");
 
-        if (noble.state === "poweredOn") {
+        if (noble._state === "poweredOn") {
             try {
                 noble.startScanning([], true);
                 this.emit("connected");
