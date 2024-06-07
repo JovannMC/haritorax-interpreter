@@ -97,11 +97,12 @@ let trackerModelEnabled: string;
 
 /**
  * The "imu" event which provides info about the tracker's IMU data.
- * Support: GX6, GX2, Bluetooth
+ * Supported trackers: wireless, wired
+ * Supported connections: COM, Bluetooth
  *
  * @event this#imu
  * @type {object}
- * @property {string} trackerName - The name of the tracker. Possible values for GX6: "rightKnee", "rightAnkle", "hip", "chest", "leftKnee", "leftAnkle", "leftElbow", "rightElbow".
+ * @property {string} trackerName - The name of the tracker.
  * @property {object} rotation - The rotation data of the tracker.
  * @property {number} rotation.x - The x component of the rotation.
  * @property {number} rotation.y - The y component of the rotation.
@@ -116,17 +117,19 @@ let trackerModelEnabled: string;
 
 /**
  * The "tracker" event which provides info about the tracker's other data.
- * Support: GX6, GX2
+ * Supported trackers: wireless
+ * Supported connections: COM, Bluetooth
  *
  * @event this#tracker
  * @type {object}
- * @property {string} trackerName - The name of the tracker. (rightKnee, rightAnkle, hip, chest, leftKnee, leftAnkle, leftElbow, rightElbow)
+ * @property {string} trackerName - The name of the tracker.
  * @property {string} data - The data received from the tracker.
  **/
 
 /**
  * The "mag" event which provides the tracker's magnetometer status
- * Support: GX6, GX2, Bluetooth
+ * Supported trackers: wireless
+ * Supported connections: COM, Bluetooth
  *
  * @event this#mag
  * @type {object}
@@ -136,7 +139,8 @@ let trackerModelEnabled: string;
 
 /**
  * The "button" event which provides info about the tracker's button data.
- * Support: GX6, GX2, Bluetooth
+ * Supported trackers: wireless
+ * Supported connections: COM, Bluetooth
  *
  * @event this#button
  * @type {object}
@@ -149,7 +153,8 @@ let trackerModelEnabled: string;
 
 /**
  * The "battery" event which provides info about the tracker's battery data.
- * Support: GX6, GX2, Bluetooth (partial)
+ * Supported trackers: wireless
+ * Supported connections: COM, Bluetooth (partial)
  *
  * @event this#battery
  * @type {object}
@@ -161,7 +166,8 @@ let trackerModelEnabled: string;
 
 /**
  * The "info" event which provides info about the tracker or dongle.
- * Support: GX6, GX2, Bluetooth
+ * Supported trackers: wireless
+ * Supported connections: COM, Bluetooth
  *
  * @event this#info
  * @type {object}
@@ -173,7 +179,8 @@ let trackerModelEnabled: string;
 
 /**
  * The "connect" event which provides the name of the tracker that has connected.
- * Support: GX6, GX2, Bluetooth
+ * Supported trackers: wireless, wired
+ * Supported connections: COM, Bluetooth
  *
  * @event this#connect
  * @type {string}
@@ -182,7 +189,8 @@ let trackerModelEnabled: string;
 
 /**
  * The "disconnect" event which provides the name of the tracker that has disconnected.
- * Support: GX6, GX2, Bluetooth
+ * Supported trackers: wireless, wired
+ * Supported connections: COM, Bluetooth
  *
  * @event this#disconnect
  * @type {string}
@@ -298,7 +306,8 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Sets the tracker settings for a specific tracker.
-     * Support: GX6, GX2
+     * Supported trackers: Wireless
+     * Supported connections: COM, Bluetooth
      *
      * @param {string} trackerName - The name of the tracker to apply settings to (rightKnee, rightAnkle, hip, chest, leftKnee, leftAnkle, leftElbow, rightElbow).
      * @param {number} sensorMode - The sensor mode, which controls whether magnetometer is used (1 or 2).
@@ -474,7 +483,8 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Sets the tracker settings for all connected trackers
-     * Support: GX6, GX2, Bluetooth
+     * Supported trackers: Wireless
+     * Supported connections: COM, Bluetooth
      *
      * @param {number} sensorMode - The sensor mode, which controls whether magnetometer is used (1 or 2).
      * @param {number} fpsMode - The posture data transfer rate/FPS (50 or 100).
@@ -564,7 +574,8 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Returns device info for the specified tracker or dongle.
-     * Support: GX6, GX2, Bluetooth
+     * Supported trackers: Wireless
+     * Supported connections: COM, Bluetooth
      *
      * @function getDeviceInfo
      * @returns {object} The device info (version, model, serial)
@@ -649,7 +660,8 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Get battery info from the trackers.
-     * Support: GX6, GX2, Bluetooth
+     * Supported trackers: wireless
+     * Supported connections: COM, Bluetooth
      *
      * @function getBatteryInfo
      * @returns {object} The battery info (batteryRemaining, batteryVoltage, chargeStatus)
@@ -699,7 +711,8 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Get the active trackers.
-     * Support: GX6, GX2, Bluetooth
+     * Supported trackers: wireless, wired
+     * Supported connections: COM, Bluetooth
      *
      * @function getActiveTrackers
      * @returns {array} The active trackers.
@@ -719,7 +732,8 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Get the tracker's settings.
-     * Support: GX6, GX2
+     * Supported trackers: wireless
+     * Supported connections: COM, Bluetooth
      *
      * @function getTrackerSettings
      * @param {string} trackerName
@@ -834,7 +848,8 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Get the tracker's (raw hex) settings
-     * Support: GX6, GX2
+     * Supported trackers: wireless
+     * Supported connections: COM, Bluetooth
      *
      * @function getTrackerSettingsRaw
      * @param {string} trackerName
@@ -853,7 +868,8 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Get the tracker's buttons.
-     * Support: GX6, GX2, Bluetooth
+     * Supported trackers: wireless
+     * Supported connections: COM, Bluetooth
      *
      * @function getTrackerButtons
      * @param {string} trackerName
@@ -873,7 +889,8 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Get the tracker's magnetometer status
-     * Support: GX6, GX2, Bluetooth
+     * Supported trackers: wireless
+     * Supported connections: COM, Bluetooth
      *
      * @function getTrackerMag
      * @param {string} trackerName
@@ -904,7 +921,8 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Check whether the connection mode is active or not.
-     * Support: GX6, GX2, Bluetooth
+     * Supported trackers: wireless, wired
+     * Supported connections: COM, Bluetooth
      *
      * @function getConnectionModeActive
      * @param {string} connectionMode
@@ -967,7 +985,9 @@ function listenToDeviceEvents() {
                         // Handled by GX6 class
                         break;
                     default:
-                        log(`${port} - Unknown data from ${trackerName} (identifier: ${identifier}): ${portData}`);
+                        log(
+                            `${port} - Unknown data from ${trackerName} (identifier: ${identifier}): ${portData}`
+                        );
                 }
             } else if (trackerModelEnabled === "wired") {
                 switch (identifier[0]) {
@@ -979,8 +999,8 @@ function listenToDeviceEvents() {
                         processWiredData(portData);
                         break;
                     case "s":
-                    // settings and tracker info, for now we will only use this for mag status
-                    // example: s:{"imu_mode":1, "imu_num":6, "magf_status":"020200", "speed_mode":2, "dcal_flags":"04", "detected":"04004C6C"}
+                        // settings and tracker info, for now we will only use this for mag status
+                        // example: s:{"imu_mode":1, "imu_num":6, "magf_status":"020200", "speed_mode":2, "dcal_flags":"04", "detected":"04004C6C"}
                         processMagData(portData, trackerName);
                     case "t":
                         processButtonData(portData, trackerName);
@@ -990,7 +1010,9 @@ function listenToDeviceEvents() {
                         processBatteryData(portData, trackerName);
                         break;
                     default:
-                        log(`${port} - Unknown data from ${trackerName} (identifier: ${identifier}): ${portData}`);
+                        log(
+                            `${port} - Unknown data from ${trackerName} (identifier: ${identifier}): ${portData}`
+                        );
                 }
             }
         }
@@ -1093,7 +1115,8 @@ function processWiredData(data: string) {
 /**
  * Processes the IMU data received from the tracker by the dongle.
  * The data contains the information about the rotation, gravity, and ankle motion (if enabled) of the tracker.
- * Support: GX6, GX2, Bluetooth
+ * Supported trackers: wireless
+ * Supported connections: COM, Bluetooth
  *
  * @function processIMUData
  *
@@ -1237,7 +1260,8 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
 /**
  * Processes other tracker data received from the tracker by the dongle.
  * Read function comments for more information.
- * Support: GX6, GX2
+ * Supported trackers: wireless
+ * Supported connections: COM, Bluetooth
  *
  * @function processTrackerData
  * @param {string} data - The data to process.
@@ -1267,7 +1291,8 @@ function processTrackerData(data: string, trackerName: string) {
 /**
  * Processes the magnetometer data received from the Bluetooth tracker.
  * GX mag status is processed by decodeIMUPacket()
- * Support: Bluetooth
+ * Supported trackers: wireless
+ * Supported connections: COM, Bluetooth
  *
  * @function processMagData
  * @param {string} data - The data to process.
@@ -1298,10 +1323,19 @@ function processMagData(data: string, trackerName: string) {
         // example: {"imu_mode":1, "imu_num":5, "magf_status":"33333333", "speed_mode":2, "dcal_flags":"04", "detected":"04004C4C"}
         // each digit represents a tracker, so grab the value of the tracker we want
         try {
-            let trackerNames = ["chest", "leftKnee", "leftAnkle", "rightKnee", "rightAnkle", "hip", "leftElbow", "rightElbow"];
+            let trackerNames = [
+                "chest",
+                "leftKnee",
+                "leftAnkle",
+                "rightKnee",
+                "rightAnkle",
+                "hip",
+                "leftElbow",
+                "rightElbow",
+            ];
             const jsonData = JSON.parse(data);
             const magStatusData = jsonData.magf_status;
-    
+
             magData = parseInt(magStatusData[trackerNames.indexOf(trackerName)]);
         } catch (err) {
             error(`Error processing mag data for ${trackerName}: ${err}`);
@@ -1336,7 +1370,8 @@ function processMagData(data: string, trackerName: string) {
 /**
  * Processes the button data received from the tracker by the dongle.
  * The data contains the information about the main and sub buttons on the tracker along with which one was pressed/updated.
- * Support: GX6, GX2, Bluetooth
+ * Supported trackers: wireless
+ * Supported connections: COM, Bluetooth
  *
  * @function processButtonData
  * @param {string} data - The data to process.
@@ -1439,7 +1474,8 @@ function processButtonData(data: string, trackerName: string, characteristic?: s
 /**
  * Processes the battery data received from the tracker by the dongle.
  * It contains the information about the battery percentage, voltage, and charge status of the tracker.
- * Support: GX6, GX2, Bluetooth (partial)
+ * Supported trackers: wireless
+ * Supported connections: COM, Bluetooth (partial)
  *
  * @function processBatteryData
  * @param {string} data - The data to process.
