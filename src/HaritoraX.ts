@@ -1097,8 +1097,7 @@ function processWiredData(data: string) {
 
     const buffer = Buffer.from(data, "base64");
 
-    // alright, so for some ungodly reason shiftall decided to use different letters for different number of trackers, AND if they have ankle motion enabled or not
-    // WHAT THE HELL.
+    // read processIMUData for my rant about these stuff
     if (buffer.length === 84 || buffer.length === 88) {
         // 5 (base) + 1 (hip) = 6 trackers
         trackerNames.push("hip");
@@ -1161,10 +1160,10 @@ function processIMUData(data: Buffer, trackerName: string) {
                 log(`Tracker ${trackerName} ankle: ${ankle}`);
             } else if (leftAnkle) {
                 // wired tracker
-                log(`Tracker (WIRED) left ankle: ${leftAnkle}`);
+                log(`Tracker ${trackerName} left ankle: ${leftAnkle}`);
             } else if (rightAnkle) {
                 // wired tracker
-                log(`Tracker (WIRED) right ankle: ${rightAnkle}`);
+                log(`Tracker ${trackerName} right ankle: ${rightAnkle}`);
             }
             if (magStatus) log(`Tracker ${trackerName} magnetometer status: ${magStatus}`);
         }
@@ -1426,7 +1425,7 @@ function processButtonData(data: string, trackerName: string, characteristic?: s
                 currentButtons[SUB_BUTTON_INDEX] += 1;
                 buttonPressed = "sub";
             }
-            isOn = TRACKER_ON; // Tracker is always on when connected via bluetooth, because need to be connected to read button data
+            isOn = TRACKER_ON; // Tracker is always on when connected via bluetooth, because you need to be connected to read button data
         } else if (comEnabled) {
             if (trackerModelEnabled === "wireless") {
                 let newMainButtonState = parseInt(data[6], 16);
@@ -1509,9 +1508,6 @@ function processButtonData(data: string, trackerName: string, characteristic?: s
  **/
 
 function processBatteryData(data: string, trackerName: string) {
-    const BATTERY_REMAINING_INDEX = 0;
-    const BATTERY_VOLTAGE_INDEX = 1;
-    const CHARGE_STATUS_INDEX = 2;
     let batteryData: [number, number, string] = [undefined, undefined, undefined];
 
     if (trackerName.startsWith("HaritoraX")) {
@@ -1519,7 +1515,7 @@ function processBatteryData(data: string, trackerName: string) {
             let batteryRemainingHex = Buffer.from(data, "base64").toString("hex");
             batteryData[0] = parseInt(batteryRemainingHex, 16);
             log(
-                `Tracker ${trackerName} battery remaining: ${batteryData[BATTERY_REMAINING_INDEX]}%`
+                `Tracker ${trackerName} battery remaining: ${batteryData[0]}%`
             );
         } catch {
             error(`Error converting battery data to hex for ${trackerName}: ${data}`);
@@ -1530,9 +1526,9 @@ function processBatteryData(data: string, trackerName: string) {
             log(`Tracker ${trackerName} remaining: ${batteryInfo["battery remaining"]}%`);
             log(`Tracker ${trackerName} voltage: ${batteryInfo["battery voltage"]}`);
             log(`Tracker ${trackerName} Status: ${batteryInfo["charge status"]}`);
-            batteryData[BATTERY_REMAINING_INDEX] = batteryInfo["battery remaining"];
-            batteryData[BATTERY_VOLTAGE_INDEX] = batteryInfo["battery voltage"];
-            batteryData[CHARGE_STATUS_INDEX] = batteryInfo["charge status"];
+            batteryData[0] = batteryInfo["battery remaining"];
+            batteryData[1] = batteryInfo["battery voltage"];
+            batteryData[2] = batteryInfo["charge status"];
         } catch (err) {
             error(`Error parsing battery data JSON for ${trackerName}: ${err}`);
         }
