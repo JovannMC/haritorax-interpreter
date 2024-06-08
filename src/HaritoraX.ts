@@ -113,6 +113,8 @@ let trackerModelEnabled: string;
  * @property {number} gravity.y - The y component of the gravity.
  * @property {number} gravity.z - The z component of the gravity.
  * @property {number|undefined} ankle - The ankle motion data of the tracker if enabled. Undefined if disabled.
+ * @property {number|undefined} leftAnkle - The left ankle motion data of the tracker if enabled (only wired trackers). Undefined if disabled. 
+ * @property {number|undefined} rightAnkle - The right ankle motion data of the tracker if enabled (only wired trackers). Undefined if disabled.
  **/
 
 /**
@@ -991,11 +993,15 @@ function listenToDeviceEvents() {
                 }
             } else if (trackerModelEnabled === "wired") {
                 switch (identifier[0]) {
-                    // for whatever reason, it seems like they use different letters for different number of trackers
-                    // x = 5 trackers, p = 6 trackers (specifically hip)
-                    // unknown if same applies to 8 trackers (5+1+2) or 7 trackers (5+2)
+                    // alright, so for some ungodly reason shiftall decided to use different letters for different number of trackers, AND if they have ankle motion enabled or not
+                    // WHAT THE HELL.
+                    // x = 5 trackers
+                    // p = 6 trackers
+                    // r = 6 trackers (w/ ankle motion)
+                    // unknown if same applies to 8 trackers (5+1+2) or 7 trackers (5+2), but likely the same, along with ankle on/off
                     case "x":
                     case "p":
+                    case "r":
                         processWiredData(portData);
                         break;
                     case "s":
@@ -1091,14 +1097,16 @@ function processWiredData(data: string) {
 
     const buffer = Buffer.from(data, "base64");
 
-    if (buffer.length === 84) {
+    // alright, so for some ungodly reason shiftall decided to use different letters for different number of trackers, AND if they have ankle motion enabled or not
+    // WHAT THE HELL.
+    if (buffer.length === 84 || buffer.length === 88) {
         // 5 (base) + 1 (hip) = 6 trackers
         trackerNames.push("hip");
-    } else if (buffer.length === 100) {
+    } else if (buffer.length === 100 || buffer.length === 104) {
         // 5 (base) + 2 (elbows) = 7 trackers
         trackerNames.push("leftElbow");
         trackerNames.push("rightElbow");
-    } else if (buffer.length === 116) {
+    } else if (buffer.length === 116 || buffer.length === 120) {
         // 5 (base) + 1 (hip) + 2 (elbows) = 8 trackers
         trackerNames.push("hip");
         trackerNames.push("leftElbow");
@@ -1135,7 +1143,7 @@ function processIMUData(data: Buffer, trackerName: string) {
 
     // Decode and log the data
     try {
-        const { rotation, gravity, ankle, magStatus } = decodeIMUPacket(data, trackerName);
+        const { rotation, gravity, ankle, leftAnkle, rightAnkle, magStatus } = decodeIMUPacket(data, trackerName);
 
         if (printTrackerIMUData) {
             log(
@@ -1148,11 +1156,20 @@ function processIMUData(data: Buffer, trackerName: string) {
                     5
                 )}, ${gravity.z.toFixed(5)})`
             );
-            if (ankle) log(`Tracker ${trackerName} ankle: ${ankle}`);
+            if (ankle) {
+                // wireless tracker
+                log(`Tracker ${trackerName} ankle: ${ankle}`);
+            } else if (leftAnkle) {
+                // wired tracker
+                log(`Tracker (WIRED) left ankle: ${leftAnkle}`);
+            } else if (rightAnkle) {
+                // wired tracker
+                log(`Tracker (WIRED) right ankle: ${rightAnkle}`);
+            }
             if (magStatus) log(`Tracker ${trackerName} magnetometer status: ${magStatus}`);
         }
 
-        main.emit("imu", trackerName, rotation, gravity, ankle);
+        main.emit("imu", trackerName, rotation, gravity, ankle, leftAnkle, rightAnkle);
         if (!trackerName.startsWith("HaritoraX")) main.emit("mag", trackerName, magStatus);
     } catch (err) {
         error(`Error decoding tracker ${trackerName} IMU packet data: ${err}`);
@@ -1182,7 +1199,11 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
         const gravityRawZ = data.readInt16LE(12);
 
         // TODO: implement ankle and mag for wired trackers
-        let ankle = null;
+        // wireless
+        let ankle = undefined;
+        // wired
+        let leftAnkle = undefined
+        let rightAnkle = undefined;
         let magStatus = undefined;
 
         if (trackerModelEnabled === "wireless") {
@@ -1212,6 +1233,10 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
 
                 trackerMag.set(trackerName, magStatus);
             }
+        } else if (trackerModelEnabled === "wired") {
+            let bufferData = data.toString("base64");
+            leftAnkle = bufferData[bufferData.length - 2];
+            rightAnkle = bufferData[bufferData.length - 1];
         }
 
         const rotation = {
@@ -1251,7 +1276,7 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
             z: gravityRaw.z - hFinal[3] * 1.2,
         };
 
-        return { rotation, gravity, ankle, magStatus };
+        return { rotation, gravity, ankle, leftAnkle, rightAnkle, magStatus };
     } catch (error: any) {
         throw new Error("Error decoding IMU packet: " + error.message);
     }
