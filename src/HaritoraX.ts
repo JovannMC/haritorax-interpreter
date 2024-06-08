@@ -1,5 +1,8 @@
 "use strict";
 
+// TODO: update and make actual docs
+// TODO: add more error handling (throw error if using method on unsupported tracker)
+
 import { Buffer } from "buffer";
 import { EventEmitter } from "events";
 import COM from "./mode/com.js";
@@ -128,7 +131,7 @@ let trackerModelEnabled: string;
 
 /**
  * The "mag" event which provides the tracker's magnetometer status
- * Supported trackers: wireless
+ * Supported trackers: wireless, wired
  * Supported connections: COM, Bluetooth
  *
  * @event this#mag
@@ -139,7 +142,7 @@ let trackerModelEnabled: string;
 
 /**
  * The "button" event which provides info about the tracker's button data.
- * Supported trackers: wireless
+ * Supported trackers: wireless, wired
  * Supported connections: COM, Bluetooth
  *
  * @event this#button
@@ -153,7 +156,7 @@ let trackerModelEnabled: string;
 
 /**
  * The "battery" event which provides info about the tracker's battery data.
- * Supported trackers: wireless
+ * Supported trackers: wireless, wired
  * Supported connections: COM, Bluetooth (partial)
  *
  * @event this#battery
@@ -328,11 +331,14 @@ export default class HaritoraX extends EventEmitter {
         sensorAutoCorrection: string[],
         ankleMotionDetection: boolean
     ) {
+        if (trackerModelEnabled === "wired") {
+            log(`Tracker settings are not supported for wired models`);
+            return false;
+        }
+        
         // elbows untested, might not work
         const TRACKERS_GROUP_ONE = ["rightAnkle", "rightKnee", "leftAnkle", "leftElbow"];
         const TRACKERS_GROUP_TWO = ["hip", "chest", "leftKnee", "rightElbow"];
-
-        log(com.getTrackerAssignment().toString());
 
         let sensorAutoCorrectionBit = 0;
         if (sensorAutoCorrection.includes("accel")) sensorAutoCorrectionBit |= 0x01;
@@ -503,6 +509,11 @@ export default class HaritoraX extends EventEmitter {
         sensorAutoCorrection: string[],
         ankleMotionDetection: boolean
     ) {
+        if (trackerModelEnabled === "wired") {
+            log(`Tracker settings are not supported for wired models`);
+            return false;
+        }
+
         if (comEnabled) {
             try {
                 const sensorModeBit = sensorMode === 1 ? SENSOR_MODE_1 : SENSOR_MODE_2; // Default to mode 2
@@ -583,6 +594,11 @@ export default class HaritoraX extends EventEmitter {
      **/
 
     async getDeviceInfo(trackerName: string) {
+        if (trackerModelEnabled === "wired") {
+            log(`Device info is not supported for wired models`);
+            return false;
+        }
+
         // GX
         const VERSION_INDEX = 0;
         const MODEL_INDEX = 1;
@@ -740,6 +756,11 @@ export default class HaritoraX extends EventEmitter {
      * @returns {Object} The tracker settings (sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection)
      **/
     async getTrackerSettings(trackerName: string, forceBluetoothRead?: boolean) {
+        if (trackerModelEnabled === "wired") {
+            log(`Tracker settings are not supported for wired models`);
+            return false;
+        }
+
         log(`trackerName: ${trackerName}`);
         log(`forceBluetoothRead: ${forceBluetoothRead}`);
 
@@ -856,6 +877,11 @@ export default class HaritoraX extends EventEmitter {
      * @returns {Map} The tracker settings map
      **/
     getTrackerSettingsRaw(trackerName: string) {
+        if (trackerModelEnabled === "wired") {
+            log(`Tracker settings are not supported for wired models`);
+            return false;
+        }
+
         if (trackerSettingsRaw.has(trackerName)) {
             let hexValue = trackerSettingsRaw.get(trackerName);
             log(`Tracker ${trackerName} raw hex settings: ${hexValue}`);
@@ -876,6 +902,11 @@ export default class HaritoraX extends EventEmitter {
      * @returns {Map} The tracker button map
      **/
     getTrackerButtons(trackerName: string) {
+        if (trackerModelEnabled === "wired") {
+            log(`Tracker buttons are not supported for wired models`);
+            return false;
+        }
+
         if (trackerButtons.has(trackerName)) {
             let [mainButton, subButton] = trackerButtons.get(trackerName);
             log(`Tracker ${trackerName} main button: ${mainButton}`);
@@ -897,6 +928,11 @@ export default class HaritoraX extends EventEmitter {
      * @returns {string} The tracker's magnetometer status
      */
     async getTrackerMag(trackerName: string) {
+        if (trackerModelEnabled === "wired") {
+            log(`Tracker mag is not supported for wired models`);
+            return false;
+        }
+
         if (trackerMag.has(trackerName)) {
             let magStatus = trackerMag.get(trackerName);
             log(`Tracker ${trackerName} magnetometer status: ${magStatus}`);
@@ -1001,13 +1037,13 @@ function listenToDeviceEvents() {
                     case "s":
                         // settings and tracker info, for now we will only use this for mag status
                         // example: s:{"imu_mode":1, "imu_num":6, "magf_status":"020200", "speed_mode":2, "dcal_flags":"04", "detected":"04004C6C"}
-                        processMagData(portData, trackerName);
+                        processMagData(portData);
                     case "t":
-                        processButtonData(portData, trackerName);
+                        processButtonData(portData);
                         break;
                     case "v":
                         // same as wireless
-                        processBatteryData(portData, trackerName);
+                        processBatteryData(portData);
                         break;
                     default:
                         log(
@@ -1115,7 +1151,7 @@ function processWiredData(data: string) {
 /**
  * Processes the IMU data received from the tracker by the dongle.
  * The data contains the information about the rotation, gravity, and ankle motion (if enabled) of the tracker.
- * Supported trackers: wireless
+ * Supported trackers: wireless, wired
  * Supported connections: COM, Bluetooth
  *
  * @function processIMUData
@@ -1275,6 +1311,11 @@ function processTrackerData(data: string, trackerName: string) {
      * This could also be used to report calibration data when running the calibration through the software.
      */
 
+    if (trackerModelEnabled === "wired") {
+        log(`Tracker other data is not supported for wired models`);
+        return false;
+    }
+
     if (data === "7f7f7f7f7f7f") {
         //log(`Searching for tracker ${trackerName}...`);
         if (activeDevices.includes(trackerName))
@@ -1291,7 +1332,7 @@ function processTrackerData(data: string, trackerName: string) {
 /**
  * Processes the magnetometer data received from the Bluetooth tracker.
  * GX mag status is processed by decodeIMUPacket()
- * Supported trackers: wireless
+ * Supported trackers: wireless, wired
  * Supported connections: COM, Bluetooth
  *
  * @function processMagData
@@ -1300,7 +1341,7 @@ function processTrackerData(data: string, trackerName: string) {
  * @fires haritora#mag
  **/
 
-function processMagData(data: string, trackerName: string) {
+function processMagData(data: string, trackerName?: string) {
     if (!data) return null;
 
     const GREEN = 3;
@@ -1370,7 +1411,7 @@ function processMagData(data: string, trackerName: string) {
 /**
  * Processes the button data received from the tracker by the dongle.
  * The data contains the information about the main and sub buttons on the tracker along with which one was pressed/updated.
- * Supported trackers: wireless
+ * Supported trackers: wireless, wired
  * Supported connections: COM, Bluetooth
  *
  * @function processButtonData
@@ -1380,7 +1421,7 @@ function processMagData(data: string, trackerName: string) {
  * @fires haritora#button
  **/
 
-function processButtonData(data: string, trackerName: string, characteristic?: string) {
+function processButtonData(data: string, trackerName?: string, characteristic?: string) {
     if (!canSendButtonData) return;
 
     const MAIN_BUTTON_INDEX = 0;
@@ -1483,7 +1524,7 @@ function processButtonData(data: string, trackerName: string, characteristic?: s
  * @fires haritora#battery
  **/
 
-function processBatteryData(data: string, trackerName: string) {
+function processBatteryData(data: string, trackerName?: string) {
     const BATTERY_REMAINING_INDEX = 0;
     const BATTERY_VOLTAGE_INDEX = 1;
     const CHARGE_STATUS_INDEX = 2;
@@ -1500,6 +1541,7 @@ function processBatteryData(data: string, trackerName: string) {
             error(`Error converting battery data to hex for ${trackerName}: ${data}`);
         }
     } else if (comEnabled) {
+        if (trackerModelEnabled === "wired") trackerName = "wired";
         try {
             const batteryInfo = JSON.parse(data);
             log(`Tracker ${trackerName} remaining: ${batteryInfo["battery remaining"]}%`);
