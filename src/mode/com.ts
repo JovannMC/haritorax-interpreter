@@ -11,6 +11,7 @@ let debug = 0;
 
 const BAUD_RATE = 500000; // from the haritora_setting.json in the HaritoraConfigurator
 
+// For HaritoraX Wireless
 const trackerAssignment = new Map([
     // tracker part, [tracker id, port, port id]
     ["DONGLE", ["0", "", ""]],
@@ -24,6 +25,7 @@ const trackerAssignment = new Map([
     ["rightElbow", ["8", "", ""]],
 ]);
 
+// For HaritoraX Wireless
 const deviceInformation = new Map([
     // deviceName, [version, model, serial]
     ["DONGLE", ["", "", ""]],
@@ -40,12 +42,14 @@ const deviceInformation = new Map([
 // Stores the ports that are currently active as objects for access later
 let activePorts: ActivePorts = {};
 let trackersAssigned = false;
+let trackerModelEnabled: String;
 
 export default class COM extends EventEmitter {
-    constructor(debugMode = 0) {
+    constructor(trackerModel: string, debugMode = 0) {
         super();
         debug = debugMode;
         main = this;
+        trackerModelEnabled = trackerModel;
         log(`Debug mode for GX: ${debug}`);
     }
 
@@ -80,6 +84,7 @@ export default class COM extends EventEmitter {
                 let portId = null;
                 let portData = null;
 
+                if (trackerModelEnabled === "wireless") {
                     const splitData = data.toString().split(/:(.+)/);
                     identifier = splitData[0].toLowerCase();
                     portId = identifier.match(/\d/) ? identifier.match(/\d/)[0] : "DONGLE";
@@ -125,6 +130,11 @@ export default class COM extends EventEmitter {
                             break;
                         }
                     }
+                } else if (trackerModelEnabled === "wired") {
+                    const splitData = data.toString().split(/:(.+)/);
+                    identifier = splitData[0].toLowerCase();
+                    portData = splitData[1];
+                }
 
                 this.emit("data", trackerName, port, portId, identifier, portData);
             });
@@ -156,14 +166,17 @@ export default class COM extends EventEmitter {
                     activePorts[port].destroy();
                 }
             }
-
-            activePorts = {};
         } catch (err) {
             error(`Error while closing serial ports: ${err}`);
             return false;
         }
 
+        this.emit("disconnected");
         return true;
+    }
+
+    getActiveTrackerModel() {
+        return trackerModelEnabled;
     }
 
     getTrackerAssignment() {
@@ -242,9 +255,10 @@ function log(message: string) {
     const logDir = path.join(os.homedir(), "Desktop", "logs");
     const logPath = path.join(
         logDir,
-        `log-haritorax-interpreter-raw-com-data-${date.getFullYear()}${("0" + (date.getMonth() + 1)).slice(
-            -2
-        )}${("0" + date.getDate()).slice(-2)}.txt`
+        `log-haritorax-interpreter-raw-com-data-${date.getFullYear()}${(
+            "0" +
+            (date.getMonth() + 1)
+        ).slice(-2)}${("0" + date.getDate()).slice(-2)}.txt`
     );
 
     // Create the directory if it doesn't exist
@@ -257,7 +271,10 @@ function log(message: string) {
         fs.writeFileSync(logPath, "");
     }
 
-    fs.appendFileSync(logPath, `${date.toTimeString()} -- (haritorax-interpreter) -- COM: ${emittedMessage}\n`);
+    fs.appendFileSync(
+        logPath,
+        `${date.toTimeString()} -- (haritorax-interpreter) -- COM: ${emittedMessage}\n`
+    );
 }
 
 /*
@@ -272,7 +289,6 @@ function error(msg: string) {
 
     main.emit("error", emittedMessage);
     console.error(`${date.toTimeString()} -- (haritorax-interpreter) -- COM: ${msg}`);
-
 
     const logDir = path.join(os.homedir(), "Desktop", "logs");
     const logPath = path.join(
@@ -292,7 +308,10 @@ function error(msg: string) {
         fs.writeFileSync(logPath, "");
     }
 
-    fs.appendFileSync(logPath, `${date.toTimeString()} -- (haritorax-interpreter) -- COM: ${msg}\n`);
+    fs.appendFileSync(
+        logPath,
+        `${date.toTimeString()} -- (haritorax-interpreter) -- COM: ${msg}\n`
+    );
 }
 
 /*

@@ -1,125 +1,421 @@
 "use strict";
 
-import { BluetoothSerialPort } from "bluetooth-serial-port";
+import noble, { Peripheral, Service, Characteristic } from "@abandonware/noble";
 import { EventEmitter } from "events";
-import * as os from "os";
-import * as fs from "fs";
-import * as path from "path";
 
-let main: Bluetooth = undefined;
+let bluetooth: Bluetooth = undefined;
 let debug = 0;
 
-// Stores the ports that are currently active as objects for access later
-let activePorts: ActivePorts = {};
-let trackerModelEnabled: String;
+const services = new Map([
+    ["1800", "Generic Access"],
+    ["1801", "Generic Attribute"],
+    ["180a", "Device Information"],
+    ["180f", "Battery Service"],
+    ["00dbec3a90aa11eda1eb0242ac120002", "Tracker Service"],
+    ["ef84369a90a911eda1eb0242ac120002", "Setting Service"],
+]);
+
+const characteristics = new Map([
+    // Battery Service
+    ["2a19", "BatteryLevel"],
+    // BT device info
+    ["2a25", "SerialNumber"],
+    ["2a29", "Manufacturer"],
+    ["2a27", "HardwareRevision"],
+    ["2a26", "FirmwareRevision"],
+    ["2a28", "SoftwareRevision"],
+    ["2a24", "ModelNumber"],
+    // Tracker Service
+    ["00dbf1c690aa11eda1eb0242ac120002", "Sensor"],
+    ["00dbf30690aa11eda1eb0242ac120002", "Magnetometer"],
+    ["00dbf45090aa11eda1eb0242ac120002", "MainButton"],
+    ["00dbf58690aa11eda1eb0242ac120002", "SecondaryButton"],
+    // Setting Service
+    ["ef84420290a911eda1eb0242ac120002", "FpsSetting"],
+    ["ef8443f690a911eda1eb0242ac120002", "TofSetting"],
+    ["ef8445c290a911eda1eb0242ac120002", "SensorModeSetting"],
+    ["ef84c30090a911eda1eb0242ac120002", "WirelessModeSetting"],
+    ["ef84c30590a911eda1eb0242ac120002", "AutoCalibrationSetting"],
+    //["ef843b5490a911eda1eb0242ac120002", "Something"], unsure what this is, reports randomly like battery level
+]);
+
+type ActiveDevice = [string, Peripheral, Service[], Characteristic[]];
+let activeDevices: ActiveDevice[] = [];
+
+let allowReconnect = true;
 
 export default class Bluetooth extends EventEmitter {
-    constructor(trackerModel: string, debugMode = 0) {
+    constructor(debugMode = 0) {
         super();
+        noble.on("discover", this.onDiscover.bind(this));
         debug = debugMode;
-        main = this;
-        trackerModelEnabled = trackerModel;
-        log(`Debug mode for GX: ${debug}`);
+        bluetooth = this;
+        console.log(`(haritorax-interpreter) - Debug mode for BT: ${debug}`);
     }
 
-    startConnection(deviceName = "HaritoraX") {
-        const bluetooth = new BluetoothSerialPort();
-        let disconnectTimeout: NodeJS.Timeout;
+    startConnection() {
+        log("Connected to bluetooth");
 
-        bluetooth.on("found", (address, name) => {
-            log(`Found device with address ${address} and name ${name}`);
-
-            if (name.includes(deviceName)) {
-                log(`Connecting to device with address ${address} and name ${name}`);
-                bluetooth.findSerialPortChannel(
-                    address,
-                    (channel) => {
-                        bluetooth.connect(
-                            address,
-                            channel,
-                            () => {
-                                log(
-                                    `Connected to device at address ${address} on channel ${channel}`
-                                );
-                                const port = `${address}:${channel}`;
-                                activePorts[port] = bluetooth;
-                                this.emit("connected", port);
-
-                                bluetooth.on("data", (buffer) => {
-                                    const data = buffer.toString("utf-8");
-
-                                    let identifier = null;
-                                    let portData = null;
-
-                                    const splitData = data.toString().split(/:(.+)/);
-                                    identifier = splitData[0].toLowerCase();
-                                    portData = splitData[1];
-
-                                    log(`Received data from port ${port}: ${data}`);
-
-                                    this.emit("data", identifier, portData);
-                                });
-
-                                // Send "heartbeat" packets to the trackers to keep them alive
-                                setInterval(() => {
-                                    log(`Sending heartbeat to port ${port}`);
-                                    bluetooth.write(Buffer.from(""), (err) => {
-                                        if (err) {
-                                            error(
-                                                `Error while sending heartbeat to port ${port}: ${err}`
-                                            );
-                                        }
-                                    });
-                                }, 10000);
-
-                                // Reset the disconnect timeout whenever data is received
-                                clearTimeout(disconnectTimeout);
-                                disconnectTimeout = setTimeout(() => {
-                                    this.emit(
-                                        "disconnect",
-                                        `No data received from port ${port} for 10 seconds`
-                                    );
-                                }, 10000); // Set timeout to 10 seconds
-                            },
-                            () => {
-                                error(
-                                    `Cannot connect to device at address ${address} on channel ${channel}`
-                                );
-                            }
-                        );
-                    },
-                    () => {
-                        error(`No RFCOMM channel found for device at address ${address}`);
-                    }
-                );
+        if (noble._state === "poweredOn") {
+            try {
+                noble.startScanning([], true);
+                this.emit("connected");
+                return true;
+            } catch (err) {
+                error(`Error starting scanning of BT devices:\n${err}`);
+                return false;
             }
-        });
+        } else {
+            noble.on("stateChange", (state) => {
+                if (state === "poweredOn") {
+                    try {
+                        noble.startScanning([], true);
+                        this.emit("connected");
+                        return true;
+                    } catch (err) {
+                        error(`Error starting scanning of BT devices:\n${err}`);
+                        return false;
+                    }
+                }
+            });
+            return true;
+        }
+    }
 
-        return true;
+    onDiscover(peripheral: Peripheral) {
+        const {
+            advertisement: { localName },
+        } = peripheral;
+        if (
+            localName &&
+            localName.startsWith("HaritoraX") &&
+            (!activeDevices.find((device) => device[1] === peripheral) ||
+                !activeDevices.find((device) => device[0] === localName))
+        ) {
+            log(`Found device: ${localName}`);
+            if (localName.startsWith("HaritoraX-"))
+                log(
+                    "HaritoraX (1.0/1.1/1.1b) detected. Device is not fully supported and you may experience issues."
+                );
+
+            activeDevices.push([localName, peripheral, [], []]);
+
+            peripheral.connect((err: any) => {
+                if (err) {
+                    error(`Error connecting to ${localName}: ${err}`);
+                    return;
+                }
+                log(`(bluetooth) Connected to ${localName}`);
+                this.emit("connect", peripheral);
+
+                const activeServices: any[] = [];
+                const activeCharacteristics: any[] = [];
+
+                peripheral.discoverServices(null, (err: any, services: any[]) => {
+                    if (err) {
+                        error(`Error discovering services: ${err}`);
+                        return;
+                    }
+
+                    services.forEach(
+                        (service: {
+                            discoverCharacteristics: (
+                                arg0: any[],
+                                arg1: (error: any, characteristics: any) => void
+                            ) => void;
+                            uuid: any;
+                        }) => {
+                            activeServices.push(service);
+                            service.discoverCharacteristics(
+                                [],
+                                (err: any, characteristics: any[]) => {
+                                    if (err) {
+                                        error(
+                                            `Error discovering characteristics of service ${service.uuid}: ${err}`
+                                        );
+                                        return;
+                                    }
+
+                                    characteristics.forEach(
+                                        (characteristic: {
+                                            on: (arg0: string, arg1: (data: any) => void) => void;
+                                            uuid: any;
+                                            subscribe: (arg0: (err: any) => void) => void;
+                                        }) => {
+                                            activeCharacteristics.push(characteristic);
+                                            characteristic.on("data", (data: any) => {
+                                                emitData(
+                                                    this,
+                                                    localName,
+                                                    service.uuid,
+                                                    characteristic.uuid,
+                                                    data
+                                                );
+                                            });
+                                            characteristic.subscribe((err: any) => {
+                                                if (err) {
+                                                    error(
+                                                        `Error subscribing to characteristic ${characteristic.uuid} of service ${service.uuid}: ${err}`
+                                                    );
+                                                }
+                                            });
+                                        }
+                                    );
+                                }
+                            );
+                        }
+                    );
+                    const deviceIndex = activeDevices.findIndex(
+                        (device) => device[0] === localName
+                    );
+                    if (deviceIndex !== -1) {
+                        activeDevices[deviceIndex] = [
+                            localName,
+                            peripheral,
+                            activeServices,
+                            activeCharacteristics,
+                        ];
+                    } else {
+                        activeDevices.push([
+                            localName,
+                            peripheral,
+                            activeServices,
+                            activeCharacteristics,
+                        ]);
+                    }
+                });
+            });
+
+            // TODO: add reason (manual, timeout, etc.)
+            peripheral.on("disconnect", () => {
+                if (!allowReconnect) return;
+                log(`Disconnected from ${localName}`);
+                this.emit("disconnect", peripheral);
+                const index = activeDevices.findIndex((device) => device[1] === peripheral);
+                if (index !== -1) {
+                    activeDevices.splice(index, 1);
+                }
+
+                setTimeout(() => {
+                    noble.startScanning([], true);
+                }, 3000);
+            });
+        }
     }
 
     stopConnection() {
         try {
-            for (let port in activePorts) {
-                log(`Closing Bluetooth Serial port: ${port}`);
-                activePorts[port].close();
-                delete activePorts[port];
+            noble.stopScanning();
+            for (let device of activeDevices) {
+                log(`Disconnecting from BT device ${device[0]}`);
+                device[1].disconnect();
             }
         } catch (err) {
-            error(`Error while closing Bluetooth ports: ${err}`);
+            error(`Error while closing bluetooth connection: ${err}`);
             return false;
         }
 
+        activeDevices = [];
+        allowReconnect = false;
+
+        this.emit("disconnected");
+        log("Disconnected from bluetooth");
         return true;
     }
 
-    getActiveTrackerModel() {
-        return trackerModelEnabled;
+    async read(localName: string, service: string, characteristic: string): Promise<any> {
+        if (!activeDevices.find((device: ActiveDevice) => device[0] === localName)) {
+            error(`Device ${localName} not found`);
+            return null;
+        }
+
+        while (!(await areAllBLEDiscovered())) {
+            log("Waiting for all services and characteristics to be discovered...");
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+
+        log(`Reading characteristic ${characteristic} of service ${service}`);
+
+        const device = activeDevices.find((device: ActiveDevice) => device[0] === localName);
+        if (!device) {
+            error(`Device ${localName} not found`);
+            throw new Error(`Device ${localName} not found`);
+        }
+
+        const serviceInstance = device[2].find((s: Service) => s.uuid === service);
+        if (!serviceInstance) {
+            error(`Service ${service} not found`);
+            throw new Error(`Service ${service} not found`);
+        }
+
+        const characteristicInstance = device[3].find(
+            (c: Characteristic) => c.uuid === characteristic
+        );
+        if (!characteristicInstance) {
+            error(`Characteristic ${characteristic} not found`);
+            throw new Error(`Characteristic ${characteristic} not found`);
+        }
+
+        return new Promise((resolve, reject) => {
+            characteristicInstance.read((err: any, data: any) => {
+                const characteristicName = characteristics.get(characteristic);
+                if (err) {
+                    error(`Error reading characteristic ${characteristicName}: ${err}`);
+                    reject(err);
+                    return;
+                }
+
+                const buffer = new Uint8Array(data).buffer;
+
+                resolve(buffer);
+            });
+        });
     }
 
-    getActivePorts() {
-        return activePorts;
+    async write(
+        localName: string,
+        service: string,
+        characteristic: string,
+        data: any
+    ): Promise<void> {
+        while (!(await areAllBLEDiscovered())) {
+            log("Waiting for all services and characteristics to be discovered...");
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+
+        log(
+            `Writing to characteristic ${characteristic} of service ${service} for device ${localName}`
+        );
+        const device = activeDevices.find((device: ActiveDevice) => device[0] === localName);
+        if (!device) {
+            error(`Device ${localName} not found`);
+            throw new Error(`Device ${localName} not found`);
+        }
+
+        const serviceInstance = device[2].find((s: Service) => s.uuid === service);
+        if (!serviceInstance) {
+            error(`Service ${service} not found`);
+            throw new Error(`Service ${service} not found`);
+        }
+
+        const characteristicInstance = device[3].find(
+            (c: Characteristic) => c.uuid === characteristic
+        );
+        if (!characteristicInstance) {
+            error(`Characteristic ${characteristic} not found`);
+            throw new Error(`Characteristic ${characteristic} not found`);
+        }
+
+        return new Promise((resolve, reject) => {
+            characteristicInstance.write(data, false, (err: any) => {
+                if (err) {
+                    error(`Error writing to characteristic ${characteristic}: ${err}`);
+                    reject(err);
+                    return;
+                }
+
+                log(`Wrote data to characteristic ${characteristic}`);
+                resolve();
+            });
+        });
     }
+
+    getServices() {
+        return services;
+    }
+
+    getCharacteristics() {
+        return characteristics;
+    }
+
+    getActiveDevices() {
+        return activeDevices;
+    }
+
+    getAllowReconnect() {
+        return allowReconnect;
+    }
+
+    getActiveTrackers() {
+        return activeDevices.map((device) => device[0]);
+    }
+
+    getServiceUUID(name: string) {
+        for (let [uuid, serviceName] of services) {
+            if (serviceName === name) {
+                return uuid;
+            }
+        }
+        return null;
+    }
+
+    getCharacteristicUUID(name: string) {
+        for (let [uuid, characteristicName] of characteristics) {
+            if (characteristicName === name) {
+                return uuid;
+            }
+        }
+        return null;
+    }
+
+    getDeviceInfo(localName: any) {
+        for (let device of activeDevices) {
+            if (device[0] === localName) {
+                return device;
+            }
+        }
+        return null;
+    }
+}
+
+const importantServices = ["ef84369a90a911eda1eb0242ac120002", "180f"];
+const importantCharacteristics = [
+    "2a19",
+    "ef84420290a911eda1eb0242ac120002",
+    "ef8443f690a911eda1eb0242ac120002",
+    "ef8445c290a911eda1eb0242ac120002",
+    "ef84c30090a911eda1eb0242ac120002",
+    "ef84c30590a911eda1eb0242ac120002",
+];
+
+async function areAllBLEDiscovered(): Promise<boolean> {
+    for (const serviceUuid of importantServices) {
+        if (
+            !activeDevices.find((device: any) =>
+                device[2].find((service: any) => service.uuid === serviceUuid)
+            )
+        ) {
+            return false;
+        }
+    }
+
+    for (const characteristicUuid of importantCharacteristics) {
+        if (
+            !activeDevices.find((device: any) =>
+                device[3].find((characteristic: any) => characteristic.uuid === characteristicUuid)
+            )
+        ) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+function emitData(
+    classInstance: Bluetooth,
+    localName: any,
+    service: string,
+    characteristic: string,
+    data: any
+) {
+    classInstance.emit(
+        "data",
+        localName,
+        services.get(service) || service,
+        characteristics.get(characteristic) || characteristic,
+        data
+    );
 }
 
 /*
@@ -127,76 +423,11 @@ export default class Bluetooth extends EventEmitter {
  */
 
 function log(message: string) {
-    let emittedMessage = `(haritorax-interpreter) BT-COM - ${message}`;
-
-    const date = new Date();
-
-    main.emit("log", emittedMessage);
-    console.log(`${date.toTimeString()} -- (haritorax-interpreter) -- BT-COM: ${emittedMessage}`);
-
-    const logDir = path.join(os.homedir(), "Desktop", "logs");
-    const logPath = path.join(
-        logDir,
-        `log-haritorax-interpreter-raw-bluetooth-serial-data-${date.getFullYear()}${(
-            "0" +
-            (date.getMonth() + 1)
-        ).slice(-2)}${("0" + date.getDate()).slice(-2)}.txt`
-    );
-
-    // Create the directory if it doesn't exist
-    if (!fs.existsSync(logDir)) {
-        fs.mkdirSync(logDir, { recursive: true });
-    }
-
-    // Create the file if it doesn't exist
-    if (!fs.existsSync(logPath)) {
-        fs.writeFileSync(logPath, "");
-    }
-
-    fs.appendFileSync(
-        logPath,
-        `${date.toTimeString()} -- (haritorax-interpreter) -- BT-COM: ${emittedMessage}\n`
-    );
+    bluetooth.emit("log", message);
 }
 
-function error(msg: string) {
-    let emittedMessage = `(haritorax-interpreter) - ${msg}`;
-
-    const date = new Date();
-
-    main.emit("error", emittedMessage);
-    console.error(`${date.toTimeString()} -- (haritorax-interpreter) -- BT-COM: ${msg}`);
-
-    const logDir = path.join(os.homedir(), "Desktop", "logs");
-    const logPath = path.join(
-        logDir,
-        `log-haritorax-interpreter-${date.getFullYear()}${("0" + (date.getMonth() + 1)).slice(
-            -2
-        )}${("0" + date.getDate()).slice(-2)}.txt`
-    );
-
-    // Create the directory if it doesn't exist
-    if (!fs.existsSync(logDir)) {
-        fs.mkdirSync(logDir, { recursive: true });
-    }
-
-    // Create the file if it doesn't exist
-    if (!fs.existsSync(logPath)) {
-        fs.writeFileSync(logPath, "");
-    }
-
-    fs.appendFileSync(
-        logPath,
-        `${date.toTimeString()} -- (haritorax-interpreter) -- BT-COM: ${msg}\n`
-    );
-}
-
-/*
- * Typescript type definitions
- */
-
-interface ActivePorts {
-    [key: string]: BluetoothSerialPort;
+function error(message: string) {
+    bluetooth.emit("logError", message);
 }
 
 export { Bluetooth };
