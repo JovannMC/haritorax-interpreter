@@ -4,14 +4,20 @@ import { Buffer } from "buffer";
 import { EventEmitter } from "events";
 import COM from "./mode/com.js";
 import Bluetooth from "./mode/bluetooth.js";
+import BLE from "./mode/ble.js";
+import * as os from "os";
+import * as fs from "fs";
+import * as path from "path";
 
 let debug = 0;
 let printTrackerIMUData = false;
 
 let com: COM;
 let bluetooth: Bluetooth;
+let ble: BLE;
 let comEnabled = false;
 let bluetoothEnabled = false;
+let bleEnabled = false;
 let main: HaritoraX;
 let canSendButtonData = false;
 
@@ -113,7 +119,7 @@ let trackerModelEnabled: string;
  * @property {number} gravity.y - The y component of the gravity.
  * @property {number} gravity.z - The z component of the gravity.
  * @property {number|undefined} ankle - The ankle motion data of the tracker if enabled. Undefined if disabled.
- * @property {number|undefined} leftAnkle - The left ankle motion data of the tracker if enabled (only wired trackers). Undefined if disabled. 
+ * @property {number|undefined} leftAnkle - The left ankle motion data of the tracker if enabled (only wired trackers). Undefined if disabled.
  * @property {number|undefined} rightAnkle - The right ankle motion data of the tracker if enabled (only wired trackers). Undefined if disabled.
  **/
 
@@ -251,8 +257,9 @@ export default class HaritoraX extends EventEmitter {
      * device.startConnection("COM");
      **/
     startConnection(connectionMode: string, portNames?: string[]) {
-        com = new COM(trackerModelEnabled, debug);
-        bluetooth = new Bluetooth(debug);
+        com = new COM(debug);
+        bluetooth = new Bluetooth(trackerModelEnabled, debug);
+        ble = new BLE(debug);
 
         if (connectionMode === "com") {
             com.startConnection(portNames);
@@ -260,22 +267,29 @@ export default class HaritoraX extends EventEmitter {
             setTimeout(() => {
                 canSendButtonData = true;
             }, 500);
-        } else if (connectionMode === "bluetooth" && trackerModelEnabled === "wireless") {
+        } else if (connectionMode === "bluetooth" && trackerModelEnabled === "wired") {
             bluetooth.startConnection();
             bluetoothEnabled = true;
+
+            setTimeout(() => {
+                canSendButtonData = true;
+            }, 500);
+        } else if (connectionMode === "ble" && trackerModelEnabled === "wireless") {
+            ble.startConnection();
+            bleEnabled = true;
             setTimeout(() => {
                 canSendButtonData = true;
             }, 500);
 
-            trackerService = bluetooth.getServiceUUID("Tracker Service");
-            settingsService = bluetooth.getServiceUUID("Setting Service");
-            batteryService = bluetooth.getServiceUUID("Battery Service");
-            magnetometerCharacteristic = bluetooth.getCharacteristicUUID("Magnetometer");
-            batteryLevelCharacteristic = bluetooth.getCharacteristicUUID("BatteryLevel");
-            sensorModeCharacteristic = bluetooth.getCharacteristicUUID("SensorModeSetting");
-            fpsModeCharacteristic = bluetooth.getCharacteristicUUID("FpsSetting");
-            correctionCharacteristic = bluetooth.getCharacteristicUUID("AutoCalibrationSetting");
-            ankleCharacteristic = bluetooth.getCharacteristicUUID("TofSetting");
+            trackerService = ble.getServiceUUID("Tracker Service");
+            settingsService = ble.getServiceUUID("Setting Service");
+            batteryService = ble.getServiceUUID("Battery Service");
+            magnetometerCharacteristic = ble.getCharacteristicUUID("Magnetometer");
+            batteryLevelCharacteristic = ble.getCharacteristicUUID("BatteryLevel");
+            sensorModeCharacteristic = ble.getCharacteristicUUID("SensorModeSetting");
+            fpsModeCharacteristic = ble.getCharacteristicUUID("FpsSetting");
+            correctionCharacteristic = ble.getCharacteristicUUID("AutoCalibrationSetting");
+            ankleCharacteristic = ble.getCharacteristicUUID("TofSetting");
         } else {
             log(`Connection mode ${connectionMode} not supported for ${trackerModelEnabled}`);
         }
@@ -295,15 +309,17 @@ export default class HaritoraX extends EventEmitter {
         if (connectionMode === "com" && comEnabled) {
             com.stopConnection();
             comEnabled = false;
-            activeDevices = [];
-            canSendButtonData = false;
+        } else if (connectionMode === "ble" && bleEnabled) {
+            ble.stopConnection();
+            bleEnabled = false;
         } else if (connectionMode === "bluetooth" && bluetoothEnabled) {
             bluetooth.stopConnection();
             bluetoothEnabled = false;
-            activeDevices = [];
-        } else {
-            log(`Connection mode ${connectionMode} not active`);
         }
+
+        canSendButtonData = false;
+        // TODO: only clear devices whose connection modes were stopped
+        activeDevices = [];
     }
 
     /**
@@ -350,16 +366,11 @@ export default class HaritoraX extends EventEmitter {
 
             const sensorModeBuffer = Buffer.from([sensorModeData]);
             const sensorModeValue = new DataView(sensorModeBuffer.buffer).getInt8(0);
-            bluetooth.write(
-                trackerName,
-                settingsService,
-                sensorModeCharacteristic,
-                sensorModeBuffer
-            );
+            ble.write(trackerName, settingsService, sensorModeCharacteristic, sensorModeBuffer);
 
             const fpsModeBuffer = Buffer.from([fpsMode === 50 ? 1 : 2]);
             const fpsModeValue = new DataView(fpsModeBuffer.buffer).getInt8(0);
-            bluetooth.write(trackerName, settingsService, fpsModeCharacteristic, fpsModeBuffer);
+            ble.write(trackerName, settingsService, fpsModeCharacteristic, fpsModeBuffer);
 
             let correctionBit = 0;
             if (sensorAutoCorrection.includes("accel")) correctionBit |= 0x01;
@@ -367,16 +378,11 @@ export default class HaritoraX extends EventEmitter {
             if (sensorAutoCorrection.includes("mag")) correctionBit |= 0x04;
             const correctionBuffer = Buffer.from([correctionBit]);
             const correctionValue = new DataView(correctionBuffer.buffer).getInt8(0);
-            bluetooth.write(
-                trackerName,
-                settingsService,
-                correctionCharacteristic,
-                correctionBuffer
-            );
+            ble.write(trackerName, settingsService, correctionCharacteristic, correctionBuffer);
 
             const ankleBuffer = Buffer.from([ankleMotionDetection ? 1 : 0]);
             const ankleValue = new DataView(ankleBuffer.buffer).getInt8(0);
-            bluetooth.write(trackerName, settingsService, ankleCharacteristic, ankleBuffer);
+            ble.write(trackerName, settingsService, ankleCharacteristic, ankleBuffer);
 
             log(`Setting the following settings onto tracker ${trackerName}:`);
             log(`Sensor mode: ${sensorMode}`);
@@ -551,8 +557,8 @@ export default class HaritoraX extends EventEmitter {
             }
         }
 
-        if (bluetoothEnabled) {
-            for (let trackerName of bluetooth.getActiveTrackers()) {
+        if (bleEnabled) {
+            for (let trackerName of ble.getActiveTrackers()) {
                 this.setTrackerSettings(
                     trackerName,
                     sensorMode,
@@ -606,9 +612,7 @@ export default class HaritoraX extends EventEmitter {
             model = com.getDeviceInformation(trackerName)[MODEL_INDEX];
             version = com.getDeviceInformation(trackerName)[VERSION_INDEX];
         } else if (trackerName.startsWith("HaritoraX")) {
-            let trackerObject = bluetooth
-                .getActiveDevices()
-                .find((device) => device[0] === trackerName);
+            let trackerObject = ble.getActiveDevices().find((device) => device[0] === trackerName);
             if (!trackerObject) {
                 log(`Tracker ${trackerName} not found`);
                 return null;
@@ -629,23 +633,15 @@ export default class HaritoraX extends EventEmitter {
             const decoder = new TextDecoder("utf-8");
 
             // Get buffers
-            let versionBuffer = await bluetooth.read(
+            let versionBuffer = await ble.read(
                 trackerName,
                 SERVICE_UUID,
                 versionCharacteristic.uuid
             );
 
-            let modelBuffer = await bluetooth.read(
-                trackerName,
-                SERVICE_UUID,
-                modelCharacteristic.uuid
-            );
+            let modelBuffer = await ble.read(trackerName, SERVICE_UUID, modelCharacteristic.uuid);
 
-            let serialBuffer = await bluetooth.read(
-                trackerName,
-                SERVICE_UUID,
-                serialCharacteristic.uuid
-            );
+            let serialBuffer = await ble.read(trackerName, SERVICE_UUID, serialCharacteristic.uuid);
 
             // Convert to UTF-8 string
             if (versionBuffer && modelBuffer && serialBuffer) {
@@ -683,7 +679,7 @@ export default class HaritoraX extends EventEmitter {
             } else {
                 if (trackerName.startsWith("HaritoraX")) {
                     log(`Reading battery info for ${trackerName}...`);
-                    let buffer = await bluetooth.read(
+                    let buffer = await ble.read(
                         trackerName,
                         batteryService,
                         batteryLevelCharacteristic
@@ -721,12 +717,12 @@ export default class HaritoraX extends EventEmitter {
      **/
 
     getActiveTrackers() {
-        if (comEnabled && bluetoothEnabled) {
-            return activeDevices.concat(bluetooth.getActiveTrackers());
+        if (comEnabled && bleEnabled) {
+            return activeDevices.concat(ble.getActiveTrackers());
         } else if (comEnabled) {
             return activeDevices;
-        } else if (bluetoothEnabled) {
-            return bluetooth.getActiveTrackers();
+        } else if (bleEnabled) {
+            return ble.getActiveTrackers();
         } else {
             return null;
         }
@@ -746,14 +742,14 @@ export default class HaritoraX extends EventEmitter {
         log(`forceBluetoothRead: ${forceBluetoothRead}`);
 
         if (
-            (forceBluetoothRead && bluetoothEnabled && trackerName.startsWith("HaritoraX")) ||
-            (bluetoothEnabled && trackerName.startsWith("HaritoraX")) ||
+            (forceBluetoothRead && bleEnabled && trackerName.startsWith("HaritoraX")) ||
+            (bleEnabled && trackerName.startsWith("HaritoraX")) ||
             !trackerSettings.has(trackerName)
         ) {
             log(`Forcing BLE reading for ${trackerName}`);
             try {
                 // Attempt to read the sensor mode value
-                const sensorModeRead = await bluetooth.read(
+                const sensorModeRead = await ble.read(
                     trackerName,
                     settingsService,
                     sensorModeCharacteristic
@@ -763,7 +759,7 @@ export default class HaritoraX extends EventEmitter {
                     : null;
 
                 // Attempt to read the fps mode value
-                const fpsModeRead = await bluetooth.read(
+                const fpsModeRead = await ble.read(
                     trackerName,
                     settingsService,
                     fpsModeCharacteristic
@@ -771,7 +767,7 @@ export default class HaritoraX extends EventEmitter {
                 const fpsModeValue = fpsModeRead ? new DataView(fpsModeRead).getInt8(0) : null;
 
                 // Attempt to read the correction value
-                const correctionRead = await bluetooth.read(
+                const correctionRead = await ble.read(
                     trackerName,
                     settingsService,
                     correctionCharacteristic
@@ -781,11 +777,7 @@ export default class HaritoraX extends EventEmitter {
                     : null;
 
                 // Attempt to read the ankle value
-                const ankleRead = await bluetooth.read(
-                    trackerName,
-                    settingsService,
-                    ankleCharacteristic
-                );
+                const ankleRead = await ble.read(trackerName, settingsService, ankleCharacteristic);
                 const ankleValue = ankleRead ? new DataView(ankleRead).getInt8(0) : null;
 
                 let sensorMode;
@@ -907,7 +899,7 @@ export default class HaritoraX extends EventEmitter {
         } else {
             if (trackerName.startsWith("HaritoraX")) {
                 // Read from BLE
-                let magStatus = await bluetooth.read(
+                let magStatus = await ble.read(
                     trackerName,
                     trackerService,
                     magnetometerCharacteristic
@@ -936,6 +928,8 @@ export default class HaritoraX extends EventEmitter {
                 return comEnabled;
             case "bluetooth":
                 return bluetoothEnabled;
+            case "ble":
+                return bleEnabled;
             default:
                 return null;
         }
@@ -957,6 +951,10 @@ export default class HaritoraX extends EventEmitter {
 }
 
 function listenToDeviceEvents() {
+    /*
+     * COM events
+    */
+
     com.on(
         "data",
         (
@@ -1007,13 +1005,13 @@ function listenToDeviceEvents() {
                     case "s":
                         // settings and tracker info, for now we will only use this for mag status
                         // example: s:{"imu_mode":1, "imu_num":6, "magf_status":"020200", "speed_mode":2, "dcal_flags":"04", "detected":"04004C6C"}
-                        processMagData(portData, trackerName);
+                        processMagData(portData, "HaritoraX");
                     case "t":
-                        processButtonData(portData, trackerName);
+                        processButtonData(portData, "HaritoraX");
                         break;
                     case "v":
                         // same as wireless
-                        processBatteryData(portData, trackerName);
+                        processBatteryData(portData, "HaritoraX");
                         break;
                     default:
                         log(
@@ -1024,42 +1022,58 @@ function listenToDeviceEvents() {
         }
     );
 
-    bluetooth.on(
-        "data",
-        (localName: string, service: string, characteristic: string, data: string) => {
-            if (service === "Device Information") return;
-
-            switch (characteristic) {
-                case "Sensor":
-                    processIMUData(Buffer.from(data, "base64"), localName);
-                    break;
-                case "MainButton":
-                case "SecondaryButton":
-                    processButtonData(data, localName, characteristic);
-                    break;
-                case "BatteryLevel":
-                    processBatteryData(data, localName);
-                    break;
-                case "SensorModeSetting":
-                case "FpsSetting":
-                case "AutoCalibrationSetting":
-                case "TofSetting":
-                    // No need to process, we add the case here but don't do anything because it's not "unknown data".
-                    // Not sure why it randomly reports its current settings.
-                    break;
-                case "Magnetometer":
-                    processMagData(data, localName);
-                    break;
-                default:
-                    log(`Unknown data from ${localName}: ${data} - ${characteristic} - ${service}`);
-                    log(`Data in utf-8: ${Buffer.from(data, "base64").toString("utf-8")}`);
-                    log(`Data in hex: ${Buffer.from(data, "base64").toString("hex")}`);
-                    log(`Data in base64: ${Buffer.from(data, "base64").toString("base64")}`);
-            }
+    bluetooth.on("data", (identifier: string, data: string) => {
+        switch (identifier) {
+            case "x":
+                processWiredData(data);
+                break;
+            case "r":
+                processButtonData(data, "HaritoraX");
+                break;
+            case "v":
+                processBatteryData(data, "HaritoraX");
+                break;
+            case "m":
+                processMagData(data, "HaritoraX");
+                break;
+            default:
+                log(`Unknown data from HaritoraX: ${data} - ${identifier}`);
         }
-    );
+    });
 
-    bluetooth.on("connect", (peripheral) => {
+    ble.on("data", (localName: string, service: string, characteristic: string, data: string) => {
+        if (service === "Device Information") return;
+
+        switch (characteristic) {
+            case "Sensor":
+                processIMUData(Buffer.from(data, "base64"), localName);
+                break;
+            case "MainButton":
+            case "SecondaryButton":
+                processButtonData(data, localName, characteristic);
+                break;
+            case "BatteryLevel":
+                processBatteryData(data, localName);
+                break;
+            case "SensorModeSetting":
+            case "FpsSetting":
+            case "AutoCalibrationSetting":
+            case "TofSetting":
+                // No need to process, we add the case here but don't do anything because it's not "unknown data".
+                // Not sure why it randomly reports its current settings.
+                break;
+            case "Magnetometer":
+                processMagData(data, localName);
+                break;
+            default:
+                log(`Unknown data from ${localName}: ${data} - ${characteristic} - ${service}`);
+                log(`Data in utf-8: ${Buffer.from(data, "base64").toString("utf-8")}`);
+                log(`Data in hex: ${Buffer.from(data, "base64").toString("hex")}`);
+                log(`Data in base64: ${Buffer.from(data, "base64").toString("base64")}`);
+        }
+    });
+
+    ble.on("connect", (peripheral) => {
         const trackerName = peripheral.advertisement.localName;
         if (trackerName && !activeDevices.includes(trackerName)) {
             activeDevices.push(trackerName);
@@ -1068,11 +1082,16 @@ function listenToDeviceEvents() {
         }
     });
 
-    bluetooth.on("disconnect", (peripheral) => {
+    ble.on("disconnect", (peripheral) => {
         const trackerName = peripheral.advertisement.localName;
         main.emit("disconnect", trackerName);
         log(`Disconnected from ${trackerName}`);
     });
+
+    bluetooth.on("disconnect", (reason) => {
+        log(`Disconnected from HaritoraX: ${reason}`);
+        main.emit("disconnect", "HaritoraX");
+    })
 
     com.on("log", (message: string) => {
         log(message);
@@ -1082,11 +1101,11 @@ function listenToDeviceEvents() {
         error(message);
     });
 
-    bluetooth.on("log", (message: string) => {
+    ble.on("log", (message: string) => {
         log(message);
     });
 
-    bluetooth.on("logError", (message: string) => {
+    ble.on("logError", (message: string) => {
         error(message);
     });
 }
@@ -1134,7 +1153,7 @@ function processWiredData(data: string) {
 
 function processIMUData(data: Buffer, trackerName: string) {
     // If tracker isn't in activeDevices, add it and emit "connect" event
-    if (trackerName && !activeDevices.includes(trackerName) && (comEnabled || bluetoothEnabled)) {
+    if (trackerName && !activeDevices.includes(trackerName) && (comEnabled || bleEnabled)) {
         log(`Tracker ${trackerName} isn't in active devices, adding and emitting connect event`);
         activeDevices.push(trackerName);
         main.emit("connect", trackerName);
@@ -1142,7 +1161,10 @@ function processIMUData(data: Buffer, trackerName: string) {
 
     // Decode and log the data
     try {
-        const { rotation, gravity, ankle, leftAnkle, rightAnkle, magStatus } = decodeIMUPacket(data, trackerName);
+        const { rotation, gravity, ankle, leftAnkle, rightAnkle, magStatus } = decodeIMUPacket(
+            data,
+            trackerName
+        );
 
         if (printTrackerIMUData) {
             log(
@@ -1201,7 +1223,7 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
         // wireless
         let ankle = undefined;
         // wired
-        let leftAnkle = undefined
+        let leftAnkle = undefined;
         let rightAnkle = undefined;
         let magStatus = undefined;
 
@@ -1514,9 +1536,7 @@ function processBatteryData(data: string, trackerName: string) {
         try {
             let batteryRemainingHex = Buffer.from(data, "base64").toString("hex");
             batteryData[0] = parseInt(batteryRemainingHex, 16);
-            log(
-                `Tracker ${trackerName} battery remaining: ${batteryData[0]}%`
-            );
+            log(`Tracker ${trackerName} battery remaining: ${batteryData[0]}%`);
         } catch {
             error(`Error converting battery data to hex for ${trackerName}: ${data}`);
         }
@@ -1538,7 +1558,7 @@ function processBatteryData(data: string, trackerName: string) {
     main.emit("battery", trackerName, ...batteryData);
 }
 
-function log(message: string) {
+/*function log(message: string) {
     let emittedMessage = undefined;
     if (debug === 1) {
         emittedMessage = `(haritorax-interpreter) - ${message}`;
@@ -1554,8 +1574,38 @@ function log(message: string) {
         console.log(emittedMessage);
         main.emit("log", emittedMessage);
     }
+}*/
+
+function log(msg: string) {
+    let emittedMessage = `(haritorax-interpreter) - ${msg}`;
+
+    const date = new Date();
+
+    const logDir = path.join(os.homedir(), "Desktop", "logs");
+    const logPath = path.join(
+        logDir,
+        `log-haritorax-interpreter-${date.getFullYear()}${("0" + (date.getMonth() + 1)).slice(
+            -2
+        )}${("0" + date.getDate()).slice(-2)}.txt`
+    );
+
+    // Create the directory if it doesn't exist
+    if (!fs.existsSync(logDir)) {
+        fs.mkdirSync(logDir, { recursive: true });
+    }
+
+    // Create the file if it doesn't exist
+    if (!fs.existsSync(logPath)) {
+        fs.writeFileSync(logPath, "");
+    }
+
+    fs.appendFileSync(logPath, `${date.toTimeString()} -- (haritorax-interpreter): ${msg}\n`);
+
+    main.emit("log", emittedMessage);
+    console.log(`${date.toTimeString()} -- (haritorax-interpreter): ${msg}`);
 }
 
+/*
 function error(message: string) {
     let emittedError = undefined;
     if (debug === 1) {
@@ -1572,6 +1622,35 @@ function error(message: string) {
         console.error(emittedError);
         main.emit("logError", emittedError);
     }
+}*/
+
+function error(msg: string) {
+    let emittedMessage = `(haritorax-interpreter) - ${msg}`;
+
+    const date = new Date();
+
+    const logDir = path.join(os.homedir(), "Desktop", "logs");
+    const logPath = path.join(
+        logDir,
+        `log-haritorax-interpreter-${date.getFullYear()}${("0" + (date.getMonth() + 1)).slice(
+            -2
+        )}${("0" + date.getDate()).slice(-2)}.txt`
+    );
+
+    // Create the directory if it doesn't exist
+    if (!fs.existsSync(logDir)) {
+        fs.mkdirSync(logDir, { recursive: true });
+    }
+
+    // Create the file if it doesn't exist
+    if (!fs.existsSync(logPath)) {
+        fs.writeFileSync(logPath, "");
+    }
+
+    fs.appendFileSync(logPath, `${date.toTimeString()} -- (haritorax-interpreter): ${msg}\n`);
+
+    main.emit("log", emittedMessage);
+    console.error(`${date.toTimeString()} -- (haritorax-interpreter): ${msg}`);
 }
 
 export { HaritoraX };
