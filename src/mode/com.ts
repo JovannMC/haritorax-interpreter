@@ -147,7 +147,7 @@ export default class COM extends EventEmitter {
             setInterval(() => {
                 if (serial.isOpen) {
                     log(`Sending heartbeat to port ${port}`);
-                    serial.write("", (err) => {
+                    serial.write("report send info\r\nblt send info\r\n", (err) => {
                         if (!err) return;
                         error(`Error while sending heartbeat to port ${port}: ${err}`);
                     });
