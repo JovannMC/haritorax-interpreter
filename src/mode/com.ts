@@ -240,78 +240,12 @@ export default class COM extends EventEmitter {
  * Helper functions
  */
 
-/*function log(message: string) {
-    main.emit("log", message);
-}*/
-
 function log(message: string) {
-    let emittedMessage = `(haritorax-interpreter) COM - ${message}`;
-
-    const date = new Date();
-
-    main.emit("log", emittedMessage);
-    console.log(`${date.toTimeString()} -- (haritorax-interpreter) -- COM: ${emittedMessage}`);
-
-    const logDir = path.join(os.homedir(), "Desktop", "logs");
-    const logPath = path.join(
-        logDir,
-        `log-haritorax-interpreter-raw-com-data-${date.getFullYear()}${(
-            "0" +
-            (date.getMonth() + 1)
-        ).slice(-2)}${("0" + date.getDate()).slice(-2)}.txt`
-    );
-
-    // Create the directory if it doesn't exist
-    if (!fs.existsSync(logDir)) {
-        fs.mkdirSync(logDir, { recursive: true });
-    }
-
-    // Create the file if it doesn't exist
-    if (!fs.existsSync(logPath)) {
-        fs.writeFileSync(logPath, "");
-    }
-
-    fs.appendFileSync(
-        logPath,
-        `${date.toTimeString()} -- (haritorax-interpreter) -- COM: ${emittedMessage}\n`
-    );
+    main.emit("log", message);
 }
 
-/*
 function error(message: string) {
     main.emit("logError", message);
-}*/
-
-function error(msg: string) {
-    let emittedMessage = `(haritorax-interpreter) - ${msg}`;
-
-    const date = new Date();
-
-    main.emit("error", emittedMessage);
-    console.error(`${date.toTimeString()} -- (haritorax-interpreter) -- COM: ${msg}`);
-
-    const logDir = path.join(os.homedir(), "Desktop", "logs");
-    const logPath = path.join(
-        logDir,
-        `log-haritorax-interpreter-${date.getFullYear()}${("0" + (date.getMonth() + 1)).slice(
-            -2
-        )}${("0" + date.getDate()).slice(-2)}.txt`
-    );
-
-    // Create the directory if it doesn't exist
-    if (!fs.existsSync(logDir)) {
-        fs.mkdirSync(logDir, { recursive: true });
-    }
-
-    // Create the file if it doesn't exist
-    if (!fs.existsSync(logPath)) {
-        fs.writeFileSync(logPath, "");
-    }
-
-    fs.appendFileSync(
-        logPath,
-        `${date.toTimeString()} -- (haritorax-interpreter) -- COM: ${msg}\n`
-    );
 }
 
 /*
