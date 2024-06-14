@@ -26,7 +26,6 @@
   ],
   "dependencies": {
     "@abandonware/noble": "^1.9.2-25",
-    "bluetooth-serial-port": "github:eelcocramer/node-bluetooth-serial-port",
     "quaternion": "^1.5.1",
     "serialport": "^12.0.0"
   },
