@@ -255,13 +255,25 @@ export default class HaritoraX extends EventEmitter {
         bluetooth = new Bluetooth(debug);
 
         if (connectionMode === "com") {
-            com.startConnection(portNames);
+            const connectionStarted = com.startConnection(portNames);
+            if (!connectionStarted) {
+                error("Error starting COM connection");
+                return false;
+            }
+
             comEnabled = true;
             setTimeout(() => {
                 canSendButtonData = true;
             }, 500);
+
+            return true;
         } else if (connectionMode === "bluetooth" && trackerModelEnabled === "wireless") {
-            bluetooth.startConnection();
+            const connectionStarted = bluetooth.startConnection();
+            if (!connectionStarted) {
+                error("Error starting BLE connection");
+                return false;
+            }
+
             bluetoothEnabled = true;
             setTimeout(() => {
                 canSendButtonData = true;
@@ -270,17 +282,36 @@ export default class HaritoraX extends EventEmitter {
             trackerService = bluetooth.getServiceUUID("Tracker Service");
             settingsService = bluetooth.getServiceUUID("Setting Service");
             batteryService = bluetooth.getServiceUUID("Battery Service");
+
             magnetometerCharacteristic = bluetooth.getCharacteristicUUID("Magnetometer");
             batteryLevelCharacteristic = bluetooth.getCharacteristicUUID("BatteryLevel");
             sensorModeCharacteristic = bluetooth.getCharacteristicUUID("SensorModeSetting");
             fpsModeCharacteristic = bluetooth.getCharacteristicUUID("FpsSetting");
             correctionCharacteristic = bluetooth.getCharacteristicUUID("AutoCalibrationSetting");
             ankleCharacteristic = bluetooth.getCharacteristicUUID("TofSetting");
+
+            if (
+                !trackerService ||
+                !settingsService ||
+                !batteryService ||
+                !magnetometerCharacteristic ||
+                !batteryLevelCharacteristic ||
+                !sensorModeCharacteristic ||
+                !fpsModeCharacteristic ||
+                !correctionCharacteristic ||
+                !ankleCharacteristic
+            ) {
+                error("Error getting required UUIDs for BLE connection");
+                return false;
+            }
+
+            return true;
         } else {
             log(`Connection mode ${connectionMode} not supported for ${trackerModelEnabled}`);
         }
 
         listenToDeviceEvents();
+        return true;
     }
 
     /**
