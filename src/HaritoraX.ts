@@ -4,9 +4,6 @@ import { Buffer } from "buffer";
 import { EventEmitter } from "events";
 import COM from "./mode/com.js";
 import Bluetooth from "./mode/bluetooth.js";
-import * as os from "os";
-import * as fs from "fs";
-import * as path from "path";
 
 let debug = 0;
 let printTrackerIMUData = false;
@@ -15,7 +12,6 @@ let com: COM;
 let bluetooth: Bluetooth;
 let comEnabled = false;
 let bluetoothEnabled = false;
-let bleEnabled = false;
 let main: HaritoraX;
 let canSendButtonData = false;
 
@@ -264,9 +260,9 @@ export default class HaritoraX extends EventEmitter {
             setTimeout(() => {
                 canSendButtonData = true;
             }, 500);
-        } else if (connectionMode === "ble" && trackerModelEnabled === "wireless") {
+        } else if (connectionMode === "bluetooth" && trackerModelEnabled === "wireless") {
             bluetooth.startConnection();
-            bleEnabled = true;
+            bluetoothEnabled = true;
             setTimeout(() => {
                 canSendButtonData = true;
             }, 500);
@@ -299,9 +295,6 @@ export default class HaritoraX extends EventEmitter {
         if (connectionMode === "com" && comEnabled) {
             com.stopConnection();
             comEnabled = false;
-        } else if (connectionMode === "ble" && bleEnabled) {
-            bluetooth.stopConnection();
-            bleEnabled = false;
         } else if (connectionMode === "bluetooth" && bluetoothEnabled) {
             bluetooth.stopConnection();
             bluetoothEnabled = false;
@@ -557,7 +550,7 @@ export default class HaritoraX extends EventEmitter {
             }
         }
 
-        if (bleEnabled) {
+        if (bluetoothEnabled) {
             for (let trackerName of bluetooth.getActiveTrackers()) {
                 this.setTrackerSettings(
                     trackerName,
@@ -727,11 +720,11 @@ export default class HaritoraX extends EventEmitter {
      **/
 
     getActiveTrackers() {
-        if (comEnabled && bleEnabled) {
+        if (comEnabled && bluetoothEnabled) {
             return activeDevices.concat(bluetooth.getActiveTrackers());
         } else if (comEnabled) {
             return activeDevices;
-        } else if (bleEnabled) {
+        } else if (bluetoothEnabled) {
             return bluetooth.getActiveTrackers();
         } else {
             return null;
@@ -752,8 +745,8 @@ export default class HaritoraX extends EventEmitter {
         log(`forceBluetoothRead: ${forceBluetoothRead}`);
 
         if (
-            (forceBluetoothRead && bleEnabled && trackerName.startsWith("HaritoraX")) ||
-            (bleEnabled && trackerName.startsWith("HaritoraX")) ||
+            (forceBluetoothRead && bluetoothEnabled && trackerName.startsWith("HaritoraX")) ||
+            (bluetoothEnabled && trackerName.startsWith("HaritoraX")) ||
             !trackerSettings.has(trackerName)
         ) {
             log(`Forcing BLE reading for ${trackerName}`);
@@ -942,8 +935,6 @@ export default class HaritoraX extends EventEmitter {
                 return comEnabled;
             case "bluetooth":
                 return bluetoothEnabled;
-            case "ble":
-                return bleEnabled;
             default:
                 return null;
         }
@@ -1012,9 +1003,11 @@ function listenToDeviceEvents() {
                     // r = 6 trackers (w/ ankle motion)
                     // unknown if same applies to 8 trackers (5+1+2) or 7 trackers (5+2), but likely the same, along with ankle on/off
                     case "x":
+                        processWiredData(5, portData);
+                        break;
                     case "p":
                     case "r":
-                        processWiredData(portData);
+                        processWiredData(6, portData);
                         break;
                     case "s":
                         // settings and tracker info, for now we will only use this for mag status
@@ -1035,25 +1028,6 @@ function listenToDeviceEvents() {
             }
         }
     );
-
-    bluetooth.on("data", (identifier: string, data: string) => {
-        switch (identifier) {
-            case "x":
-                processWiredData(data);
-                break;
-            case "r":
-                processButtonData(data, "HaritoraX");
-                break;
-            case "v":
-                processBatteryData(data, "HaritoraX");
-                break;
-            case "m":
-                processMagData(data, "HaritoraX");
-                break;
-            default:
-                log(`Unknown data from HaritoraX: ${data} - ${identifier}`);
-        }
-    });
 
     bluetooth.on(
         "data",
@@ -1127,25 +1101,30 @@ function listenToDeviceEvents() {
     });
 }
 
-function processWiredData(data: string) {
+function processWiredData(trackerCount: number, data: string) {
     // Default 5 (base) trackers
     let trackerNames = ["chest", "leftKnee", "leftAnkle", "rightKnee", "rightAnkle"];
-
     const buffer = Buffer.from(data, "base64");
 
-    // read processIMUData for my rant about these stuff
-    if (buffer.length === 84 || buffer.length === 88) {
-        // 5 (base) + 1 (hip) = 6 trackers
-        trackerNames.push("hip");
-    } else if (buffer.length === 100 || buffer.length === 104) {
-        // 5 (base) + 2 (elbows) = 7 trackers
-        trackerNames.push("leftElbow");
-        trackerNames.push("rightElbow");
-    } else if (buffer.length === 116 || buffer.length === 120) {
-        // 5 (base) + 1 (hip) + 2 (elbows) = 8 trackers
-        trackerNames.push("hip");
-        trackerNames.push("leftElbow");
-        trackerNames.push("rightElbow");
+    switch (trackerCount) {
+        case 5:
+            // 5 (base) trackers
+            break;
+        case 6:
+            // 5 (base) + 1 (hip) = 6 trackers
+            trackerNames.push("hip");
+            break;
+        case 7:
+            // 5 (base) + 2 (elbows) = 7 trackers
+            trackerNames.push("leftElbow");
+            trackerNames.push("rightElbow");
+            break;
+        case 8:
+            // 5 (base) + 1 (hip) + 2 (elbows) = 8 trackers
+            trackerNames.push("hip");
+            trackerNames.push("leftElbow");
+            trackerNames.push("rightElbow");
+            break;
     }
 
     trackerNames.forEach((trackerName, index) => {
@@ -1168,9 +1147,9 @@ function processWiredData(data: string) {
  * @fires haritora#imu
  **/
 
-function processIMUData(data: Buffer, trackerName: string) {
+function processIMUData(data: Buffer, trackerName: string, ankleBuffer?: Buffer) {
     // If tracker isn't in activeDevices, add it and emit "connect" event
-    if (trackerName && !activeDevices.includes(trackerName) && (comEnabled || bleEnabled)) {
+    if (trackerName && !activeDevices.includes(trackerName) && (comEnabled || bluetoothEnabled)) {
         log(`Tracker ${trackerName} isn't in active devices, adding and emitting connect event`);
         activeDevices.push(trackerName);
         main.emit("connect", trackerName);
@@ -1180,7 +1159,8 @@ function processIMUData(data: Buffer, trackerName: string) {
     try {
         const { rotation, gravity, ankle, leftAnkle, rightAnkle, magStatus } = decodeIMUPacket(
             data,
-            trackerName
+            trackerName,
+            ankleBuffer
         );
 
         if (printTrackerIMUData) {
@@ -1221,7 +1201,7 @@ function processIMUData(data: Buffer, trackerName: string) {
  * @see {@link https://github.com/OCSYT/SlimeTora/}
  **/
 
-function decodeIMUPacket(data: Buffer, trackerName: string) {
+function decodeIMUPacket(data: Buffer, trackerName: string, ankleBuffer?: Buffer) {
     try {
         if (data.length < 14) {
             throw new Error("Too few bytes to decode IMU packet");
@@ -1271,10 +1251,10 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
 
                 trackerMag.set(trackerName, magStatus);
             }
-        } else if (trackerModelEnabled === "wired") {
-            let bufferData = data.toString("base64");
-            leftAnkle = bufferData[bufferData.length - 2];
-            rightAnkle = bufferData[bufferData.length - 1];
+        } else if (trackerModelEnabled === "wired" && ankleBuffer) {
+            // TODO: idk if this is right
+            leftAnkle = ankleBuffer.readInt8(0);
+            rightAnkle = ankleBuffer.readInt8(1);
         }
 
         const rotation = {

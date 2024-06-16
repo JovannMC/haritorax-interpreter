@@ -143,7 +143,9 @@ export default class COM extends EventEmitter {
                 this.emit("disconnected", port);
             });
 
-            // Send "heartbeat" packets to the trackers to keep them alive
+            // Send "heartbeat" packets to the trackers to keep them alive (by requesting info from the trackers)
+            // note: THIS TOOK ME 4 DAYS STRAIGHT TO FIGURE OUT WHY, I AM GOING TO EXPLODE
+            // -jovannmc
             setInterval(() => {
                 if (serial.isOpen) {
                     log(`Sending heartbeat to port ${port}`);
