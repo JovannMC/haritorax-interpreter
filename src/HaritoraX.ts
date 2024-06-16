@@ -1018,7 +1018,7 @@ function listenToDeviceEvents() {
                         // Let the person set the tracker settings manually
                         break;
                     case "i":
-                        // Handled by GX6 class
+                        // Handled by com.ts
                         break;
                     default:
                         log(
@@ -1048,8 +1048,16 @@ function listenToDeviceEvents() {
                         processButtonData(portData, "HaritoraX");
                         break;
                     case "v":
-                        // same as wireless
+                        // TODO: fix battery data
+                        // exactly same as wireless, but for some reason it isn't working well - gotta fix
                         processBatteryData(portData, "HaritoraX");
+                        break;
+                    case "i":
+                        // TODO: implement info data
+                        // not unknown data but not handled right now
+                        // "comm" shows it is in bluetooth mode, a dongle for the wired trackers *was* planned, but never released
+                        // "comm_next" defines whether it is in classic bluetooth (Bluetooth Serial Port Profile) or BLE (Bluetooth Low Energy) mode
+                        // example: {"model":"MC2B", "version":"1.7.10", "serial no":"0000000", "comm":"BLT", "comm_next":"BTSPP"}
                         break;
                     default:
                         log(

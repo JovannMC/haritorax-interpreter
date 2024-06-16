@@ -2,9 +2,6 @@
 
 import { SerialPort, ReadlineParser } from "serialport";
 import { EventEmitter } from "events";
-import * as os from "os";
-import * as fs from "fs";
-import * as path from "path";
 
 let main: COM = undefined;
 let debug = 0;
