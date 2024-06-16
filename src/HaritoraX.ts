@@ -1129,8 +1129,14 @@ function listenToDeviceEvents() {
                     case "x":
                         processWiredData(5, portData);
                         break;
-                    case "p":
                     case "r":
+                        // if the tracker has ankle motion enabled, it will send "r" instead of "p", so set ankle motion detection to true
+                        let trackerArray = trackerSettings.get(trackerName);
+                        if (trackerArray && trackerArray.length > 0) {
+                            trackerArray[trackerArray.length - 1] = true;
+                            trackerSettings.set(trackerName, trackerArray);
+                        }
+                    case "p":
                         processWiredData(6, portData);
                         break;
                     case "s":
@@ -1594,7 +1600,6 @@ function processSettingsData(data: string, trackerName: string) {
     );
     return { sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection };
 }
-
 
 /**
  * Processes the info data received from the trackers.
