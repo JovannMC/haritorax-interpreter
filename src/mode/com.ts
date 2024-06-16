@@ -47,7 +47,7 @@ export default class COM extends EventEmitter {
         debug = debugMode;
         main = this;
         trackerModelEnabled = trackerModel;
-        log(`Debug mode for GX: ${debug}`);
+        log(`Debug mode for COM: ${debug}`);
     }
 
     startConnection(portNames: string[]) {

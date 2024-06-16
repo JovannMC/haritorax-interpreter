@@ -265,8 +265,6 @@ export default class HaritoraX extends EventEmitter {
             setTimeout(() => {
                 canSendButtonData = true;
             }, 500);
-
-            return true;
         } else if (connectionMode === "bluetooth" && trackerModelEnabled === "wireless") {
             const connectionStarted = bluetooth.startConnection();
             if (!connectionStarted) {
@@ -305,7 +303,6 @@ export default class HaritoraX extends EventEmitter {
                 return false;
             }
 
-            return true;
         } else {
             log(`Connection mode ${connectionMode} not supported for ${trackerModelEnabled}`);
         }
