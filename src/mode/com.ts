@@ -5,6 +5,7 @@ import { EventEmitter } from "events";
 
 let main: COM = undefined;
 let debug = 0;
+let heartbeatInterval: number; // in milliseconds
 
 const BAUD_RATE = 500000; // from the haritora_setting.json in the HaritoraConfigurator
 
@@ -42,12 +43,13 @@ let trackersAssigned = false;
 let trackerModelEnabled: String;
 
 export default class COM extends EventEmitter {
-    constructor(trackerModel: string, debugMode = 0) {
+    constructor(trackerModel: string, debugMode = 0, heartbeat = 10000) {
         super();
         debug = debugMode;
+        heartbeatInterval = heartbeat;
         main = this;
         trackerModelEnabled = trackerModel;
-        log(`Debug mode for COM: ${debug}`);
+        log(`Initialized COM module with settings: ${trackerModelEnabled} ${debug} ${heartbeatInterval}`);
     }
 
     startConnection(portNames: string[]) {
@@ -143,6 +145,7 @@ export default class COM extends EventEmitter {
             // Send "heartbeat" packets to the trackers to keep them alive (by requesting info from the trackers)
             // note: THIS TOOK ME 4 DAYS STRAIGHT TO FIGURE OUT WHY, I AM GOING TO EXPLODE
             // -jovannmc
+            // TODO: find a better way to keep the trackers alive (so that we aren't spammed with info data every x seconds)
             setInterval(() => {
                 if (serial.isOpen) {
                     log(`Sending heartbeat to port ${port}`);
@@ -151,7 +154,7 @@ export default class COM extends EventEmitter {
                         error(`Error while sending heartbeat to port ${port}: ${err}`);
                     });
                 }
-            }, 10000);
+            }, heartbeatInterval);
         });
         return true;
     }

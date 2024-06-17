@@ -266,8 +266,8 @@ export default class HaritoraX extends EventEmitter {
      * @example
      * device.startConnection("COM");
      **/
-    startConnection(connectionMode: string, portNames?: string[]) {
-        com = new COM(trackerModelEnabled, debug);
+    startConnection(connectionMode: string, portNames?: string[], heartbeatInterval?: number) {
+        com = new COM(trackerModelEnabled, debug, heartbeatInterval);
         bluetooth = new Bluetooth(debug);
 
         if (connectionMode === "com") {

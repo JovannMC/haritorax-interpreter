@@ -50,7 +50,7 @@ export default class Bluetooth extends EventEmitter {
         noble.on("discover", this.onDiscover.bind(this));
         debug = debugMode;
         bluetooth = this;
-        log(`(haritorax-interpreter) - Debug mode for BT: ${debug}`);
+        log(`Initialized Bluetooth module with settings: ${debug}`);
     }
 
     startConnection() {
