@@ -1619,14 +1619,16 @@ function processInfoData(data: string, trackerName: string) {
         let serial, version, model, comm, comm_next;
         const jsonData = JSON.parse(data);
 
-        version = jsonData.version;
-        model = jsonData.model;
-        serial = jsonData["serial no"];
-        comm = jsonData.comm;
-        comm_next = jsonData.comm_next;
+        version = jsonData.version as string;
+        model = jsonData.model as string;
+        serial = jsonData["serial no"] as string;
+        comm = jsonData.comm as string;
+        comm_next = jsonData.comm_next as string;
 
         log(`Tracker ${trackerName} info: ${version}, ${model}, ${serial}, ${comm}, ${comm_next}`);
         main.emit("info", trackerName, version, model, serial, comm, comm_next);
+        deviceInformation.set(trackerName, [version, model, serial, comm, comm_next]);
+        
         return { version, model, serial, comm, comm_next };
     } catch (error) {
         log(`Error processing info data for tracker ${trackerName}: ${error}`);
