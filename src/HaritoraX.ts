@@ -81,7 +81,7 @@ const trackerMag: Map<string, string> = new Map([
 ]);
 
 // For HaritoraX Wired
-const deviceInformation = new Map([
+const deviceInformation: Map<string, string[]> = new Map([
     // example: {"model":"MC2B", "version":"1.7.10", "serial no":"0000000", "comm":"BLT", "comm_next":"BTSPP"}
     // deviceName, [version, model, serial, comm, comm_next]
     ["rightKnee", ["", "", "", "", ""]],
@@ -1127,18 +1127,12 @@ function listenToDeviceEvents() {
                     // r = 6 trackers (w/ ankle motion)
                     // unknown if same applies to 8 trackers (5+1+2) or 7 trackers (5+2), but likely the same, along with ankle on/off
                     case "x":
-                        processWiredData(5, portData);
-                        break;
                     case "r":
-                        // if the tracker has ankle motion enabled, it will send "r" instead of "p", so set ankle motion detection to true
-                        let trackerArray = trackerSettings.get(trackerName);
-                        if (trackerArray && trackerArray.length > 0) {
-                            trackerArray[trackerArray.length - 1] = true;
-                            trackerSettings.set(trackerName, trackerArray);
-                        }
                     case "p":
-                        processWiredData(6, portData);
-                        break;
+                    case "h":
+                    case "e":
+                    case "g":
+                        processWiredData(identifier, portData);
                     case "s":
                         // settings and tracker info, for now we will only use this for mag status
                         // example: s:{"imu_mode":1, "imu_num":6, "magf_status":"020200", "speed_mode":2, "dcal_flags":"04", "detected":"04004C6C"}
@@ -1237,36 +1231,68 @@ function listenToDeviceEvents() {
     });
 }
 
-function processWiredData(trackerCount: number, data: string) {
+const wiredTrackerAssignments: Map<[number, boolean], string> = new Map([
+    // [trackerCount, ankleEnabled], identifier
+    [[5, false], "x"],
+    [[5, true], "x"],
+    [[6, false], "p"],
+    [[6, true], "r"],
+    [[7, false], "e"],
+    [[7, true], "h"],
+    [[8, false], "g"],
+    [[8, true], "h"],
+]);
+
+function processWiredData(identifier: string, data: string) {
     // Default 5 (base) trackers
     let trackerNames = ["chest", "leftKnee", "leftAnkle", "rightKnee", "rightAnkle"];
     const buffer = Buffer.from(data, "base64");
 
-    switch (trackerCount) {
-        case 5:
-            // 5 (base) trackers
+    let trackerCount = 0;
+    let ankleEnabled = false;
+
+    for (let [key, value] of wiredTrackerAssignments) {
+        if (value === identifier) {
+            [trackerCount, ankleEnabled] = key;
             break;
-        case 6:
-            // 5 (base) + 1 (hip) = 6 trackers
-            trackerNames.push("hip");
-            break;
-        case 7:
-            // 5 (base) + 2 (elbows) = 7 trackers
-            trackerNames.push("leftElbow");
-            trackerNames.push("rightElbow");
-            break;
-        case 8:
-            // 5 (base) + 1 (hip) + 2 (elbows) = 8 trackers
-            trackerNames.push("hip");
-            trackerNames.push("leftElbow");
-            trackerNames.push("rightElbow");
-            break;
+        }
+    }
+
+    let trackerArray = trackerSettings.get("HaritoraX");
+    if (
+        trackerArray &&
+        trackerArray.length > 0 &&
+        trackerArray[trackerArray.length - 1] !== ankleEnabled
+    ) {
+        trackerArray[trackerArray.length - 1] = ankleEnabled;
+        trackerSettings.set("HaritoraX", trackerArray);
+    }
+
+    if (identifier === "x") {
+        // 5 (base) trackers
+    } else if (identifier === "p" || identifier === "r") {
+        // 5 (base) + 1 (hip) = 6 trackers
+        trackerNames.push("hip");
+    } else if (identifier === "e" || (identifier === "h" && data.split("A").length - 1 >= 18)) {
+        // 5 (base) + 2 (elbows) = 7 trackers
+        trackerNames.push("leftElbow");
+        trackerNames.push("rightElbow");
+    } else if (identifier === "g" || (identifier === "h" && data.split("A").length - 1 < 18)) {
+        // 5 (base) + 1 (hip) + 2 (elbows) = 8 trackers
+        trackerNames.push("hip");
+        trackerNames.push("leftElbow");
+        trackerNames.push("rightElbow");
     }
 
     trackerNames.forEach((trackerName, index) => {
         const start = index * 14; // 14 bytes per tracker
         const trackerBuffer = buffer.slice(start, start + 14);
-        processIMUData(trackerBuffer, trackerName);
+
+        let ankleBuffer = undefined;
+        if (ankleEnabled) ankleBuffer = buffer.slice(buffer.length - 4);
+
+        processIMUData(trackerBuffer, trackerName, ankleBuffer);
+        
     });
 }
 
@@ -1352,7 +1378,6 @@ function decodeIMUPacket(data: Buffer, trackerName: string, ankleBuffer?: Buffer
         const gravityRawY = data.readInt16LE(10);
         const gravityRawZ = data.readInt16LE(12);
 
-        // TODO: implement ankle and mag for wired trackers
         // wireless
         let ankle = undefined;
         // wired
@@ -1362,7 +1387,7 @@ function decodeIMUPacket(data: Buffer, trackerName: string, ankleBuffer?: Buffer
 
         if (trackerModelEnabled === "wireless") {
             let bufferData = data.toString("base64");
-            ankle = bufferData.slice(-2) !== "==" ? data.readInt16LE(data.length - 2) : undefined;
+            ankle = bufferData.slice(-2) !== "==" ? data.readInt8(data.length - 2) : undefined;
 
             if (!trackerName.startsWith("HaritoraX")) {
                 const magnetometerData = bufferData.charAt(bufferData.length - 5);
@@ -1388,9 +1413,9 @@ function decodeIMUPacket(data: Buffer, trackerName: string, ankleBuffer?: Buffer
                 trackerMag.set(trackerName, magStatus);
             }
         } else if (trackerModelEnabled === "wired" && ankleBuffer) {
-            // TODO: idk if this is right
+            // TODO: idk if this is right, check if it's similar to wireless
             leftAnkle = ankleBuffer.readInt8(0);
-            rightAnkle = ankleBuffer.readInt8(1);
+            rightAnkle = ankleBuffer.readInt8(2);
         }
 
         const rotation = {
@@ -1551,7 +1576,7 @@ function processMagData(data: string, trackerName: string) {
  * Supported trackers: wired
  * Supported connections: COM
  *
- * @function processMagData
+ * @function processSettingsData
  * @param {string} data - The data to process.
  * @param {string} trackerName - The name of the tracker.
  * @fires haritora#settings
@@ -1606,10 +1631,10 @@ function processSettingsData(data: string, trackerName: string) {
  * Supported trackers: wired
  * Supported connections: COM
  *
- * @function processMagData
+ * @function processInfoData
  * @param {string} data - The data to process.
  * @param {string} trackerName - The name of the tracker.
- * @fires haritora#settings
+ * @fires haritora#info
  **/
 
 function processInfoData(data: string, trackerName: string) {
@@ -1628,7 +1653,7 @@ function processInfoData(data: string, trackerName: string) {
         log(`Tracker ${trackerName} info: ${version}, ${model}, ${serial}, ${comm}, ${comm_next}`);
         main.emit("info", trackerName, version, model, serial, comm, comm_next);
         deviceInformation.set(trackerName, [version, model, serial, comm, comm_next]);
-        
+
         return { version, model, serial, comm, comm_next };
     } catch (error) {
         log(`Error processing info data for tracker ${trackerName}: ${error}`);
