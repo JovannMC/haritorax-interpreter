@@ -558,9 +558,9 @@ export default class HaritoraX extends EventEmitter {
 
                     // FPS mode
                     if (fpsMode === 50) {
-                        com.getActivePorts()[port].write("system speed mode 2\r\n");
-                    } else if (fpsMode === 100) {
                         com.getActivePorts()[port].write("system speed mode 1\r\n");
+                    } else if (fpsMode === 100) {
+                        com.getActivePorts()[port].write("system speed mode 2\r\n");
                     }
 
                     // Sensor auto correction
