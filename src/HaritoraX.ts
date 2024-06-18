@@ -127,8 +127,6 @@ let trackerModelEnabled: string;
  * @property {number} gravity.y - The y component of the gravity.
  * @property {number} gravity.z - The z component of the gravity.
  * @property {number|undefined} ankle - The ankle motion data of the tracker if enabled. Undefined if disabled.
- * @property {number|undefined} leftAnkle - The left ankle motion data of the tracker if enabled (only wired trackers). Undefined if disabled.
- * @property {number|undefined} rightAnkle - The right ankle motion data of the tracker if enabled (only wired trackers). Undefined if disabled.
  **/
 
 /**
@@ -1288,11 +1286,16 @@ function processWiredData(identifier: string, data: string) {
         const start = index * 14; // 14 bytes per tracker
         const trackerBuffer = buffer.slice(start, start + 14);
 
-        let ankleBuffer = undefined;
-        if (ankleEnabled) ankleBuffer = buffer.slice(buffer.length - 4);
-
-        processIMUData(trackerBuffer, trackerName, ankleBuffer);
-        
+        const ankleBuffer = buffer.slice(buffer.length - 4);
+        let ankleValue = undefined;
+        if (ankleEnabled) {
+            if (trackerName === "leftAnkle") {
+                ankleValue = ankleBuffer.readInt8(0);
+            } else if (trackerName === "rightAnkle") {
+                ankleValue = ankleBuffer.readInt8(2);
+            }
+        }
+        processIMUData(trackerBuffer, trackerName, ankleValue);
     });
 }
 
@@ -1306,10 +1309,11 @@ function processWiredData(identifier: string, data: string) {
  *
  * @param {string} data - The data to process.
  * @param {string} trackerName - The name of the tracker.
+ * @param {number} [ankleValue] - The ankle value (processed before running, for wired)
  * @fires haritora#imu
  **/
 
-function processIMUData(data: Buffer, trackerName: string, ankleBuffer?: Buffer) {
+function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) {
     // If tracker isn't in activeDevices, add it and emit "connect" event
     if (trackerName && !activeDevices.includes(trackerName) && (comEnabled || bluetoothEnabled)) {
         log(`Tracker ${trackerName} isn't in active devices, adding and emitting connect event`);
@@ -1319,10 +1323,9 @@ function processIMUData(data: Buffer, trackerName: string, ankleBuffer?: Buffer)
 
     // Decode and log the data
     try {
-        const { rotation, gravity, ankle, leftAnkle, rightAnkle, magStatus } = decodeIMUPacket(
+        const { rotation, gravity, ankle, magStatus } = decodeIMUPacket(
             data,
-            trackerName,
-            ankleBuffer
+            trackerName
         );
 
         if (printTrackerIMUData) {
@@ -1336,20 +1339,12 @@ function processIMUData(data: Buffer, trackerName: string, ankleBuffer?: Buffer)
                     5
                 )}, ${gravity.z.toFixed(5)})`
             );
-            if (ankle) {
-                // wireless tracker
-                log(`Tracker ${trackerName} ankle: ${ankle}`);
-            } else if (leftAnkle) {
-                // wired tracker
-                log(`Tracker ${trackerName} left ankle: ${leftAnkle}`);
-            } else if (rightAnkle) {
-                // wired tracker
-                log(`Tracker ${trackerName} right ankle: ${rightAnkle}`);
-            }
+            if (ankle) log(`Tracker ${trackerName} ankle: ${ankle}`);
+            if (ankleValue) log(`Tracker ${trackerName} (wired/manual) ankle: ${ankleValue}`);
             if (magStatus) log(`Tracker ${trackerName} magnetometer status: ${magStatus}`);
         }
 
-        main.emit("imu", trackerName, rotation, gravity, ankle, leftAnkle, rightAnkle);
+        main.emit("imu", trackerName, rotation, gravity, ankle ? ankle : ankleValue,);  
         if (!trackerName.startsWith("HaritoraX")) main.emit("mag", trackerName, magStatus);
     } catch (err) {
         error(`Error decoding tracker ${trackerName} IMU packet data: ${err}`);
@@ -1363,7 +1358,7 @@ function processIMUData(data: Buffer, trackerName: string, ankleBuffer?: Buffer)
  * @see {@link https://github.com/OCSYT/SlimeTora/}
  **/
 
-function decodeIMUPacket(data: Buffer, trackerName: string, ankleBuffer?: Buffer) {
+function decodeIMUPacket(data: Buffer, trackerName: string) {
     try {
         if (data.length < 14) {
             throw new Error("Too few bytes to decode IMU packet");
@@ -1381,8 +1376,6 @@ function decodeIMUPacket(data: Buffer, trackerName: string, ankleBuffer?: Buffer
         // wireless
         let ankle = undefined;
         // wired
-        let leftAnkle = undefined;
-        let rightAnkle = undefined;
         let magStatus = undefined;
 
         if (trackerModelEnabled === "wireless") {
@@ -1412,10 +1405,6 @@ function decodeIMUPacket(data: Buffer, trackerName: string, ankleBuffer?: Buffer
 
                 trackerMag.set(trackerName, magStatus);
             }
-        } else if (trackerModelEnabled === "wired" && ankleBuffer) {
-            // TODO: idk if this is right, check if it's similar to wireless
-            leftAnkle = ankleBuffer.readInt8(0);
-            rightAnkle = ankleBuffer.readInt8(2);
         }
 
         const rotation = {
@@ -1455,7 +1444,7 @@ function decodeIMUPacket(data: Buffer, trackerName: string, ankleBuffer?: Buffer
             z: gravityRaw.z - hFinal[3] * 1.2,
         };
 
-        return { rotation, gravity, ankle, leftAnkle, rightAnkle, magStatus };
+        return { rotation, gravity, ankle, magStatus };
     } catch (error: any) {
         throw new Error("Error decoding IMU packet: " + error.message);
     }
