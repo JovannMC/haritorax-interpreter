@@ -1012,7 +1012,7 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Get the tracker's magnetometer status
-     * Supported trackers: wireless
+     * Supported trackers: wireless, wired
      * Supported connections: COM, Bluetooth
      *
      * @function getTrackerMag
@@ -1067,13 +1067,13 @@ export default class HaritoraX extends EventEmitter {
     }
 
     /**
-     * Parse the data buffer as IMU data and fires the "imu" event.
+     * Manually emit an event.
      *
      * @param data
      * @param trackerName
      */
-    parseIMUData(data: Buffer, trackerName: string) {
-        processIMUData(data, trackerName);
+    emitEvent(event: string, trackerName: string, port: string, _portId: string, identifier: string, data: string) {
+        com.emit(event, trackerName, port, _portId, identifier, data);
     }
 }
 
@@ -1131,11 +1131,13 @@ function listenToDeviceEvents() {
                     case "e":
                     case "g":
                         processWiredData(identifier, portData);
+                        break;
                     case "s":
                         // settings and tracker info, for now we will only use this for mag status
                         // example: s:{"imu_mode":1, "imu_num":6, "magf_status":"020200", "speed_mode":2, "dcal_flags":"04", "detected":"04004C6C"}
                         processMagData(portData, "HaritoraX");
                         processSettingsData(portData, "HaritoraX");
+                        break;
                     case "t":
                         processButtonData(portData, "HaritoraX");
                         break;

@@ -1,6 +1,6 @@
 const { HaritoraX } = require("../dist/index.js");
 
-let mode = process.argv[2] || "gx";
+let mode = process.argv[2] || "com";
 let device = new HaritoraX("wireless", 2, true);
 
 if (mode === "bt" || mode === "bluetooth") {
@@ -33,7 +33,7 @@ if (mode === "bt" || mode === "bluetooth") {
 
     setInterval(async () => {
         try {
-            console.log("Active trackers for GX:", device.getActiveTrackers());
+            console.log("Active trackers for COM:", device.getActiveTrackers());
             console.log("Device info:", await device.getDeviceInfo("rightAnkle"));
             console.log("Device battery:", await device.getBatteryInfo("rightAnkle"));
             console.log("Device magnetometer:", await device.getTrackerMag("rightAnkle"));
