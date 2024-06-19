@@ -20,7 +20,7 @@ const SENSOR_MODE_2 = 0;
 const FPS_MODE_100 = 1;
 const FPS_MODE_50 = 0;
 
-const trackerButtons: Map<string, [number, number]> = new Map([
+const trackerButtons: Map<string, [number, number, number?]> = new Map([
     // trackerName, [mainButton, subButton]
     ["rightKnee", [0, 0]],
     ["rightAnkle", [0, 0]],
@@ -142,7 +142,7 @@ let trackerModelEnabled: string;
 
 /**
  * The "mag" event which provides the tracker's magnetometer status
- * Supported trackers: wireless, wired(?)
+ * Supported trackers: wireless, wired
  * Supported connections: COM, Bluetooth
  *
  * @event this#mag
@@ -153,7 +153,7 @@ let trackerModelEnabled: string;
 
 /**
  * The "button" event which provides info about the tracker's button data.
- * Supported trackers: wireless, wired(?)
+ * Supported trackers: wireless, wired
  * Supported connections: COM, Bluetooth
  *
  * @event this#button
@@ -163,6 +163,7 @@ let trackerModelEnabled: string;
  * @property {boolean} isOn - Whether the tracker is turning on/is on (true) or turning off/is off (false).
  * @property {number} mainButton - Amount of times the main button was pressed.
  * @property {number} subButton - Amount of times the sub button was pressed.
+ * @property {number} sub2Button - Amount of times the sub2 button was pressed. (wired only)
  **/
 
 /**
@@ -1666,7 +1667,7 @@ function processInfoData(data: string, trackerName: string) {
 /**
  * Processes the button data received from the tracker by the dongle.
  * The data contains the information about the main and sub buttons on the tracker along with which one was pressed/updated.
- * Supported trackers: wireless, wired(?)
+ * Supported trackers: wireless, wired
  * Supported connections: COM, Bluetooth
  *
  * @function processButtonData
@@ -1681,10 +1682,11 @@ function processButtonData(data: string, trackerName: string, characteristic?: s
 
     const MAIN_BUTTON_INDEX = 0;
     const SUB_BUTTON_INDEX = 1;
+    const SUB2_BUTTON_INDEX = 2;
     const TRACKER_OFF = false;
     const TRACKER_ON = true;
 
-    let currentButtons = trackerButtons.get(trackerName) || [0, 0];
+    let currentButtons = trackerButtons.get(trackerName) || [0, 0, 0];
     let isOn = undefined;
     let buttonPressed = undefined;
 
@@ -1742,6 +1744,9 @@ function processButtonData(data: string, trackerName: string, characteristic?: s
                 } else if (buttonData.id === "button2") {
                     currentButtons[SUB_BUTTON_INDEX] += 1;
                     buttonPressed = "sub";
+                } else if (buttonData.id === "button3") {
+                    currentButtons[SUB2_BUTTON_INDEX] += 1;
+                    buttonPressed = "sub2";
                 }
                 isOn = TRACKER_ON;
                 trackerName = "HaritoraX";
@@ -1759,12 +1764,14 @@ function processButtonData(data: string, trackerName: string, characteristic?: s
         buttonPressed,
         isOn,
         currentButtons[MAIN_BUTTON_INDEX],
-        currentButtons[SUB_BUTTON_INDEX]
+        currentButtons[SUB_BUTTON_INDEX],
+        currentButtons[SUB2_BUTTON_INDEX]
     );
 
     log(`Tracker ${trackerName} button press: ${buttonPressed}`);
     log(`Tracker ${trackerName} main button: ${currentButtons[MAIN_BUTTON_INDEX]}`);
     log(`Tracker ${trackerName} sub button: ${currentButtons[SUB_BUTTON_INDEX]}`);
+    log(`Tracker ${trackerName} sub2 button: ${currentButtons[SUB2_BUTTON_INDEX]}`);
     return true;
 }
 
