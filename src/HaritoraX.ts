@@ -1072,7 +1072,14 @@ export default class HaritoraX extends EventEmitter {
      * @param data
      * @param trackerName
      */
-    emitEvent(event: string, trackerName: string, port: string, _portId: string, identifier: string, data: string) {
+    emitEvent(
+        event: string,
+        trackerName: string,
+        port: string,
+        _portId: string,
+        identifier: string,
+        data: string
+    ) {
         com.emit(event, trackerName, port, _portId, identifier, data);
     }
 }
@@ -1325,10 +1332,7 @@ function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) 
 
     // Decode and log the data
     try {
-        const { rotation, gravity, ankle, magStatus } = decodeIMUPacket(
-            data,
-            trackerName
-        );
+        const { rotation, gravity, ankle, magStatus } = decodeIMUPacket(data, trackerName);
 
         if (printTrackerIMUData) {
             log(
@@ -1346,7 +1350,7 @@ function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) 
             if (magStatus) log(`Tracker ${trackerName} magnetometer status: ${magStatus}`);
         }
 
-        main.emit("imu", trackerName, rotation, gravity, ankle ? ankle : ankleValue,);  
+        main.emit("imu", trackerName, rotation, gravity, ankle ? ankle : ankleValue);
         if (!trackerName.startsWith("HaritoraX")) main.emit("mag", trackerName, magStatus);
     } catch (err) {
         error(`Error decoding tracker ${trackerName} IMU packet data: ${err}`);
@@ -1485,8 +1489,8 @@ function processTrackerData(data: string, trackerName: string) {
 
 /**
  * Processes the magnetometer data received from the Bluetooth tracker.
- * GX mag status is processed by decodeIMUPacket()
- * Supported trackers: wireless, wired(?)
+ * GX(6/2) mag status for wireless is processed by decodeIMUPacket()
+ * Supported trackers: wireless, wired
  * Supported connections: COM, Bluetooth
  *
  * @function processMagData
@@ -1495,28 +1499,34 @@ function processTrackerData(data: string, trackerName: string) {
  * @fires haritora#mag
  **/
 
+const GREEN = 3;
+const YELLOW = 2;
+const RED_2 = 1;
+const RED = 0;
+
 function processMagData(data: string, trackerName: string) {
     if (!data) return null;
 
-    const GREEN = 3;
-    const YELLOW = 2;
-    const RED_2 = 1;
-    const RED = 0;
-    let magStatus;
+    let magStatus: string;
     let magData;
 
     if (trackerModelEnabled === "wireless") {
         try {
             const buffer = Buffer.from(data, "base64");
             magData = buffer.readUInt8(0);
+
+            if (magData === null) return null;
+
+            magStatus = getMagStatus(magData);
+            log(`Tracker ${trackerName} mag status: ${magStatus}`);
+            trackerMag.set(trackerName, magStatus);
+            main.emit("mag", trackerName, magStatus);
+            return magStatus;
         } catch (err) {
             error(`Error processing mag data for ${trackerName}: ${err}`);
             return null;
         }
     } else if (trackerModelEnabled === "wired") {
-        // we receive a JSON, so we need to get value of "magf_status"
-        // example: {"imu_mode":1, "imu_num":5, "magf_status":"33333333", "speed_mode":2, "dcal_flags":"04", "detected":"04004C4C"}
-        // each digit represents a tracker, so grab the value of the tracker we want
         try {
             let trackerNames = [
                 "chest",
@@ -1530,36 +1540,37 @@ function processMagData(data: string, trackerName: string) {
             ];
             const jsonData = JSON.parse(data);
             const magStatusData = jsonData.magf_status;
+            trackerNames.forEach((trackerName) => {
+                let trackerIndex = trackerNames.indexOf(trackerName);
+                if (trackerIndex === -1 || Number.isNaN(trackerIndex)) return;
 
-            magData = parseInt(magStatusData[trackerNames.indexOf(trackerName)]);
+                let magData = parseInt(magStatusData[trackerIndex]);
+                if (magData === undefined || Number.isNaN(magData)) return;
+
+                let magStatus = getMagStatus(magData);
+                log(`Tracker ${trackerName} mag status: ${magStatus}`);
+                trackerMag.set(trackerName, magStatus);
+                main.emit("mag", trackerName, magStatus);
+            });
         } catch (err) {
-            error(`Error processing mag data for ${trackerName}: ${err}`);
+            error(`Error processing mag data: ${err}`);
             return null;
         }
     }
+}
 
+function getMagStatus(magData: number) {
     switch (magData) {
         case GREEN:
-            magStatus = "green";
-            break;
+            return "green";
         case YELLOW:
-            magStatus = "yellow";
-            break;
+            return "yellow";
         case RED:
-            magStatus = "red";
-            break;
         case RED_2:
-            magStatus = "red";
-            break;
+            return "red";
         default:
-            magStatus = "unknown";
-            break;
+            return "unknown";
     }
-
-    log(`Tracker ${trackerName} mag status: ${magStatus}`);
-    trackerMag.set(trackerName, magStatus);
-    main.emit("mag", trackerName, magStatus);
-    return magStatus;
 }
 
 /**
