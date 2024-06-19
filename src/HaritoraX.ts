@@ -1380,7 +1380,7 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
 
         if (trackerModelEnabled === "wireless") {
             let bufferData = data.toString("base64");
-            ankle = bufferData.slice(-2) !== "==" ? data.readInt8(data.length - 2) : undefined;
+            ankle = bufferData.slice(-2) !== "==" ? data.readUint16LE(data.length - 2) : undefined;
 
             if (!trackerName.startsWith("HaritoraX")) {
                 const magnetometerData = bufferData.charAt(bufferData.length - 5);
