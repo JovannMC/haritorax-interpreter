@@ -135,20 +135,6 @@ export default class COM extends EventEmitter {
                     const splitData = data.toString().split(/:(.+)/);
                     identifier = splitData[0].toLowerCase();
                     portData = splitData[1];
-
-                    // Send "heartbeat" packets to the trackers to keep them alive (by requesting info from the trackers)
-                    // note: THIS TOOK ME 4 DAYS STRAIGHT TO FIGURE OUT WHY, I AM GOING TO EXPLODE
-                    // -jovannmc
-                    // TODO: find a better way to keep the trackers alive (so that we aren't spammed with info data every x seconds)
-                    setInterval(() => {
-                        if (serial.isOpen) {
-                            log(`Sending heartbeat to port ${port}`);
-                            serial.write("report send info\r\nblt send info\r\n", (err) => {
-                                if (!err) return;
-                                error(`Error while sending heartbeat to port ${port}: ${err}`);
-                            });
-                        }
-                    }, heartbeatInterval);
                 }
 
                 this.emit("data", trackerName, port, portId, identifier, portData);
@@ -157,6 +143,22 @@ export default class COM extends EventEmitter {
             serial.on("close", () => {
                 this.emit("disconnected", port);
             });
+
+            // Send "heartbeat" packets to the trackers to keep them alive (by requesting info from the trackers)
+            // note: THIS TOOK ME 4 DAYS STRAIGHT TO FIGURE OUT WHY, I AM GOING TO EXPLODE
+            // -jovannmc
+            // TODO: find a better way to keep the trackers alive (so that we aren't spammed with info data every x seconds)
+            if (trackerModelEnabled === "wired") {
+                setInterval(() => {
+                    if (serial.isOpen) {
+                        log(`Sending heartbeat to port ${port}`);
+                        serial.write("report send info\r\nblt send info\r\n", (err) => {
+                            if (!err) return;
+                            error(`Error while sending heartbeat to port ${port}: ${err}`);
+                        });
+                    }
+                }, heartbeatInterval);
+            }
         });
         return true;
     }

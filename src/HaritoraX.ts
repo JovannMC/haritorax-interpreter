@@ -1354,7 +1354,7 @@ function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) 
         }
 
         main.emit("imu", trackerName, rotation, gravity, ankle ? ankle : ankleValue);
-        if (!trackerName.startsWith("HaritoraX")) main.emit("mag", trackerName, magStatus);
+        if (!trackerName.startsWith("HaritoraX") && trackerModelEnabled !== "wired") main.emit("mag", trackerName, magStatus);
     } catch (err) {
         error(`Error decoding tracker ${trackerName} IMU packet data: ${err}`);
     }
