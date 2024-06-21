@@ -261,6 +261,7 @@ export default class HaritoraX extends EventEmitter {
      *
      * @param {string} connectionMode - Connect to the trackers with the specified mode (COM or bluetooth).
      * @param {string[]} [portNames] - The port names to connect to. (COM only)
+     * @returns {boolean} Whether the connection started successfully.
      *
      * @example
      * device.startConnection("COM");
@@ -328,7 +329,7 @@ export default class HaritoraX extends EventEmitter {
     /**
      * Stops the connection to the trackers with the specified mode.
      *
-     * @param {string} connectionMode - Disconnect from the trackers with the specified mode (com or bluetooth).
+     * @param {string} connectionMode - Disconnect from the trackers with the specified mode (COM or bluetooth).
      *
      * @example
      * device.stopConnection("com");
@@ -672,7 +673,8 @@ export default class HaritoraX extends EventEmitter {
      * Supported connections: COM, Bluetooth
      *
      * @function getDeviceInfo
-     * @returns {object} The device info (version, model, serial)
+     * @param trackerName - The name of the tracker.
+     * @returns {object} The device info (version, model, serial, comm, comm_next).
      * @fires this#info
      **/
 
@@ -773,7 +775,7 @@ export default class HaritoraX extends EventEmitter {
      * Supported connections: COM, Bluetooth
      *
      * @function getBatteryInfo
-     * @returns {object} The battery info (batteryRemaining, batteryVoltage, chargeStatus)
+     * @returns {object} The battery info (batteryRemaining, batteryVoltage, chargeStatus).
      * @fires this#battery
      **/
 
@@ -845,8 +847,9 @@ export default class HaritoraX extends EventEmitter {
      * Supported connections: COM, Bluetooth
      *
      * @function getTrackerSettings
-     * @param {string} trackerName
-     * @returns {Object} The tracker settings (sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection)
+     * @param {string} trackerName - The name of the tracker.
+     * @param {boolean} forceBluetoothRead - force reading settings data from BLE device
+     * @returns {Object} The tracker settings (sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection).
      **/
     async getTrackerSettings(trackerName?: string, forceBluetoothRead?: boolean) {
         if (trackerModelEnabled === "wired") {
@@ -978,8 +981,8 @@ export default class HaritoraX extends EventEmitter {
      * Supported connections: COM, Bluetooth
      *
      * @function getTrackerSettingsRaw
-     * @param {string} trackerName
-     * @returns {Map} The tracker settings map
+     * @param {string} trackerName - The name of the tracker.
+     * @returns {Map} The tracker settings map.
      **/
     getTrackerSettingsRaw(trackerName: string) {
         if (trackerSettingsRaw.has(trackerName)) {
@@ -998,8 +1001,8 @@ export default class HaritoraX extends EventEmitter {
      * Supported connections: COM, Bluetooth
      *
      * @function getTrackerButtons
-     * @param {string} trackerName
-     * @returns {Map} The tracker button map
+     * @param {string} trackerName - The name of the tracker.
+     * @returns {Map} The tracker button map.
      **/
     getTrackerButtons(trackerName: string) {
         if (trackerButtons.has(trackerName)) {
@@ -1019,8 +1022,8 @@ export default class HaritoraX extends EventEmitter {
      * Supported connections: COM, Bluetooth
      *
      * @function getTrackerMag
-     * @param {string} trackerName
-     * @returns {string} The tracker's magnetometer status
+     * @param {string} trackerName - The name of the tracker.
+     * @returns {string} The tracker's magnetometer status.
      */
     async getTrackerMag(trackerName: string) {
         if (trackerMag.has(trackerName)) {
@@ -1051,8 +1054,8 @@ export default class HaritoraX extends EventEmitter {
      * Supported connections: COM, Bluetooth
      *
      * @function getConnectionModeActive
-     * @param {string} connectionMode
-     * @returns {boolean} Whether the connection mode is active or not
+     * @param {string} connectionMode - The connection mode to check.
+     * @returns {boolean} Whether the connection mode is active or not.
      **/
     getConnectionModeActive(connectionMode: string) {
         switch (connectionMode) {
@@ -1070,20 +1073,23 @@ export default class HaritoraX extends EventEmitter {
     }
 
     /**
-     * Manually emit an event.
+     * Manually emit a "data" event from com.ts to emulate receiving data from trackers.
      *
-     * @param data
-     * @param trackerName
+     * @function emitData
+     * @param trackerName - The name of the tracker.
+     * @param port - COM port that data was sent by.
+     * @param _portId - ID of tracker in the port for data (0/1).
+     * @param identifier - Identifier of the data.
+     * @param data - The data to be processed.
      */
-    emitEvent(
-        event: string,
+    emitData(
         trackerName: string,
         port: string,
         _portId: string,
         identifier: string,
         data: string
     ) {
-        com.emit(event, trackerName, port, _portId, identifier, data);
+        com.emit("data", trackerName, port, _portId, identifier, data);
     }
 }
 
@@ -1321,7 +1327,7 @@ function processWiredData(identifier: string, data: string) {
  *
  * @param {string} data - The data to process.
  * @param {string} trackerName - The name of the tracker.
- * @param {number} [ankleValue] - The ankle value (processed before running, for wired)
+ * @param {number} [ankleValue] - The ankle value (processed before running, for wired).
  * @fires haritora#imu
  **/
 
@@ -1675,7 +1681,7 @@ function processInfoData(data: string, trackerName: string) {
  * @function processButtonData
  * @param {string} data - The data to process.
  * @param {string} trackerName - The name of the tracker.
- * @param {string} characteristic - The characteristic of the data, if bluetooth trackers. (MainButton, SecondaryButton)
+ * @param {string} characteristic - The characteristic of the data, if trackers connected via BLE. (MainButton, SecondaryButton)
  * @fires haritora#button
  **/
 
