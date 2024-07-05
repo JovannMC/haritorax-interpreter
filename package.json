@@ -10,6 +10,7 @@
   "description": "Communicate with the HaritoraX trackers",
   "main": "./dist/index.js",
   "scripts": {
+    "preinstall": "npx only-allow pnpm",
     "start": "npm run build && node ./test/test.js",
     "build": "tsc && tsc -d"
   },
