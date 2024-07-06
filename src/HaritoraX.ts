@@ -15,10 +15,54 @@ let bluetoothEnabled = false;
 let main: HaritoraX;
 let canSendButtonData = false;
 
+/*
+ * Constants
+ */
+
+const GREEN = 3;
+const YELLOW = 2;
+const RED_2 = 1;
+const RED = 0;
+
 const SENSOR_MODE_1 = 1;
 const SENSOR_MODE_2 = 0;
 const FPS_MODE_100 = 1;
 const FPS_MODE_50 = 0;
+
+type SensorCorrectionKey = "accel" | "gyro" | "mag";
+const SENSOR_CORRECTION_BITS: Record<SensorCorrectionKey, number> = {
+    accel: 1,
+    gyro: 2,
+    mag: 4,
+};
+
+// COM
+const VERSION_INDEX = 0;
+const MODEL_INDEX = 1;
+const SERIAL_INDEX = 2;
+const COMM_INDEX = 3; // wired only
+const COMM_NEXT_INDEX = 4; // wired only
+
+// Bluetooth
+const SERVICE_UUID = "180a";
+const VERSION_UUID = "2a28";
+const MODEL_UUID = "2a24";
+const SERIAL_UUID = "2a25";
+
+// buttons
+const MAIN_BUTTON_INDEX = 0;
+const SUB_BUTTON_INDEX = 1;
+const SUB2_BUTTON_INDEX = 2;
+const TRACKER_OFF = false;
+const TRACKER_ON = true;
+
+// TODO: need to fix this, again - test all and see which one changes which tracker
+const TRACKERS_GROUP_ONE = ["rightAnkle", "rightKnee", "leftAnkle", "leftElbow"];
+const TRACKERS_GROUP_TWO = ["hip", "chest", "leftKnee", "rightElbow"];
+
+/*
+ * Maps
+ */
 
 const trackerButtons: Map<string, [number, number, number?]> = new Map([
     // trackerName, [mainButton, subButton]
@@ -218,40 +262,25 @@ let trackerModelEnabled: string;
  * The HaritoraX class.
  * This class provides methods and events to connect to the HaritoraX trackers, interpret the data, and interact with the trackers.
  *
- * @param {boolean} debugMode - Enable logging of debug messages depending on verbosity. (0 = none, 1 = debug, 2 = debug w/ function info)
+ * @param {boolean} debugMode - Enable logging of debug messages. (true or false)
  * @param {boolean} printTrackerIMUProcessing - Print the tracker IMU processing data (processIMUData()). (true or false)
  *
  * @example
  * let device = new HaritoraXWireless(2);
  **/
 export default class HaritoraX extends EventEmitter {
-    constructor(trackerModel: string, debugMode = 0, printIMUData = false) {
+    constructor(
+        trackerModel: TrackerModel,
+        debugMode: boolean = false,
+        printIMUData: boolean = false
+    ) {
         super();
-
-        const validTrackerModels = ["wireless", "wired"];
-        if (!validTrackerModels.includes(trackerModel)) {
-            throw new Error(
-                `Invalid tracker model: ${trackerModel}. Valid models are: ${validTrackerModels.join(
-                    ", "
-                )}`
-            );
-        }
-
-        if (typeof debugMode !== "boolean") {
-            throw new Error(`Invalid debugMode value: ${debugMode}. It should be a boolean.`);
-        }
-
-        // Validate printTrackerIMUProcessing
-        if (typeof printIMUData !== "boolean") {
-            throw new Error(
-                `Invalid printTrackerIMUProcessing value: ${printIMUData}. It should be a boolean.`
-            );
-        }
 
         trackerModelEnabled = trackerModel;
         debug = debugMode;
         printIMU = printIMUData;
         main = this;
+
         log(`Set debug mode: ${debug}`);
         log(`Print tracker IMU processing: ${printIMU}`);
     }
@@ -266,64 +295,79 @@ export default class HaritoraX extends EventEmitter {
      * @example
      * device.startConnection("COM");
      **/
-    startConnection(connectionMode: string, portNames?: string[], heartbeatInterval?: number) {
+    startConnection(
+        connectionMode: string,
+        portNames?: string[],
+        heartbeatInterval?: number
+    ): boolean {
         com = new COM(trackerModelEnabled, heartbeatInterval);
         bluetooth = new Bluetooth();
 
-        if (connectionMode === "com") {
-            const connectionStarted = com.startConnection(portNames);
-            if (!connectionStarted) {
-                error("Error starting COM connection");
-                return false;
-            }
-
-            comEnabled = true;
-            setTimeout(() => {
-                canSendButtonData = true;
-            }, 500);
-        } else if (connectionMode === "bluetooth" && trackerModelEnabled === "wireless") {
-            const connectionStarted = bluetooth.startConnection();
-            if (!connectionStarted) {
-                error("Error starting BLE connection");
-                return false;
-            }
-
-            bluetoothEnabled = true;
-            setTimeout(() => {
-                canSendButtonData = true;
-            }, 500);
-
-            trackerService = bluetooth.getServiceUUID("Tracker Service");
-            settingsService = bluetooth.getServiceUUID("Setting Service");
-            batteryService = bluetooth.getServiceUUID("Battery Service");
-
-            magnetometerCharacteristic = bluetooth.getCharacteristicUUID("Magnetometer");
-            batteryLevelCharacteristic = bluetooth.getCharacteristicUUID("BatteryLevel");
-            sensorModeCharacteristic = bluetooth.getCharacteristicUUID("SensorModeSetting");
-            fpsModeCharacteristic = bluetooth.getCharacteristicUUID("FpsSetting");
-            correctionCharacteristic = bluetooth.getCharacteristicUUID("AutoCalibrationSetting");
-            ankleCharacteristic = bluetooth.getCharacteristicUUID("TofSetting");
-
-            if (
-                !trackerService ||
-                !settingsService ||
-                !batteryService ||
-                !magnetometerCharacteristic ||
-                !batteryLevelCharacteristic ||
-                !sensorModeCharacteristic ||
-                !fpsModeCharacteristic ||
-                !correctionCharacteristic ||
-                !ankleCharacteristic
-            ) {
-                error("Error getting required UUIDs for BLE connection");
-                return false;
-            }
-        } else {
+        if (!this.isConnectionModeSupported(connectionMode)) {
             log(`Connection mode ${connectionMode} not supported for ${trackerModelEnabled}`);
+            return false;
+        }
+
+        const connectionStarted = this.initiateConnection(connectionMode, portNames);
+        if (!connectionStarted) {
+            error(`Error starting ${connectionMode.toUpperCase()} connection`);
+            return false;
+        }
+
+        if (connectionMode === "com" || connectionMode === "bluetooth") {
+            setTimeout(() => {
+                canSendButtonData = true;
+            }, 500);
         }
 
         listenToDeviceEvents();
         return true;
+    }
+
+    private isConnectionModeSupported(connectionMode: string): boolean {
+        return (
+            connectionMode === "com" ||
+            (connectionMode === "bluetooth" && trackerModelEnabled === "wireless")
+        );
+    }
+
+    private async initiateConnection(
+        connectionMode: string,
+        portNames?: string[]
+    ): Promise<boolean> {
+        if (connectionMode === "com") {
+            comEnabled = true;
+            return await com.startConnection(portNames);
+        } else if (connectionMode === "bluetooth") {
+            bluetoothEnabled = true;
+            return bluetooth.startConnection() && this.setupBluetoothServices();
+        }
+        return false;
+    }
+
+    private setupBluetoothServices(): boolean {
+        trackerService = bluetooth.getServiceUUID("Tracker Service");
+        settingsService = bluetooth.getServiceUUID("Setting Service");
+        batteryService = bluetooth.getServiceUUID("Battery Service");
+
+        magnetometerCharacteristic = bluetooth.getCharacteristicUUID("Magnetometer");
+        batteryLevelCharacteristic = bluetooth.getCharacteristicUUID("BatteryLevel");
+        sensorModeCharacteristic = bluetooth.getCharacteristicUUID("SensorModeSetting");
+        fpsModeCharacteristic = bluetooth.getCharacteristicUUID("FpsSetting");
+        correctionCharacteristic = bluetooth.getCharacteristicUUID("AutoCalibrationSetting");
+        ankleCharacteristic = bluetooth.getCharacteristicUUID("TofSetting");
+
+        return (
+            !!trackerService &&
+            !!settingsService &&
+            !!batteryService &&
+            !!magnetometerCharacteristic &&
+            !!batteryLevelCharacteristic &&
+            !!sensorModeCharacteristic &&
+            !!fpsModeCharacteristic &&
+            !!correctionCharacteristic &&
+            !!ankleCharacteristic
+        );
     }
 
     /**
@@ -334,18 +378,34 @@ export default class HaritoraX extends EventEmitter {
      * @example
      * device.stopConnection("com");
      **/
-    stopConnection(connectionMode: string) {
+    async stopConnection(connectionMode: string) {
         if (connectionMode === "com" && comEnabled) {
+            await this.removeActiveDevices("com");
+
             com.stopConnection();
             comEnabled = false;
         } else if (connectionMode === "bluetooth" && bluetoothEnabled) {
+            await this.removeActiveDevices("bluetooth");
+
             bluetooth.stopConnection();
             bluetoothEnabled = false;
         }
 
         canSendButtonData = false;
-        // TODO: only clear devices whose connection modes were stopped
-        activeDevices = [];
+    }
+
+    private async removeActiveDevices(deviceTypeToRemove: string) {
+        let devices =
+            deviceTypeToRemove === "bluetooth" ? bluetooth.getActiveDevices() : com.getTrackers();
+        for (let device of devices) {
+            let deviceName = device[0];
+            let index = activeDevices.indexOf(deviceName);
+            if (index !== -1) {
+                activeDevices.splice(index, 1);
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -364,7 +424,6 @@ export default class HaritoraX extends EventEmitter {
      * @example
      * trackers.setTrackerSettings("rightAnkle", 1, 100, ['accel', 'gyro'], true);
      **/
-
     setTrackerSettings(
         trackerName: string,
         sensorMode: number,
@@ -372,82 +431,29 @@ export default class HaritoraX extends EventEmitter {
         sensorAutoCorrection: string[],
         ankleMotionDetection: boolean
     ) {
-        // update 2024/06/16: i have no idea how this works
-        // elbows untested, might not work
-        const TRACKERS_GROUP_ONE = ["rightAnkle", "rightKnee", "leftAnkle", "leftElbow"];
-        const TRACKERS_GROUP_TWO = ["hip", "chest", "leftKnee", "rightElbow"];
+        const sensorAutoCorrectionBit = calculateSensorAutoCorrectionBits(
+            sensorAutoCorrection as SensorCorrectionKey[]
+        );
+        const settings = {
+            "Sensor mode": sensorMode,
+            "FPS mode": fpsMode,
+            "Sensor auto correction": sensorAutoCorrection.join(", "),
+            "Ankle motion detection": ankleMotionDetection,
+        };
 
-        log(com.getTrackerAssignment().toString());
-
-        let sensorAutoCorrectionBit = 0;
-        if (sensorAutoCorrection.includes("accel")) sensorAutoCorrectionBit |= 0x01;
-        if (sensorAutoCorrection.includes("gyro")) sensorAutoCorrectionBit |= 0x02;
-        if (sensorAutoCorrection.includes("mag")) sensorAutoCorrectionBit |= 0x04;
-
-        log(`Setting tracker settings for ${trackerName}...`);
         if (isWirelessBT(trackerName)) {
-            // Bluetooth
-            let sensorModeData;
-            if (sensorMode === 1) sensorModeData = 5;
-            else sensorModeData = 8;
-
-            const sensorModeBuffer = Buffer.from([sensorModeData]);
-            const sensorModeValue = new DataView(sensorModeBuffer.buffer).getInt8(0);
-            bluetooth.write(
-                trackerName,
-                settingsService,
-                sensorModeCharacteristic,
-                sensorModeBuffer
-            );
-
-            const fpsModeBuffer = Buffer.from([fpsMode === 50 ? 1 : 2]);
-            const fpsModeValue = new DataView(fpsModeBuffer.buffer).getInt8(0);
-            bluetooth.write(trackerName, settingsService, fpsModeCharacteristic, fpsModeBuffer);
-
-            let correctionBit = 0;
-            if (sensorAutoCorrection.includes("accel")) correctionBit |= 0x01;
-            if (sensorAutoCorrection.includes("gyro")) correctionBit |= 0x02;
-            if (sensorAutoCorrection.includes("mag")) correctionBit |= 0x04;
-            const correctionBuffer = Buffer.from([correctionBit]);
-            const correctionValue = new DataView(correctionBuffer.buffer).getInt8(0);
-            bluetooth.write(
-                trackerName,
-                settingsService,
-                correctionCharacteristic,
-                correctionBuffer
-            );
-
-            const ankleBuffer = Buffer.from([ankleMotionDetection ? 1 : 0]);
-            const ankleValue = new DataView(ankleBuffer.buffer).getInt8(0);
-            bluetooth.write(trackerName, settingsService, ankleCharacteristic, ankleBuffer);
-
-            log(`Setting the following settings onto tracker ${trackerName}:`);
-            log(`Sensor mode: ${sensorMode}`);
-            log(`FPS mode: ${fpsMode}`);
-            log(`Sensor auto correction: ${sensorAutoCorrection}`);
-            log(`Ankle motion detection: ${ankleMotionDetection}`);
-
-            log(`Raw hex data calculated to be sent:`);
-            log(`Sensor mode: ${sensorModeValue}`);
-            log(`FPS mode: ${fpsModeValue}`);
-            log(`Sensor auto correction: ${correctionValue}`);
-            log(`Ankle motion detection: ${ankleValue}`);
-
-            trackerSettings.set(trackerName, [
-                sensorMode,
-                fpsMode,
-                sensorAutoCorrection,
-                ankleMotionDetection,
-            ]);
-
-            return true;
+            writeToBluetooth(trackerName, sensorModeCharacteristic, sensorMode === 1 ? 5 : 8);
+            writeToBluetooth(trackerName, fpsModeCharacteristic, fpsMode === 50 ? 1 : 2);
+            writeToBluetooth(trackerName, correctionCharacteristic, sensorAutoCorrectionBit);
+            writeToBluetooth(trackerName, ankleCharacteristic, ankleMotionDetection ? 1 : 0);
+            logSettings(trackerName, settings);
         } else {
             // GX dongle(s)
             const sensorModeBit = sensorMode === 1 ? SENSOR_MODE_1 : SENSOR_MODE_2; // Default to mode 2
             const postureDataRateBit = fpsMode === 100 ? FPS_MODE_100 : FPS_MODE_50; // Default to 50 FPS
             const ankleMotionDetectionBit = ankleMotionDetection ? 1 : 0; // Default to false
 
-            let hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
+            const hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
             let trackerSettingsBuffer = undefined;
 
             if (TRACKERS_GROUP_ONE.includes(trackerName)) {
@@ -459,12 +465,13 @@ export default class HaritoraX extends EventEmitter {
                 return;
             }
 
-            log(`Setting the following settings onto tracker ${trackerName}:`);
-            log(`Sensor mode: ${sensorMode}`);
-            log(`FPS mode: ${fpsMode}`);
-            log(`Sensor auto correction: ${sensorAutoCorrection}`);
-            log(`Ankle motion detection: ${ankleMotionDetection}`);
-            log(`Raw hex data calculated to be sent: ${hexValue}`);
+            logSettings(trackerName, {
+                sensorMode,
+                fpsMode,
+                sensorAutoCorrection,
+                ankleMotionDetection,
+                hexValue,
+            });
 
             trackerSettings.set(trackerName, [
                 sensorMode,
@@ -474,9 +481,6 @@ export default class HaritoraX extends EventEmitter {
             ]);
 
             try {
-                log(
-                    `Sending tracker settings to ${trackerName}: ${trackerSettingsBuffer.toString()}`
-                );
                 let ports = com.getActivePorts();
                 let trackerPort = com.getTrackerPort(trackerName);
 
@@ -496,9 +500,15 @@ export default class HaritoraX extends EventEmitter {
                 });
             } catch (err) {
                 error(`Error sending tracker settings: ${err}`);
-                return false;
             }
         }
+
+        trackerSettings.set(trackerName, [
+            sensorMode,
+            fpsMode,
+            sensorAutoCorrection,
+            ankleMotionDetection,
+        ]);
         return true;
     }
 
@@ -548,123 +558,158 @@ export default class HaritoraX extends EventEmitter {
         sensorAutoCorrection: string[],
         ankleMotionDetection: boolean
     ) {
-        if (trackerModelEnabled === "wired") {
-            for (let port in com.getActivePorts()) {
-                try {
-                    // Sensor mode
-                    if (sensorMode === 1) {
-                        com.getActivePorts()[port].write("sensor imu mode 1\r\n");
-                    } else if (sensorMode === 2) {
-                        com.getActivePorts()[port].write("sensor imu mode 2\r\n");
-                    }
-
-                    // FPS mode
-                    if (fpsMode === 50) {
-                        com.getActivePorts()[port].write("system speed mode 1\r\n");
-                    } else if (fpsMode === 100) {
-                        com.getActivePorts()[port].write("system speed mode 2\r\n");
-                    }
-
-                    // Sensor auto correction
-                    let sensorAutoCorrectionBit = 0;
-                    if (sensorAutoCorrection.includes("accel")) sensorAutoCorrectionBit += 1;
-                    if (sensorAutoCorrection.includes("gyro")) sensorAutoCorrectionBit += 2;
-                    if (sensorAutoCorrection.includes("mag")) sensorAutoCorrectionBit += 4;
-                    com.getActivePorts()[port].write(
-                        `sensor cal flags ${sensorAutoCorrectionBit}\r\nsensor restart\r\n`
-                    );
-
-                    // Ankle motion detection
-                    const command = ankleMotionDetection
-                        ? "param sensor range"
-                        : "param sensor basic";
-                    com.getActivePorts()[port].write(
-                        `${command}\r\nparam save\r\nsensor restart\r\n`
-                    );
-                } catch (err) {
-                    error(`Error sending tracker settings: ${err}`);
-                    return false;
-                }
+        try {
+            if (trackerModelEnabled === "wired") {
+                this.handleWiredSettings(
+                    sensorMode,
+                    fpsMode,
+                    sensorAutoCorrection,
+                    ankleMotionDetection
+                );
+            } else if (trackerModelEnabled === "wireless") {
+                this.handleWirelessSettings(
+                    sensorMode,
+                    fpsMode,
+                    sensorAutoCorrection,
+                    ankleMotionDetection
+                );
             }
+            this.updateTrackerSettings(
+                sensorMode,
+                fpsMode,
+                sensorAutoCorrection,
+                ankleMotionDetection
+            );
+            return true;
+        } catch (err) {
+            console.error(`Error sending tracker settings: ${err}`);
+            return false;
+        }
+    }
 
-            trackerSettings.set("HaritoraXWired", [
+    private handleWiredSettings(
+        sensorMode: number,
+        fpsMode: number,
+        sensorAutoCorrection: string[],
+        ankleMotionDetection: boolean
+    ) {
+        for (let port in com.getActivePorts()) {
+            try {
+                // Sensor mode
+                if (sensorMode === 1) {
+                    com.getActivePorts()[port].write("sensor imu mode 1\r\n");
+                } else if (sensorMode === 2) {
+                    com.getActivePorts()[port].write("sensor imu mode 2\r\n");
+                }
+
+                // FPS mode
+                if (fpsMode === 50) {
+                    com.getActivePorts()[port].write("system speed mode 1\r\n");
+                } else if (fpsMode === 100) {
+                    com.getActivePorts()[port].write("system speed mode 2\r\n");
+                }
+
+                // Sensor auto correction
+                let sensorAutoCorrectionBit = 0;
+                if (sensorAutoCorrection.includes("accel")) sensorAutoCorrectionBit += 1;
+                if (sensorAutoCorrection.includes("gyro")) sensorAutoCorrectionBit += 2;
+                if (sensorAutoCorrection.includes("mag")) sensorAutoCorrectionBit += 4;
+                com.getActivePorts()[port].write(
+                    `sensor cal flags ${sensorAutoCorrectionBit}\r\nsensor restart\r\n`
+                );
+
+                // Ankle motion detection
+                const command = ankleMotionDetection ? "param sensor range" : "param sensor basic";
+                com.getActivePorts()[port].write(`${command}\r\nparam save\r\nsensor restart\r\n`);
+            } catch (err) {
+                error(`Error sending tracker settings: ${err}`);
+                return false;
+            }
+        }
+
+        trackerSettings.set("HaritoraXWired", [
+            sensorMode,
+            fpsMode,
+            sensorAutoCorrection,
+            ankleMotionDetection,
+        ]);
+
+        return true;
+    }
+
+    private handleWirelessSettings(
+        sensorMode: number,
+        fpsMode: number,
+        sensorAutoCorrection: string[],
+        ankleMotionDetection: boolean
+    ) {
+        if (comEnabled) {
+            const trackerSettingsBuffer = this.constructWirelessSettingsBuffer(
+                sensorMode,
+                fpsMode,
+                sensorAutoCorrection,
+                ankleMotionDetection
+            );
+            Object.values(com.getActivePorts()).forEach((port) => {
+                port.write(trackerSettingsBuffer, (err) => {
+                    if (err) {
+                        console.error(`Error writing data to serial port ${port.path}: ${err}`);
+                    } else {
+                        console.log(
+                            `Data written to serial port ${port.path}: ${trackerSettingsBuffer
+                                .toString()
+                                .replace(/\r\n/g, " ")}`
+                        );
+                    }
+                });
+            });
+        }
+
+        if (bluetoothEnabled) {
+            bluetooth.getActiveTrackers().forEach((trackerName) => {
+                this.setTrackerSettings(
+                    trackerName,
+                    sensorMode,
+                    fpsMode,
+                    sensorAutoCorrection,
+                    ankleMotionDetection
+                );
+            });
+        }
+    }
+
+    private constructWirelessSettingsBuffer(
+        sensorMode: number,
+        fpsMode: number,
+        sensorAutoCorrection: string[],
+        ankleMotionDetection: boolean
+    ): Buffer {
+        const sensorModeBit = sensorMode === 1 ? SENSOR_MODE_1 : SENSOR_MODE_2;
+        const postureDataRateBit = fpsMode === 100 ? FPS_MODE_100 : FPS_MODE_50;
+        const ankleMotionDetectionBit = ankleMotionDetection ? 1 : 0;
+        let sensorAutoCorrectionBit = 0;
+        if (sensorAutoCorrection.includes("accel")) sensorAutoCorrectionBit |= 0x01;
+        if (sensorAutoCorrection.includes("gyro")) sensorAutoCorrectionBit |= 0x02;
+        if (sensorAutoCorrection.includes("mag")) sensorAutoCorrectionBit |= 0x04;
+
+        const hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
+        return Buffer.from("o0:" + hexValue + "\r\n" + "o1:" + hexValue + "\r\n", "utf-8");
+    }
+
+    private updateTrackerSettings(
+        sensorMode: number,
+        fpsMode: number,
+        sensorAutoCorrection: string[],
+        ankleMotionDetection: boolean
+    ) {
+        for (let trackerName of trackerSettingsRaw.keys()) {
+            trackerSettings.set(trackerName, [
                 sensorMode,
                 fpsMode,
                 sensorAutoCorrection,
                 ankleMotionDetection,
             ]);
-
-            return true;
-        } else if (trackerModelEnabled === "wireless") {
-            if (comEnabled) {
-                try {
-                    const sensorModeBit = sensorMode === 1 ? SENSOR_MODE_1 : SENSOR_MODE_2; // Default to mode 2
-                    const postureDataRateBit = fpsMode === 100 ? FPS_MODE_100 : FPS_MODE_50; // Default to 50 FPS
-                    const ankleMotionDetectionBit = ankleMotionDetection ? 1 : 0; // Default to false
-                    let sensorAutoCorrectionBit = 0;
-                    if (sensorAutoCorrection.includes("accel")) sensorAutoCorrectionBit |= 0x01;
-                    if (sensorAutoCorrection.includes("gyro")) sensorAutoCorrectionBit |= 0x02;
-                    if (sensorAutoCorrection.includes("mag")) sensorAutoCorrectionBit |= 0x04;
-
-                    const hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
-                    const trackerSettingsBuffer = Buffer.from(
-                        "o0:" + hexValue + "\r\n" + "o1:" + hexValue + "\r\n",
-                        "utf-8"
-                    );
-
-                    log(`Setting the following settings onto all connected trackers:`);
-                    log(`Connected trackers: ${activeDevices}`);
-                    log(`Sensor mode: ${sensorMode}`);
-                    log(`FPS mode: ${fpsMode}`);
-                    log(`Sensor auto correction: ${sensorAutoCorrection}`);
-                    log(`Ankle motion detection: ${ankleMotionDetection}`);
-                    log(`Raw hex data calculated to be sent: ${hexValue}`);
-
-                    for (let port in com.getActivePorts()) {
-                        com.getActivePorts()[port].write(trackerSettingsBuffer, (err: any) => {
-                            if (err) {
-                                error(`Error writing data to serial port ${port}: ${err}`);
-                            } else {
-                                for (let trackerName of activeDevices) {
-                                    trackerSettingsRaw.set(trackerName, hexValue);
-                                }
-                                log(
-                                    `Data written to serial port ${port}: ${trackerSettingsBuffer
-                                        .toString()
-                                        .replace(/\r\n/g, " ")}`
-                                );
-                            }
-                        });
-                    }
-                } catch (err) {
-                    error(`Error sending tracker settings: ${err}`);
-                    return false;
-                }
-            }
-
-            if (bluetoothEnabled) {
-                for (let trackerName of bluetooth.getActiveTrackers()) {
-                    this.setTrackerSettings(
-                        trackerName,
-                        sensorMode,
-                        fpsMode,
-                        sensorAutoCorrection,
-                        ankleMotionDetection
-                    );
-                }
-            }
-
-            for (let trackerName of trackerSettingsRaw.keys()) {
-                trackerSettings.set(trackerName, [
-                    sensorMode,
-                    fpsMode,
-                    sensorAutoCorrection,
-                    ankleMotionDetection,
-                ]);
-            }
         }
-
-        return true;
     }
 
     /**
@@ -679,39 +724,11 @@ export default class HaritoraX extends EventEmitter {
      **/
 
     async getDeviceInfo(trackerName: string) {
-        // GX
-        const VERSION_INDEX = 0;
-        const MODEL_INDEX = 1;
-        const SERIAL_INDEX = 2;
-        // wired only
-        const COMM_INDEX = 3;
-        const COMM_NEXT_INDEX = 4;
-
-        // Bluetooth
-        const SERVICE_UUID = "180a";
-        const VERSION_UUID = "2a28";
-        const MODEL_UUID = "2a24";
-        const SERIAL_UUID = "2a25";
-
         // Global
-        let serial = undefined;
-        let model = undefined;
-        let version = undefined;
-        let comm = undefined;
-        let comm_next = undefined;
+        let serial, model, version, comm, comm_next;
 
-        if (trackerModelEnabled === "wireless" && (trackerName === "(DONGLE)" || comEnabled)) {
-            serial = com.getDeviceInformation(trackerName)[SERIAL_INDEX];
-            model = com.getDeviceInformation(trackerName)[MODEL_INDEX];
-            version = com.getDeviceInformation(trackerName)[VERSION_INDEX];
-        } else if (trackerModelEnabled === "wired" && comEnabled) {
-            serial = com.getDeviceInformation(trackerName)[SERIAL_INDEX];
-            model = com.getDeviceInformation(trackerName)[MODEL_INDEX];
-            version = com.getDeviceInformation(trackerName)[VERSION_INDEX];
-            comm = com.getDeviceInformation(trackerName)[COMM_INDEX];
-            comm_next = com.getDeviceInformation(trackerName)[COMM_NEXT_INDEX];
-        } else if (trackerModelEnabled === "wireless" && isWirelessBT(trackerName) && bluetoothEnabled) {
-            let trackerObject = bluetooth
+        if (trackerModelEnabled === "wireless" && bluetoothEnabled && isWirelessBT(trackerName)) {
+            const trackerObject = bluetooth
                 .getActiveDevices()
                 .find((device) => device[0] === trackerName);
             if (!trackerObject) {
@@ -719,45 +736,32 @@ export default class HaritoraX extends EventEmitter {
                 return null;
             }
 
-            // grab services from trackerObject, get all characteristics
-            let characteristics = trackerObject[3];
-            let versionCharacteristic = characteristics.find(
-                (characteristic) => characteristic.uuid === VERSION_UUID
-            );
-            let modelCharacteristic = characteristics.find(
-                (characteristic) => characteristic.uuid === MODEL_UUID
-            );
-            let serialCharacteristic = characteristics.find(
-                (characteristic) => characteristic.uuid === SERIAL_UUID
-            );
-
             const decoder = new TextDecoder("utf-8");
 
-            // Get buffers
-            let versionBuffer = await bluetooth.read(
-                trackerName,
-                SERVICE_UUID,
-                versionCharacteristic.uuid
-            );
+            const readCharacteristic = async (uuid: string) => {
+                const buffer = await bluetooth.read(trackerName, SERVICE_UUID, uuid);
+                return buffer ? decoder.decode(buffer) : undefined;
+            };
 
-            let modelBuffer = await bluetooth.read(
-                trackerName,
-                SERVICE_UUID,
-                modelCharacteristic.uuid
-            );
+            [version, model, serial] = await Promise.all([
+                readCharacteristic(VERSION_UUID),
+                readCharacteristic(MODEL_UUID),
+                readCharacteristic(SERIAL_UUID),
+            ]);
+        } else if (comEnabled) {
+            const deviceInfo = com.getDeviceInformation(trackerName);
+            [version, model, serial] = [
+                deviceInfo[VERSION_INDEX],
+                deviceInfo[MODEL_INDEX],
+                deviceInfo[SERIAL_INDEX],
+            ];
 
-            let serialBuffer = await bluetooth.read(
-                trackerName,
-                SERVICE_UUID,
-                serialCharacteristic.uuid
-            );
-
-            // Convert to UTF-8 string
-            if (versionBuffer && modelBuffer && serialBuffer) {
-                version = decoder.decode(versionBuffer);
-                serial = decoder.decode(serialBuffer);
-                model = decoder.decode(modelBuffer);
+            if (trackerModelEnabled === "wired") {
+                [comm, comm_next] = [deviceInfo[COMM_INDEX], deviceInfo[COMM_NEXT_INDEX]];
             }
+        } else {
+            log(`Tracker ${trackerName} not found or unsupported model enabled`);
+            return null;
         }
 
         log(`Tracker ${trackerName} info: ${version}, ${model}, ${serial}, ${comm}, ${comm_next}`);
@@ -776,44 +780,54 @@ export default class HaritoraX extends EventEmitter {
      **/
 
     async getBatteryInfo(trackerName: string) {
-        let batteryRemaining,
-            batteryVoltage,
-            chargeStatus = undefined;
-
         log(`Getting battery info for ${trackerName}`);
 
-        try {
-            if (trackerBattery.has(trackerName)) {
-                [batteryRemaining, batteryVoltage, chargeStatus] = trackerBattery.get(trackerName);
-            } else {
-                if (isWirelessBT(trackerName)) {
-                    log(`Reading battery info for ${trackerName}...`);
-                    let buffer = await bluetooth.read(
-                        trackerName,
-                        batteryService,
-                        batteryLevelCharacteristic
-                    );
-                    if (!buffer) return null;
-                    let dataView = new DataView(buffer);
-                    batteryRemaining = dataView.getUint8(0);
-                } else {
+        // Check if battery info is already available
+        if (trackerBattery.has(trackerName)) {
+            const [batteryRemaining, batteryVoltage, chargeStatus] =
+                trackerBattery.get(trackerName);
+            this.logBatteryInfo(trackerName, batteryRemaining, batteryVoltage, chargeStatus);
+            return { batteryRemaining, batteryVoltage, chargeStatus };
+        }
+
+        // Attempt to read battery info for wireless BT trackers
+        if (isWirelessBT(trackerName)) {
+            log(`Reading battery info for ${trackerName}...`);
+            try {
+                const buffer = await bluetooth.read(
+                    trackerName,
+                    batteryService,
+                    batteryLevelCharacteristic
+                );
+                if (!buffer) {
                     log(`Tracker ${trackerName} battery info not found`);
                     return null;
                 }
+                const batteryRemaining = new DataView(buffer).getUint8(0);
+                let batteryVoltage,
+                    chargeStatus = undefined;
+                trackerBattery.set(trackerName, [batteryRemaining, batteryVoltage, chargeStatus]);
+                this.logBatteryInfo(trackerName, batteryRemaining, batteryVoltage, chargeStatus);
+                return { batteryRemaining, batteryVoltage, chargeStatus };
+            } catch (err) {
+                error(`Error getting battery info for ${trackerName}: ${err}`);
+                return null;
             }
-        } catch (err) {
-            error(`Error getting battery info for ${trackerName}: ${err}`);
+        } else {
+            log(`Tracker ${trackerName} battery info not found`);
+            return null;
         }
+    }
 
+    private logBatteryInfo(
+        trackerName: string,
+        batteryRemaining: string | number | undefined,
+        batteryVoltage: string | number | undefined,
+        chargeStatus: string | undefined
+    ) {
         log(`Tracker ${trackerName} battery remaining: ${batteryRemaining}%`);
         log(`Tracker ${trackerName} battery voltage: ${batteryVoltage}`);
         log(`Tracker ${trackerName} charge status: ${chargeStatus}`);
-
-        trackerBattery.set(trackerName, [batteryRemaining, batteryVoltage, chargeStatus]);
-
-        this.emit("battery", trackerName, batteryRemaining, batteryVoltage, chargeStatus);
-
-        return { batteryRemaining, batteryVoltage, chargeStatus };
     }
 
     /**
@@ -826,15 +840,10 @@ export default class HaritoraX extends EventEmitter {
      **/
 
     getActiveTrackers() {
-        if (comEnabled && bluetoothEnabled) {
-            return activeDevices.concat(bluetooth.getActiveTrackers());
-        } else if (comEnabled) {
-            return activeDevices;
-        } else if (bluetoothEnabled) {
-            return bluetooth.getActiveTrackers();
-        } else {
-            return null;
-        }
+        if (!comEnabled && !bluetoothEnabled) return null;
+        const comTrackers = comEnabled ? activeDevices : [];
+        const bluetoothTrackers = bluetoothEnabled ? bluetooth.getActiveTrackers() : [];
+        return comTrackers.concat(bluetoothTrackers);
     }
 
     /**
@@ -848,124 +857,82 @@ export default class HaritoraX extends EventEmitter {
      * @returns {Object} The tracker settings (sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection).
      **/
     async getTrackerSettings(trackerName?: string, forceBluetoothRead?: boolean) {
-        if (trackerModelEnabled === "wired") {
-            let [sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection] =
-                trackerSettings.get("HaritoraXWired");
-
-            log(`Tracker HaritoraX settings:`);
+        const logSettings = (
+            name: string,
+            sensorMode: number,
+            fpsMode: number,
+            correction: string[],
+            ankle: boolean
+        ) => {
+            log(`Tracker ${name} settings:`);
             log(`Sensor mode: ${sensorMode}`);
             log(`FPS mode: ${fpsMode}`);
-            log(`Sensor auto correction: ${sensorAutoCorrection}`);
-            log(`Ankle motion detection: ${ankleMotionDetection}`);
+            log(`Sensor auto correction: ${correction}`);
+            log(`Ankle motion detection: ${ankle}`);
+        };
 
+        if (trackerModelEnabled === "wired") {
+            const settings = trackerSettings.get("HaritoraXWired");
+            logSettings("HaritoraX", ...settings);
             return {
-                sensorMode,
-                fpsMode,
-                sensorAutoCorrection,
-                ankleMotionDetection,
+                sensorMode: settings[0],
+                fpsMode: settings[1],
+                sensorAutoCorrection: settings[2],
+                ankleMotionDetection: settings[3],
             };
-        } else if (trackerModelEnabled === "wireless") {
-            if (
-                (forceBluetoothRead && bluetoothEnabled && isWirelessBT(trackerName)) ||
-                (bluetoothEnabled && isWirelessBT(trackerName)) ||
-                !trackerSettings.has(trackerName)
-            ) {
-                log(`Forcing BLE reading for ${trackerName}`);
+        } else if (
+            trackerModelEnabled === "wireless" &&
+            bluetoothEnabled &&
+            isWirelessBT(trackerName)
+        ) {
+            if (forceBluetoothRead || !trackerSettings.has(trackerName)) {
                 try {
-                    // Attempt to read the sensor mode value
-                    const sensorModeRead = await bluetooth.read(
-                        trackerName,
-                        settingsService,
-                        sensorModeCharacteristic
+                    const readCharacteristic = async (characteristic: string) => {
+                        const read = await bluetooth.read(
+                            trackerName,
+                            settingsService,
+                            characteristic
+                        );
+                        return read ? new DataView(read).getInt8(0) : null;
+                    };
+
+                    const sensorModeValue = await readCharacteristic(sensorModeCharacteristic);
+                    const fpsModeValue = await readCharacteristic(fpsModeCharacteristic);
+                    const correctionValue = await readCharacteristic(correctionCharacteristic);
+                    const ankleValue = await readCharacteristic(ankleCharacteristic);
+
+                    const sensorMode = sensorModeValue === 5 ? 1 : 2;
+                    const fpsMode = fpsModeValue === 1 ? 50 : 100;
+                    const sensorAutoCorrection = ["accel", "gyro", "mag"].filter(
+                        (_, i) => correctionValue & (1 << i)
                     );
-                    const sensorModeValue = sensorModeRead
-                        ? new DataView(sensorModeRead).getInt8(0)
-                        : null;
+                    const ankleMotionDetection = ankleValue === 1;
 
-                    // Attempt to read the fps mode value
-                    const fpsModeRead = await bluetooth.read(
+                    logSettings(
                         trackerName,
-                        settingsService,
-                        fpsModeCharacteristic
-                    );
-                    const fpsModeValue = fpsModeRead ? new DataView(fpsModeRead).getInt8(0) : null;
-
-                    // Attempt to read the correction value
-                    const correctionRead = await bluetooth.read(
-                        trackerName,
-                        settingsService,
-                        correctionCharacteristic
-                    );
-                    const correctionValue = correctionRead
-                        ? new DataView(correctionRead).getInt8(0)
-                        : null;
-
-                    // Attempt to read the ankle value
-                    const ankleRead = await bluetooth.read(
-                        trackerName,
-                        settingsService,
-                        ankleCharacteristic
-                    );
-                    const ankleValue = ankleRead ? new DataView(ankleRead).getInt8(0) : null;
-
-                    let sensorMode;
-                    if (sensorModeValue === 5) sensorMode = 1;
-                    else sensorMode = 2;
-
-                    let fpsMode;
-                    if (fpsModeValue === 1) fpsMode = 50;
-                    else fpsMode = 100;
-
-                    let sensorAutoCorrection = [];
-                    if (correctionValue & 0x01) sensorAutoCorrection.push("accel");
-                    if (correctionValue & 0x02) sensorAutoCorrection.push("gyro");
-                    if (correctionValue & 0x04) sensorAutoCorrection.push("mag");
-
-                    let ankleMotionDetection = ankleValue === 1;
-
-                    log(`Tracker ${trackerName} raw settings:`);
-                    log(`Sensor mode: ${sensorModeValue}`);
-                    log(`FPS mode: ${fpsModeValue}`);
-                    log(`Sensor auto correction: ${correctionValue}`);
-                    log(`Ankle motion detection: ${ankleValue}`);
-
-                    log(`Tracker ${trackerName} settings:`);
-                    log(`Sensor mode: ${sensorMode}`);
-                    log(`FPS mode: ${fpsMode}`);
-                    log(`Sensor auto correction: ${sensorAutoCorrection}`);
-                    log(`Ankle motion detection: ${ankleMotionDetection}`);
-
-                    return {
                         sensorMode,
                         fpsMode,
                         sensorAutoCorrection,
-                        ankleMotionDetection,
-                    };
+                        ankleMotionDetection
+                    );
+
+                    return { sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection };
                 } catch (err) {
                     error(`Error reading characteristic: ${err}`);
                 }
             } else {
-                // GX trackers (or not forcing BLE reading)
-                log(`Getting tracker settings for ${trackerName} (GX/no BLE reading)`);
-                if (trackerSettings.has(trackerName)) {
-                    let [sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection] =
-                        trackerSettings.get(trackerName);
-                    log(`Tracker ${trackerName} settings:`);
-                    log(`Sensor mode: ${sensorMode}`);
-                    log(`FPS mode: ${fpsMode}`);
-                    log(`Sensor auto correction: ${sensorAutoCorrection}`);
-                    log(`Ankle motion detection: ${ankleMotionDetection}`);
-                    return {
-                        sensorMode,
-                        fpsMode,
-                        sensorAutoCorrection,
-                        ankleMotionDetection,
-                    };
-                } else {
-                    log(`Tracker ${trackerName} settings not found`);
-                    return null;
-                }
+                const settings = trackerSettings.get(trackerName);
+                logSettings(trackerName, ...settings);
+                return {
+                    sensorMode: settings[0],
+                    fpsMode: settings[1],
+                    sensorAutoCorrection: settings[2],
+                    ankleMotionDetection: settings[3],
+                };
             }
+        } else {
+            log(`Tracker ${trackerName} settings not found`);
+            return null;
         }
     }
 
@@ -979,14 +946,13 @@ export default class HaritoraX extends EventEmitter {
      * @returns {Map} The tracker settings map.
      **/
     getTrackerSettingsRaw(trackerName: string) {
-        if (trackerSettingsRaw.has(trackerName)) {
-            let hexValue = trackerSettingsRaw.get(trackerName);
+        const hexValue = trackerSettingsRaw.get(trackerName);
+        if (hexValue) {
             log(`Tracker ${trackerName} raw hex settings: ${hexValue}`);
-            return hexValue;
         } else {
             log(`Tracker ${trackerName} raw hex settings not found`);
-            return null;
         }
+        return hexValue;
     }
 
     /**
@@ -999,15 +965,14 @@ export default class HaritoraX extends EventEmitter {
      * @returns {Map} The tracker button map.
      **/
     getTrackerButtons(trackerName: string) {
-        if (trackerButtons.has(trackerName)) {
-            let [mainButton, subButton] = trackerButtons.get(trackerName);
-            log(`Tracker ${trackerName} main button: ${mainButton}`);
-            log(`Tracker ${trackerName} sub button: ${subButton}`);
+        const buttons = trackerButtons.get(trackerName);
+        if (buttons) {
+            const [mainButton, subButton] = buttons;
+            log(`Tracker ${trackerName} main button: ${mainButton}, sub button: ${subButton}`);
             return { mainButton, subButton };
-        } else {
-            log(`Tracker ${trackerName} buttons not found`);
-            return null;
         }
+        log(`Tracker ${trackerName} buttons not found`);
+        return null;
     }
 
     /**
@@ -1026,22 +991,23 @@ export default class HaritoraX extends EventEmitter {
             this.emit("mag", trackerName, magStatus);
             return magStatus;
         } else {
-            if (isWirelessBT(trackerName)) {
-                try {
-                    // Read from BLE
-                    const magBuffer = await bluetooth.read(
-                        trackerName,
-                        trackerService,
-                        magnetometerCharacteristic
-                    );
-                    const magStatus = magBuffer ? Buffer.from(magBuffer).toString("utf-8") : null;
-                    this.emit("mag", trackerName, magStatus);
-                    return processMagData(magStatus, trackerName);
-                } catch (err) {
-                    error(`Error reading magnetometer status: ${err}`);
-                }
-            } else {
+            // Read from BLE device
+            if (!isWirelessBT(trackerName)) {
                 log(`Tracker ${trackerName} magnetometer status not found`);
+                return null;
+            }
+
+            try {
+                const magBuffer = await bluetooth.read(
+                    trackerName,
+                    trackerService,
+                    magnetometerCharacteristic
+                );
+                const magStatus = magBuffer ? Buffer.from(magBuffer).toString("utf-8") : null;
+                this.emit("mag", trackerName, magStatus);
+                return processMagData(magStatus, trackerName);
+            } catch (err) {
+                error(`Error reading magnetometer status: ${err}`);
                 return null;
             }
         }
@@ -1453,8 +1419,8 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
         };
 
         return { rotation, gravity, ankle, magStatus };
-    } catch (error: any) {
-        throw new Error("Error decoding IMU packet: " + error.message);
+    } catch (err) {
+        throw new Error(`Error decoding IMU packet: ${err}`);
     }
 }
 
@@ -1500,11 +1466,6 @@ function processTrackerData(data: string, trackerName: string) {
  * @param {string} trackerName - The name of the tracker.
  * @fires haritora#mag
  **/
-
-const GREEN = 3;
-const YELLOW = 2;
-const RED_2 = 1;
-const RED = 0;
 
 function processMagData(data: string, trackerName: string) {
     if (!data) return null;
@@ -1589,45 +1550,30 @@ function getMagStatus(magData: number) {
 function processSettingsData(data: string, trackerName: string) {
     // TODO: implement this for wireless BT trackers
     // example: s:{"imu_mode":1, "imu_num":6, "magf_status":"020200", "speed_mode":2, "dcal_flags":"04", "detected":"04004C6C"}
-    let sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection;
-    let sensorAutoCorrectionList: string[] = [];
-
     try {
-        const jsonData = JSON.parse(data);
-        sensorMode = jsonData.imu_mode;
-        fpsMode = jsonData.speed_mode === 1 ? 100 : 50;
-        sensorAutoCorrection = jsonData.dcal_flags;
+        const {
+            imu_mode: sensorMode,
+            speed_mode: speedMode,
+            dcal_flags: dcalFlags,
+        } = JSON.parse(data);
+        const fpsMode = speedMode === 1 ? 100 : 50;
+        const sensorAutoCorrectionList = ["accel", "gyro", "mag"].filter(
+            (_, i) => dcalFlags & (1 << i)
+        );
 
-        if (sensorAutoCorrection & 0x01) sensorAutoCorrectionList.push("accel");
-        if (sensorAutoCorrection & 0x02) sensorAutoCorrectionList.push("gyro");
-        if (sensorAutoCorrection & 0x04) sensorAutoCorrectionList.push("mag");
+        log(`Tracker ${trackerName} settings:`);
+        log(`Sensor mode: ${sensorMode}`);
+        log(`FPS mode: ${fpsMode}`);
+        log(`Sensor auto correction: ${sensorAutoCorrectionList.join(", ")}`);
+
+        trackerSettings.set(trackerName, [sensorMode, fpsMode, sensorAutoCorrectionList, false]);
+        main.emit("settings", trackerName, sensorMode, fpsMode, dcalFlags);
+
+        return { sensorMode, fpsMode, sensorAutoCorrectionList };
     } catch (err) {
         error(`Error processing settings data for ${trackerName}: ${err}`);
         return null;
     }
-
-    log(`Tracker ${trackerName} settings:`);
-    log(`Sensor mode: ${sensorMode}`);
-    log(`FPS mode: ${fpsMode}`);
-    log(`Sensor auto correction: ${sensorAutoCorrectionList}`);
-    log(`Ankle motion detection: ${ankleMotionDetection}`);
-
-    trackerSettings.set(trackerName, [
-        sensorMode,
-        fpsMode,
-        sensorAutoCorrectionList,
-        ankleMotionDetection,
-    ]);
-
-    main.emit(
-        "settings",
-        trackerName,
-        sensorMode,
-        fpsMode,
-        sensorAutoCorrection,
-        ankleMotionDetection
-    );
-    return { sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection };
 }
 
 /**
@@ -1642,21 +1588,12 @@ function processSettingsData(data: string, trackerName: string) {
  **/
 
 function processInfoData(data: string, trackerName: string) {
+    // example: {"model":"MC2B", "version":"1.7.10", "serial no":"0000000", "comm":"BLT", "comm_next":"BTSPP"}
     try {
-        // example: {"model":"MC2B", "version":"1.7.10", "serial no":"0000000", "comm":"BLT", "comm_next":"BTSPP"}
-        let serial, version, model, comm, comm_next;
-        const jsonData = JSON.parse(data);
-
-        version = jsonData.version as string;
-        model = jsonData.model as string;
-        serial = jsonData["serial no"] as string;
-        comm = jsonData.comm as string;
-        comm_next = jsonData.comm_next as string;
-
+        const { version, model, "serial no": serial, comm, comm_next } = JSON.parse(data);
         log(`Tracker ${trackerName} info: ${version}, ${model}, ${serial}, ${comm}, ${comm_next}`);
         main.emit("info", trackerName, version, model, serial, comm, comm_next);
         deviceInformation.set(trackerName, [version, model, serial, comm, comm_next]);
-
         return { version, model, serial, comm, comm_next };
     } catch (error) {
         log(`Error processing info data for tracker ${trackerName}: ${error}`);
@@ -1678,105 +1615,141 @@ function processInfoData(data: string, trackerName: string) {
  **/
 
 function processButtonData(data: string, trackerName: string, characteristic?: string) {
-    if (!canSendButtonData) return;
-
-    const MAIN_BUTTON_INDEX = 0;
-    const SUB_BUTTON_INDEX = 1;
-    const SUB2_BUTTON_INDEX = 2;
-    const TRACKER_OFF = false;
-    const TRACKER_ON = true;
+    if (!canSendButtonData) return false;
 
     let currentButtons = trackerButtons.get(trackerName) || [0, 0, 0];
-    let isOn = undefined;
     let buttonPressed = undefined;
+    let isOn = true;
 
     try {
-        if (trackerName && isWirelessBT(trackerName)) {
-            if (characteristic === "MainButton") {
-                currentButtons[MAIN_BUTTON_INDEX] += 1;
-                buttonPressed = "main";
-            } else if (characteristic === "SecondaryButton") {
-                currentButtons[SUB_BUTTON_INDEX] += 1;
-                buttonPressed = "sub";
-            }
-            isOn = TRACKER_ON; // Tracker is always on when connected via bluetooth, because you need to be connected to read button data
-        } else if (comEnabled) {
-            if (trackerModelEnabled === "wireless") {
-                let newMainButtonState = parseInt(data[6], 16);
-                let newSubButtonState = parseInt(data[9], 16);
-
-                if (currentButtons[MAIN_BUTTON_INDEX] !== newMainButtonState) {
-                    currentButtons[MAIN_BUTTON_INDEX] = newMainButtonState;
-                    if (newMainButtonState !== 0) {
-                        buttonPressed = "main";
-                    }
-                }
-
-                if (currentButtons[SUB_BUTTON_INDEX] !== newSubButtonState) {
-                    currentButtons[SUB_BUTTON_INDEX] = newSubButtonState;
-                    if (newSubButtonState !== 0) {
-                        buttonPressed = "sub";
-                    }
-                }
-
-                if (
-                    data[0] === "0" ||
-                    data[7] === "f" ||
-                    data[8] === "f" ||
-                    data[10] === "f" ||
-                    data[11] === "f"
-                ) {
-                    log(`Tracker ${trackerName} is off/turning off...`);
-                    log(`Raw data: ${data}`);
-                    isOn = TRACKER_OFF;
-                } else {
-                    log(`Tracker ${trackerName} is on/turning on...`);
-                    log(`Raw data: ${data}`);
-                    isOn = TRACKER_ON;
-                }
-            } else if (
-                trackerModelEnabled === "wired" ||
-                trackerName.startsWith("HaritoraXWired")
-            ) {
-                console.log("wired")
-                // example data: t:{"id":"button2", "type":"click", "start_time":6937744, "option":""}
-                // TODO: do more testing with wired trackers, find different "type"(s) and what "start_time" and "option" mean
-                const buttonData = JSON.parse(data);
-                if (buttonData.id === "button1") {
-                    currentButtons[MAIN_BUTTON_INDEX] += 1;
-                    buttonPressed = "main";
-                } else if (buttonData.id === "button2") {
-                    currentButtons[SUB_BUTTON_INDEX] += 1;
-                    buttonPressed = "sub";
-                } else if (buttonData.id === "button3") {
-                    currentButtons[SUB2_BUTTON_INDEX] += 1;
-                    buttonPressed = "sub2";
-                }
-                isOn = TRACKER_ON;
-                trackerName = "HaritoraXWired";
-            }
+        if (isWirelessBT(trackerName)) {
+            buttonPressed = processWirelessBTTrackerData(characteristic, currentButtons);
+        } else if (comEnabled && trackerModelEnabled === "wireless") {
+            const { buttonPressed: newButtonPressed, isOn: newIsOn } = processWirelessTrackerData(
+                data,
+                trackerName,
+                currentButtons
+            );
+            buttonPressed = newButtonPressed;
+            isOn = newIsOn;
+        } else if (comEnabled && trackerModelEnabled === "wired") {
+            buttonPressed = processWiredTrackerData(data, trackerName, currentButtons);
         }
+
+        logButtonPress(trackerName, buttonPressed, currentButtons);
+        trackerButtons.set(trackerName, currentButtons);
+        main.emit("button", trackerName, buttonPressed, isOn, ...currentButtons);
+
+        /*main.emit(
+            "button",
+            trackerName,
+            buttonPressed,
+            isOn,
+            currentButtons[MAIN_BUTTON_INDEX],
+            currentButtons[SUB_BUTTON_INDEX],
+            currentButtons[SUB2_BUTTON_INDEX]
+        );*/
+
+        return true;
     } catch (err) {
         error(`Error processing button data for ${trackerName}: ${err}`);
         return false;
     }
+}
 
-    trackerButtons.set(trackerName, currentButtons);
-    main.emit(
-        "button",
-        trackerName,
-        buttonPressed,
-        isOn,
-        currentButtons[MAIN_BUTTON_INDEX],
-        currentButtons[SUB_BUTTON_INDEX],
-        currentButtons[SUB2_BUTTON_INDEX]
-    );
+function processWirelessTrackerData(data: string, trackerName: string, currentButtons: number[]) {
+    let newMainButtonState = parseInt(data[6], 16);
+    let newSubButtonState = parseInt(data[9], 16);
+    let buttonPressed = undefined;
+    let isOn = undefined;
 
-    log(`Tracker ${trackerName} button press: ${buttonPressed}`);
-    log(`Tracker ${trackerName} main button: ${currentButtons[MAIN_BUTTON_INDEX]}`);
-    log(`Tracker ${trackerName} sub button: ${currentButtons[SUB_BUTTON_INDEX]}`);
-    log(`Tracker ${trackerName} sub2 button: ${currentButtons[SUB2_BUTTON_INDEX]}`);
-    return true;
+    if (currentButtons[MAIN_BUTTON_INDEX] !== newMainButtonState) {
+        currentButtons[MAIN_BUTTON_INDEX] = newMainButtonState;
+        if (newMainButtonState !== 0) {
+            buttonPressed = "main";
+        }
+    }
+
+    if (currentButtons[SUB_BUTTON_INDEX] !== newSubButtonState) {
+        currentButtons[SUB_BUTTON_INDEX] = newSubButtonState;
+        if (newSubButtonState !== 0) {
+            buttonPressed = "sub";
+        }
+    }
+
+    if (
+        data[0] === "0" ||
+        data[7] === "f" ||
+        data[8] === "f" ||
+        data[10] === "f" ||
+        data[11] === "f"
+    ) {
+        log(`Tracker ${trackerName} is off/turning off...`);
+        log(`Raw data: ${data}`);
+        isOn = TRACKER_OFF;
+    } else {
+        log(`Tracker ${trackerName} is on/turning on...`);
+        log(`Raw data: ${data}`);
+        isOn = TRACKER_ON;
+    }
+
+    return { buttonPressed, isOn };
+}
+
+function processWirelessBTTrackerData(
+    characteristic: string,
+    currentButtons: number[]
+): string | undefined {
+    switch (characteristic) {
+        case "MainButton":
+            currentButtons[0]++;
+            return "main";
+        case "SecondaryButton":
+            currentButtons[1]++;
+            return "sub";
+        default:
+            return undefined;
+    }
+}
+
+function processWiredTrackerData(
+    data: string,
+    trackerName: string,
+    currentButtons: number[]
+): string | undefined {
+    // example data: t:{"id":"button2", "type":"click", "start_time":6937744, "option":""}
+    // TODO: do more testing with wired trackers, find different "type"(s) and what "start_time" and "option" mean
+    const buttonData = JSON.parse(data);
+    if (trackerName.startsWith("HaritoraXWired")) {
+        if (buttonData.id === "button1") {
+            currentButtons[MAIN_BUTTON_INDEX] += 1;
+            return "main";
+        } else if (buttonData.id === "button2") {
+            currentButtons[SUB_BUTTON_INDEX] += 1;
+            return "sub";
+        } else if (buttonData.id === "button3") {
+            currentButtons[SUB2_BUTTON_INDEX] += 1;
+            return "sub2";
+        }
+    }
+
+    return undefined;
+}
+
+function logButtonPress(
+    trackerName: string,
+    buttonPressed: string | undefined,
+    currentButtons: number[]
+) {
+    if (buttonPressed) {
+        console.log(
+            `Button ${buttonPressed} pressed on tracker ${trackerName}. Current state: ${currentButtons}`
+        );
+    } else {
+        console.log(
+            `No button press detected for tracker ${trackerName}. Current state: ${currentButtons}`
+        );
+    }
 }
 
 /**
@@ -1792,34 +1765,53 @@ function processButtonData(data: string, trackerName: string, characteristic?: s
  **/
 
 function processBatteryData(data: string, trackerName: string) {
-    let batteryData: [number, number, string] = [undefined, undefined, undefined];
+    const batteryData: [number | undefined, number | undefined, string | undefined] = [
+        undefined,
+        undefined,
+        undefined,
+    ];
+    const logBatteryInfo = (
+        remaining: number | undefined,
+        voltage: number | undefined,
+        status: string | undefined
+    ) => {
+        if (remaining !== undefined) log(`Tracker ${trackerName} remaining: ${remaining}%`);
+        if (voltage !== undefined) log(`Tracker ${trackerName} voltage: ${voltage}`);
+        if (status !== undefined) log(`Tracker ${trackerName} Status: ${status}`);
+    };
 
     if (comEnabled) {
         try {
             const batteryInfo = JSON.parse(data);
-            log(`Tracker ${trackerName} remaining: ${batteryInfo["battery remaining"]}%`);
-            log(`Tracker ${trackerName} voltage: ${batteryInfo["battery voltage"]}`);
-            log(`Tracker ${trackerName} Status: ${batteryInfo["charge status"]}`);
             batteryData[0] = batteryInfo["battery remaining"];
             batteryData[1] = batteryInfo["battery voltage"];
             batteryData[2] = batteryInfo["charge status"];
+            logBatteryInfo(batteryData[0], batteryData[1], batteryData[2]);
         } catch (err) {
             error(`Error parsing battery data JSON for ${trackerName}: ${err}`);
         }
-    } else if (trackerModelEnabled === "wireless" && isWirelessBT(trackerName) && bluetoothEnabled) {
+    } else if (
+        trackerModelEnabled === "wireless" &&
+        isWirelessBT(trackerName) &&
+        bluetoothEnabled
+    ) {
         try {
-            let batteryRemainingHex = Buffer.from(data, "base64").toString("hex");
+            const batteryRemainingHex = Buffer.from(data, "base64").toString("hex");
             batteryData[0] = parseInt(batteryRemainingHex, 16);
             log(`Tracker ${trackerName} battery remaining: ${batteryData[0]}%`);
             log(`Tracker ${trackerName} battery remaining (hex): ${batteryRemainingHex}`);
-        } catch {
-            error(`Error converting battery data to hex for ${trackerName}: ${data}`);
+        } catch (err) {
+            error(`Error converting battery data to hex for ${trackerName}: ${err}`);
         }
     }
 
     trackerBattery.set(trackerName, batteryData);
     main.emit("battery", trackerName, ...batteryData);
 }
+
+/*
+ * Helper functions
+ */
 
 function log(message: string) {
     if (!debug) return;
@@ -1838,7 +1830,24 @@ function error(message: string) {
 }
 
 function isWirelessBT(trackerName: string): boolean {
-    return (trackerName.startsWith("HaritoraX") && !trackerName.startsWith("HaritoraXWired"));
+    return trackerName.startsWith("HaritoraX") && !trackerName.startsWith("HaritoraXWired");
 }
+
+function calculateSensorAutoCorrectionBits(sensorAutoCorrection: SensorCorrectionKey[]): number {
+    return sensorAutoCorrection.reduce((acc, curr) => acc | SENSOR_CORRECTION_BITS[curr], 0);
+}
+
+function writeToBluetooth(trackerName: string, characteristic: string, value: number) {
+    const buffer = Buffer.from([value]);
+    bluetooth.write(trackerName, settingsService, characteristic, buffer);
+}
+
+function logSettings(trackerName: string, settings: any, rawHexData?: string) {
+    log(`Setting the following settings onto tracker ${trackerName}:`);
+    Object.entries(settings).forEach(([key, value]) => log(`${key}: ${value}`));
+    if (rawHexData) log(`Raw hex data calculated to be sent: ${rawHexData}`);
+}
+
+type TrackerModel = "wireless" | "wired";
 
 export { HaritoraX };

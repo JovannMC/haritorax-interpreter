@@ -43,6 +43,8 @@ let activeDevices: ActiveDevice[] = [];
 
 let allowReconnect = true;
 
+let connectingDevices = new Set<string>();
+
 export default class Bluetooth extends EventEmitter {
     constructor() {
         super();
@@ -62,9 +64,9 @@ export default class Bluetooth extends EventEmitter {
                 return false;
             }
         };
-    
+
         log("Connected to bluetooth");
-    
+
         if (noble._state === "poweredOn") {
             return startScanning();
         } else {
@@ -83,28 +85,30 @@ export default class Bluetooth extends EventEmitter {
             advertisement: { localName },
         } = peripheral;
         if (!localName || !localName.startsWith("HaritoraX")) return;
-
+    
         const deviceExists = activeDevices.some(
             (device) => device[0] === localName || device[1] === peripheral
         );
-        if (deviceExists) return;
-
+        if (deviceExists || connectingDevices.has(peripheral.id)) return;
+    
         log(`Found device: ${localName}`);
-
+        connectingDevices.add(peripheral.id); // Add to connecting devices
+    
         try {
             await connectPeripheral(peripheral);
             log(`(bluetooth) Connected to ${localName}`);
             this.emit("connect", peripheral);
-
+    
             const { services, characteristics } = await discoverServicesAndCharacteristics(
                 peripheral
             );
             updateActiveDevices(localName, peripheral, services, characteristics);
         } catch (err) {
             error(`Error during discovery or connection process: ${err}`);
+        } finally {
+            connectingDevices.delete(peripheral.id); // Remove from connecting devices once done
         }
-
-        // TODO: add reason (manual, timeout, etc.)
+    
         peripheral.on("disconnect", () => {
             if (!allowReconnect) return;
             log(`Disconnected from ${localName}`);
@@ -113,9 +117,11 @@ export default class Bluetooth extends EventEmitter {
             if (index !== -1) {
                 activeDevices.splice(index, 1);
             }
-
+    
             setTimeout(() => {
-                noble.startScanning([], true);
+                if (!connectingDevices.has(peripheral.id)) { // Check before reconnecting
+                    noble.startScanning([], true);
+                }
             }, 3000);
         });
     }
@@ -144,8 +150,6 @@ export default class Bluetooth extends EventEmitter {
             throw new Error(`Device ${localName} not found`);
         }
 
-        await ensureBLEDiscovered();
-
         const serviceInstance = device[2].find((s: Service) => s.uuid === service);
         if (!serviceInstance) throw new Error(`Service ${service} not found`);
 
@@ -163,8 +167,6 @@ export default class Bluetooth extends EventEmitter {
         characteristic: string,
         data: any
     ): Promise<void> {
-        await ensureBLEDiscovered();
-
         const device = getDevice(localName);
         const serviceInstance = getService(device, service);
         const characteristicInstance = getCharacteristic(serviceInstance, characteristic);
@@ -337,6 +339,13 @@ async function writeCharacteristic(
  * General helper functions
  */
 
+async function ensureBLEDiscovered(): Promise<void> {
+    while (!(await areAllBLEDiscovered())) {
+        log("Waiting for all services and characteristics to be discovered...");
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+}
+
 const importantServices = ["ef84369a90a911eda1eb0242ac120002", "180f"];
 const importantCharacteristics = [
     "2a19",
@@ -345,48 +354,30 @@ const importantCharacteristics = [
     "ef8445c290a911eda1eb0242ac120002",
     "ef84c30090a911eda1eb0242ac120002",
     "ef84c30590a911eda1eb0242ac120002",
-    "00dbf30690aa11eda1eb0242ac120002",
 ];
 
-async function ensureBLEDiscovered(): Promise<void> {
-    let allDiscovered = false;
-
-    while (!allDiscovered) {
-        log("Waiting for all services and characteristics to be discovered...");
-
-        allDiscovered = true; // Assume all are discovered, prove otherwise
-
-        for (const serviceUuid of importantServices) {
-            if (
-                !activeDevices.find((device: any) =>
-                    device[2].find((service: any) => service.uuid === serviceUuid)
-                )
-            ) {
-                allDiscovered = false;
-                break; // Exit the loop early if a service is not found
-            }
-        }
-
-        if (allDiscovered) {
-            for (const characteristicUuid of importantCharacteristics) {
-                if (
-                    !activeDevices.find((device: any) =>
-                        device[3].find(
-                            (characteristic: any) => characteristic.uuid === characteristicUuid
-                        )
-                    )
-                ) {
-                    allDiscovered = false;
-                    break; // Exit the loop early if a characteristic is not found
-                }
-            }
-        }
-
-        if (!allDiscovered) {
-            // If not all services or characteristics are discovered, wait for a second
-            await new Promise((resolve) => setTimeout(resolve, 1000));
+async function areAllBLEDiscovered(): Promise<boolean> {
+    for (const serviceUuid of importantServices) {
+        if (
+            !activeDevices.find((device: any) =>
+                device[2].find((service: any) => service.uuid === serviceUuid)
+            )
+        ) {
+            return false;
         }
     }
+
+    for (const characteristicUuid of importantCharacteristics) {
+        if (
+            !activeDevices.find((device: any) =>
+                device[3].find((characteristic: any) => characteristic.uuid === characteristicUuid)
+            )
+        ) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 function emitData(

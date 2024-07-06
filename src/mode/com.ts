@@ -9,7 +9,7 @@ let heartbeatInterval: number; // in milliseconds
 const BAUD_RATE = 500000; // from the haritora_setting.json in the HaritoraConfigurator
 
 // For HaritoraX Wireless
-const trackerAssignment = new Map([
+const trackerAssignment: Map<string, string[]> = new Map([
     // tracker part, [tracker id, port, port id]
     ["DONGLE", ["0", "", ""]],
     ["chest", ["1", "", ""]],
@@ -23,17 +23,17 @@ const trackerAssignment = new Map([
 ]);
 
 // For HaritoraX Wireless
-const deviceInformation = new Map([
+const deviceInformation: Map<string, string[]> = new Map([
     // deviceName, [version, model, serial]
-    ["DONGLE", ["", "", ""]],
-    ["rightKnee", ["", "", ""]],
-    ["rightAnkle", ["", "", ""]],
-    ["hip", ["", "", ""]],
-    ["chest", ["", "", ""]],
-    ["leftKnee", ["", "", ""]],
-    ["leftAnkle", ["", "", ""]],
-    ["leftElbow", ["", "", ""]],
-    ["rightElbow", ["", "", ""]],
+    ["DONGLE", ["", "", "", "", ""]],
+    ["chest", ["", "", "", "", ""]],
+    ["leftKnee", ["", "", "", "", ""]],
+    ["leftAnkle", ["", "", "", "", ""]],
+    ["rightKnee", ["", "", "", "", ""]],
+    ["rightAnkle", ["", "", "", "", ""]],
+    ["hip", ["", "", "", "", ""]],
+    ["leftElbow", ["", "", "", "", ""]],
+    ["rightElbow", ["", "", "", "", ""]],
 ]);
 
 // Stores the ports that are currently active as objects for access later
