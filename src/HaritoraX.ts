@@ -5,8 +5,8 @@ import { EventEmitter } from "events";
 import COM from "./mode/com.js";
 import Bluetooth from "./mode/bluetooth.js";
 
-let debug = 0;
-let printTrackerIMUData = false;
+let debug = false;
+let printIMU = false;
 
 let com: COM;
 let bluetooth: Bluetooth;
@@ -225,7 +225,7 @@ let trackerModelEnabled: string;
  * let device = new HaritoraXWireless(2);
  **/
 export default class HaritoraX extends EventEmitter {
-    constructor(trackerModel: string, debugMode = 0, printTrackerIMUProcessing = false) {
+    constructor(trackerModel: string, debugMode = 0, printIMUData = false) {
         super();
 
         const validTrackerModels = ["wireless", "wired"];
@@ -237,23 +237,23 @@ export default class HaritoraX extends EventEmitter {
             );
         }
 
-        if (![0, 1, 2].includes(debugMode)) {
-            throw new Error(`Invalid debug mode: ${debugMode}. Valid modes are: 0, 1, 2`);
+        if (typeof debugMode !== "boolean") {
+            throw new Error(`Invalid debugMode value: ${debugMode}. It should be a boolean.`);
         }
 
         // Validate printTrackerIMUProcessing
-        if (typeof printTrackerIMUProcessing !== "boolean") {
+        if (typeof printIMUData !== "boolean") {
             throw new Error(
-                `Invalid printTrackerIMUProcessing value: ${printTrackerIMUProcessing}. It should be a boolean.`
+                `Invalid printTrackerIMUProcessing value: ${printIMUData}. It should be a boolean.`
             );
         }
 
         trackerModelEnabled = trackerModel;
         debug = debugMode;
-        printTrackerIMUData = printTrackerIMUProcessing;
+        printIMU = printIMUData;
         main = this;
         log(`Set debug mode: ${debug}`);
-        log(`Print tracker IMU processing: ${printTrackerIMUData}`);
+        log(`Print tracker IMU processing: ${printIMU}`);
     }
 
     /**
@@ -267,8 +267,8 @@ export default class HaritoraX extends EventEmitter {
      * device.startConnection("COM");
      **/
     startConnection(connectionMode: string, portNames?: string[], heartbeatInterval?: number) {
-        com = new COM(trackerModelEnabled, debug, heartbeatInterval);
-        bluetooth = new Bluetooth(debug);
+        com = new COM(trackerModelEnabled, heartbeatInterval);
+        bluetooth = new Bluetooth();
 
         if (connectionMode === "com") {
             const connectionStarted = com.startConnection(portNames);
@@ -1029,11 +1029,12 @@ export default class HaritoraX extends EventEmitter {
             if (isWirelessBT) {
                 try {
                     // Read from BLE
-                    let magStatus = await bluetooth.read(
+                    const magBuffer = await bluetooth.read(
                         trackerName,
-                        settingsService,
+                        trackerService,
                         magnetometerCharacteristic
                     );
+                    const magStatus = magBuffer ? Buffer.from(magBuffer).toString("utf-8") : null;
                     this.emit("mag", trackerName, magStatus);
                     return processMagData(magStatus, trackerName);
                 } catch (err) {
@@ -1335,7 +1336,7 @@ function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) 
     try {
         const { rotation, gravity, ankle, magStatus } = decodeIMUPacket(data, trackerName);
 
-        if (printTrackerIMUData) {
+        if (printIMU) {
             log(
                 `Tracker ${trackerName} rotation: (${rotation.x.toFixed(5)}, ${rotation.y.toFixed(
                     5
@@ -1641,7 +1642,6 @@ function processSettingsData(data: string, trackerName: string) {
  **/
 
 function processInfoData(data: string, trackerName: string) {
-    // TODO: implement this for wireless BT trackers
     try {
         // example: {"model":"MC2B", "version":"1.7.10", "serial no":"0000000", "comm":"BLT", "comm_next":"BTSPP"}
         let serial, version, model, comm, comm_next;
@@ -1821,39 +1821,19 @@ function processBatteryData(data: string, trackerName: string) {
 }
 
 function log(message: string) {
-    let emittedMessage = undefined;
-    if (debug === 1) {
-        emittedMessage = `(haritorax-interpreter) - ${message}`;
-        console.log(emittedMessage);
-        main.emit("log", emittedMessage);
-    } else if (debug === 2) {
-        const stack = new Error().stack;
-        const callerLine = stack.split("\n")[2];
-        const callerName = callerLine.match(/at (\S+)/)[1];
-        const lineNumber = callerLine.match(/:(\d+):/)[1];
+    if (!debug) return;
 
-        emittedMessage = `(haritorax-interpreter) - ${callerName} (line ${lineNumber}) || ${message}`;
-        console.log(emittedMessage);
-        main.emit("log", emittedMessage);
-    }
+    let emittedMessage = `(haritorax-interpreter) - ${message}`;
+    console.log(emittedMessage);
+    main.emit("log", emittedMessage);
 }
 
 function error(message: string) {
-    let emittedError = undefined;
-    if (debug === 1) {
-        emittedError = `(haritorax-interpreter) - ${message}`;
-        console.error(emittedError);
-        main.emit("logError", emittedError);
-    } else if (debug === 2) {
-        const stack = new Error().stack;
-        const callerLine = stack.split("\n")[2];
-        const callerName = callerLine.match(/at (\S+)/)[1];
-        const lineNumber = callerLine.match(/:(\d+):/)[1];
+    if (!debug) return;
 
-        emittedError = `(haritorax-interpreter) - ${callerName} (line ${lineNumber}) || ${message}`;
-        console.error(emittedError);
-        main.emit("logError", emittedError);
-    }
+    const emittedError = `(haritorax-interpreter) - ${message}`;
+    console.error(emittedError);
+    main.emit("logError", emittedError);
 }
 
 function isWirelessBT(trackerName: string) {
