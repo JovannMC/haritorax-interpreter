@@ -587,10 +587,7 @@ export default class HaritoraX extends EventEmitter {
                     batteryService,
                     batteryLevelCharacteristic
                 );
-                if (!buffer) {
-                    log(`Tracker ${trackerName} battery info not found`);
-                    return null;
-                }
+                if (!buffer) throw new Error(`Tracker ${trackerName} battery info not found`);
                 const batteryRemaining = new DataView(buffer).getUint8(0);
                 let batteryVoltage,
                     chargeStatus = undefined;
@@ -1607,7 +1604,7 @@ function error(message: string) {
 }
 
 function isWirelessBT(trackerName: string): boolean {
-    return trackerName.startsWith("HaritoraX") && !trackerName.startsWith("HaritoraXWired");
+    return trackerName.startsWith("HaritoraX") && trackerName !== "HaritoraXWired";
 }
 
 function calculateSensorAutoCorrectionBits(sensorAutoCorrection: SensorCorrectionKey[]): number {

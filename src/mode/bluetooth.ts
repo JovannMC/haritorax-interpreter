@@ -43,8 +43,6 @@ let activeDevices: ActiveDevice[] = [];
 
 let allowReconnect = true;
 
-let connectingDevices = new Set<string>();
-
 export default class Bluetooth extends EventEmitter {
     constructor() {
         super();
@@ -85,30 +83,30 @@ export default class Bluetooth extends EventEmitter {
             advertisement: { localName },
         } = peripheral;
         if (!localName || !localName.startsWith("HaritoraX")) return;
-    
+
         const deviceExists = activeDevices.some(
             (device) => device[0] === localName || device[1] === peripheral
         );
-        if (deviceExists || connectingDevices.has(peripheral.id)) return;
-    
+        if (deviceExists) return;
+
         log(`Found device: ${localName}`);
-        connectingDevices.add(peripheral.id); // Add to connecting devices
-    
+
+        updateActiveDevices(localName, peripheral, [], []);
+
         try {
             await connectPeripheral(peripheral);
             log(`(bluetooth) Connected to ${localName}`);
             this.emit("connect", peripheral);
-    
+
             const { services, characteristics } = await discoverServicesAndCharacteristics(
                 peripheral
             );
+
             updateActiveDevices(localName, peripheral, services, characteristics);
         } catch (err) {
             error(`Error during discovery or connection process: ${err}`);
-        } finally {
-            connectingDevices.delete(peripheral.id); // Remove from connecting devices once done
         }
-    
+
         peripheral.on("disconnect", () => {
             if (!allowReconnect) return;
             log(`Disconnected from ${localName}`);
@@ -117,11 +115,9 @@ export default class Bluetooth extends EventEmitter {
             if (index !== -1) {
                 activeDevices.splice(index, 1);
             }
-    
+
             setTimeout(() => {
-                if (!connectingDevices.has(peripheral.id)) { // Check before reconnecting
-                    noble.startScanning([], true);
-                }
+                noble.startScanning([], true);
             }, 3000);
         });
     }
@@ -145,18 +141,9 @@ export default class Bluetooth extends EventEmitter {
     }
 
     async read(localName: string, service: string, characteristic: string): Promise<ArrayBuffer> {
-        const device = activeDevices.find((device: ActiveDevice) => device[0] === localName);
-        if (!device) {
-            throw new Error(`Device ${localName} not found`);
-        }
-
-        const serviceInstance = device[2].find((s: Service) => s.uuid === service);
-        if (!serviceInstance) throw new Error(`Service ${service} not found`);
-
-        const characteristicInstance = serviceInstance.characteristics.find(
-            (c: Characteristic) => c.uuid === characteristic
-        );
-        if (!characteristicInstance) throw new Error(`Characteristic ${characteristic} not found`);
+        const device = await getDevice(localName);
+        const serviceInstance = getService(device, service);
+        const characteristicInstance = getCharacteristic(serviceInstance, characteristic);
 
         return readCharacteristic(characteristicInstance);
     }
@@ -167,7 +154,7 @@ export default class Bluetooth extends EventEmitter {
         characteristic: string,
         data: any
     ): Promise<void> {
-        const device = getDevice(localName);
+        const device = await getDevice(localName);
         const serviceInstance = getService(device, service);
         const characteristicInstance = getCharacteristic(serviceInstance, characteristic);
 
@@ -234,6 +221,7 @@ async function discoverServicesAndCharacteristics(peripheral: Peripheral): Promi
             discoverCharacteristics(peripheral.advertisement.localName, service)
         )
     );
+
     return { services, characteristics: characteristics.flat() };
 }
 
@@ -280,7 +268,7 @@ function updateActiveDevices(
 }
 
 /*
- * read() helper functions
+ * read() and write() helper functions
  */
 
 async function readCharacteristic(characteristicInstance: Characteristic): Promise<ArrayBuffer> {
@@ -294,28 +282,6 @@ async function readCharacteristic(characteristicInstance: Characteristic): Promi
             resolve(new Uint8Array(data).buffer);
         });
     });
-}
-
-/*
- * write() helper functions
- */
-
-function getDevice(localName: string): ActiveDevice {
-    const device = activeDevices.find((device) => device[0] === localName);
-    if (!device) throw new Error(`Device ${localName} not found`);
-    return device;
-}
-
-function getService(device: ActiveDevice, service: string): Service {
-    const serviceInstance = device[2].find((s) => s.uuid === service);
-    if (!serviceInstance) throw new Error(`Service ${service} not found`);
-    return serviceInstance;
-}
-
-function getCharacteristic(service: Service, characteristic: string): Characteristic {
-    const characteristicInstance = service.characteristics.find((c) => c.uuid === characteristic);
-    if (!characteristicInstance) throw new Error(`Characteristic ${characteristic} not found`);
-    return characteristicInstance;
 }
 
 async function writeCharacteristic(
@@ -335,16 +301,33 @@ async function writeCharacteristic(
     });
 }
 
+async function getDevice(localName: string): Promise<ActiveDevice> {
+    const device = activeDevices.find((device: ActiveDevice) => device[0] === localName);
+    if (!device) throw new Error(`Device ${localName} not found, list: ${activeDevices}`);
+
+    while (!(await areAllBLEDiscovered(localName))) {
+        log(`Waiting for all services and characteristics to be discovered for ${localName}...`);
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+
+    return device;
+}
+
+function getService(device: ActiveDevice, service: string): Service {
+    const serviceInstance = device[2].find((s) => s.uuid === service);
+    if (!serviceInstance) throw new Error(`Service ${service} not found for ${device[0]}, service list: ${device[2]}`);
+    return serviceInstance;
+}
+
+function getCharacteristic(service: Service, characteristic: string): Characteristic {
+    const characteristicInstance = service.characteristics.find((c) => c.uuid === characteristic);
+    if (!characteristicInstance) throw new Error(`Characteristic ${characteristic} not found for ${service.uuid}, characteristic list: ${service.characteristics}`);
+    return characteristicInstance;
+}
+
 /*
  * General helper functions
  */
-
-async function ensureBLEDiscovered(): Promise<void> {
-    while (!(await areAllBLEDiscovered())) {
-        log("Waiting for all services and characteristics to be discovered...");
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
-}
 
 const importantServices = ["ef84369a90a911eda1eb0242ac120002", "180f"];
 const importantCharacteristics = [
@@ -356,27 +339,31 @@ const importantCharacteristics = [
     "ef84c30590a911eda1eb0242ac120002",
 ];
 
-async function areAllBLEDiscovered(): Promise<boolean> {
+async function areAllBLEDiscovered(trackerName: string): Promise<boolean> {
+    // Find the device entry for the specified trackerName
+    const device = activeDevices.find((device: any) => device[0] === trackerName);
+
+    // If the device is not found, return false
+    if (!device) return false;
+
+    // Destructure the device to get services and characteristics
+    const [, , services, characteristics] = device;
+
+    // Check if all important services are discovered
     for (const serviceUuid of importantServices) {
-        if (
-            !activeDevices.find((device: any) =>
-                device[2].find((service: any) => service.uuid === serviceUuid)
-            )
-        ) {
+        if (!services.find((service: any) => service.uuid === serviceUuid)) {
             return false;
         }
     }
 
+    // Check if all important characteristics are discovered
     for (const characteristicUuid of importantCharacteristics) {
-        if (
-            !activeDevices.find((device: any) =>
-                device[3].find((characteristic: any) => characteristic.uuid === characteristicUuid)
-            )
-        ) {
+        if (!characteristics.find((characteristic: any) => characteristic.uuid === characteristicUuid)) {
             return false;
         }
     }
 
+    // If all checks pass, return true
     return true;
 }
 
