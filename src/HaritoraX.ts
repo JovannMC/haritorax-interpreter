@@ -385,7 +385,7 @@ export default class HaritoraX extends EventEmitter {
         if (sensorAutoCorrection.includes("mag")) sensorAutoCorrectionBit |= 0x04;
 
         log(`Setting tracker settings for ${trackerName}...`);
-        if (isWirelessBT) {
+        if (isWirelessBT(trackerName)) {
             // Bluetooth
             let sensorModeData;
             if (sensorMode === 1) sensorModeData = 5;
@@ -710,7 +710,7 @@ export default class HaritoraX extends EventEmitter {
             version = com.getDeviceInformation(trackerName)[VERSION_INDEX];
             comm = com.getDeviceInformation(trackerName)[COMM_INDEX];
             comm_next = com.getDeviceInformation(trackerName)[COMM_NEXT_INDEX];
-        } else if (trackerModelEnabled === "wireless" && isWirelessBT && bluetoothEnabled) {
+        } else if (trackerModelEnabled === "wireless" && isWirelessBT(trackerName) && bluetoothEnabled) {
             let trackerObject = bluetooth
                 .getActiveDevices()
                 .find((device) => device[0] === trackerName);
@@ -786,7 +786,7 @@ export default class HaritoraX extends EventEmitter {
             if (trackerBattery.has(trackerName)) {
                 [batteryRemaining, batteryVoltage, chargeStatus] = trackerBattery.get(trackerName);
             } else {
-                if (isWirelessBT) {
+                if (isWirelessBT(trackerName)) {
                     log(`Reading battery info for ${trackerName}...`);
                     let buffer = await bluetooth.read(
                         trackerName,
@@ -866,8 +866,8 @@ export default class HaritoraX extends EventEmitter {
             };
         } else if (trackerModelEnabled === "wireless") {
             if (
-                (forceBluetoothRead && bluetoothEnabled && isWirelessBT) ||
-                (bluetoothEnabled && isWirelessBT) ||
+                (forceBluetoothRead && bluetoothEnabled && isWirelessBT(trackerName)) ||
+                (bluetoothEnabled && isWirelessBT(trackerName)) ||
                 !trackerSettings.has(trackerName)
             ) {
                 log(`Forcing BLE reading for ${trackerName}`);
@@ -1026,7 +1026,7 @@ export default class HaritoraX extends EventEmitter {
             this.emit("mag", trackerName, magStatus);
             return magStatus;
         } else {
-            if (isWirelessBT) {
+            if (isWirelessBT(trackerName)) {
                 try {
                     // Read from BLE
                     const magBuffer = await bluetooth.read(
@@ -1353,7 +1353,7 @@ function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) 
         }
 
         main.emit("imu", trackerName, rotation, gravity, ankle ? ankle : ankleValue);
-        if (!isWirelessBT) main.emit("mag", trackerName, magStatus);
+        if (!isWirelessBT(trackerName)) main.emit("mag", trackerName, magStatus);
     } catch (err) {
         error(`Error decoding tracker ${trackerName} IMU packet data: ${err}`);
     }
@@ -1390,7 +1390,7 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
             let bufferData = data.toString("base64");
             ankle = bufferData.slice(-2) !== "==" ? data.readUint16LE(data.length - 2) : undefined;
 
-            if (!isWirelessBT) {
+            if (!isWirelessBT(trackerName)) {
                 const magnetometerData = bufferData.charAt(bufferData.length - 5);
 
                 switch (magnetometerData) {
@@ -1691,7 +1691,7 @@ function processButtonData(data: string, trackerName: string, characteristic?: s
     let buttonPressed = undefined;
 
     try {
-        if (trackerName && isWirelessBT) {
+        if (trackerName && isWirelessBT(trackerName)) {
             if (characteristic === "MainButton") {
                 currentButtons[MAIN_BUTTON_INDEX] += 1;
                 buttonPressed = "main";
@@ -1738,6 +1738,7 @@ function processButtonData(data: string, trackerName: string, characteristic?: s
                 trackerModelEnabled === "wired" ||
                 trackerName.startsWith("HaritoraXWired")
             ) {
+                console.log("wired")
                 // example data: t:{"id":"button2", "type":"click", "start_time":6937744, "option":""}
                 // TODO: do more testing with wired trackers, find different "type"(s) and what "start_time" and "option" mean
                 const buttonData = JSON.parse(data);
@@ -1805,7 +1806,7 @@ function processBatteryData(data: string, trackerName: string) {
         } catch (err) {
             error(`Error parsing battery data JSON for ${trackerName}: ${err}`);
         }
-    } else if (trackerModelEnabled === "wireless" && isWirelessBT && bluetoothEnabled) {
+    } else if (trackerModelEnabled === "wireless" && isWirelessBT(trackerName) && bluetoothEnabled) {
         try {
             let batteryRemainingHex = Buffer.from(data, "base64").toString("hex");
             batteryData[0] = parseInt(batteryRemainingHex, 16);
@@ -1836,8 +1837,8 @@ function error(message: string) {
     main.emit("logError", emittedError);
 }
 
-function isWirelessBT(trackerName: string) {
-    return trackerName.startsWith("HaritoraX") && !trackerName.startsWith("HaritoraXWired");
+function isWirelessBT(trackerName: string): boolean {
+    return (trackerName.startsWith("HaritoraX") && !trackerName.startsWith("HaritoraXWired"));
 }
 
 export { HaritoraX };
