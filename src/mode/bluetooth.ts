@@ -340,25 +340,21 @@ const importantCharacteristics = [
 ];
 
 async function areAllBLEDiscovered(trackerName: string): Promise<boolean> {
-    // Find the device entry for the specified trackerName
-    const device = activeDevices.find((device: any) => device[0] === trackerName);
-
-    // If the device is not found, return false
+    const device = activeDevices.find((device: ActiveDevice) => device[0] === trackerName);
     if (!device) return false;
 
-    // Destructure the device to get services and characteristics
     const [, , services, characteristics] = device;
 
     // Check if all important services are discovered
     for (const serviceUuid of importantServices) {
-        if (!services.find((service: any) => service.uuid === serviceUuid)) {
+        if (!services.find((service: Service) => service.uuid === serviceUuid)) {
             return false;
         }
     }
 
     // Check if all important characteristics are discovered
     for (const characteristicUuid of importantCharacteristics) {
-        if (!characteristics.find((characteristic: any) => characteristic.uuid === characteristicUuid)) {
+        if (!characteristics.find((characteristic: Characteristic) => characteristic.uuid === characteristicUuid)) {
             return false;
         }
     }

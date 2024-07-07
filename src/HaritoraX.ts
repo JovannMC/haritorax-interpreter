@@ -501,110 +501,6 @@ export default class HaritoraX extends EventEmitter {
     }
 
     /**
-     * Returns device info for the specified tracker or dongle.
-     * Supported trackers: wireless
-     * Supported connections: COM, Bluetooth
-     *
-     * @function getDeviceInfo
-     * @param trackerName - The name of the tracker.
-     * @returns {object} The device info (version, model, serial, comm, comm_next).
-     * @fires this#info
-     **/
-
-    async getDeviceInfo(trackerName: string) {
-        // Global
-        let serial, model, version, comm, comm_next;
-
-        if (trackerModelEnabled === "wireless" && bluetoothEnabled && isWirelessBT(trackerName)) {
-            const trackerObject = bluetooth
-                .getActiveDevices()
-                .find((device) => device[0] === trackerName);
-            if (!trackerObject) {
-                log(`Tracker ${trackerName} not found`);
-                return null;
-            }
-
-            const decoder = new TextDecoder("utf-8");
-
-            const readCharacteristic = async (uuid: string) => {
-                const buffer = await bluetooth.read(trackerName, SERVICE_UUID, uuid);
-                return buffer ? decoder.decode(buffer) : undefined;
-            };
-
-            [version, model, serial] = await Promise.all([
-                readCharacteristic(VERSION_UUID),
-                readCharacteristic(MODEL_UUID),
-                readCharacteristic(SERIAL_UUID),
-            ]);
-        } else if (comEnabled) {
-            const deviceInfo = com.getDeviceInformation(trackerName);
-            [version, model, serial] = [
-                deviceInfo[VERSION_INDEX],
-                deviceInfo[MODEL_INDEX],
-                deviceInfo[SERIAL_INDEX],
-            ];
-
-            if (trackerModelEnabled === "wired") {
-                [comm, comm_next] = [deviceInfo[COMM_INDEX], deviceInfo[COMM_NEXT_INDEX]];
-            }
-        } else {
-            log(`Tracker ${trackerName} not found or unsupported model enabled`);
-            return null;
-        }
-
-        log(`Tracker ${trackerName} info: ${version}, ${model}, ${serial}, ${comm}, ${comm_next}`);
-        this.emit("info", trackerName, version, model, serial, comm, comm_next);
-        return { version, model, serial, comm, comm_next };
-    }
-
-    /**
-     * Get battery info from the trackers.
-     * Supported trackers: wireless
-     * Supported connections: COM, Bluetooth
-     *
-     * @function getBatteryInfo
-     * @returns {object} The battery info (batteryRemaining, batteryVoltage, chargeStatus).
-     * @fires this#battery
-     **/
-
-    async getBatteryInfo(trackerName: string) {
-        log(`Getting battery info for ${trackerName}`);
-
-        // Check if battery info is already available
-        if (trackerBattery.has(trackerName)) {
-            const [batteryRemaining, batteryVoltage, chargeStatus] =
-                trackerBattery.get(trackerName);
-            logBatteryInfo(trackerName, batteryRemaining, batteryVoltage, chargeStatus);
-            return { batteryRemaining, batteryVoltage, chargeStatus };
-        }
-
-        // Attempt to read battery info for wireless BT trackers
-        if (isWirelessBT(trackerName)) {
-            log(`Reading battery info for ${trackerName}...`);
-            try {
-                const buffer = await bluetooth.read(
-                    trackerName,
-                    batteryService,
-                    batteryLevelCharacteristic
-                );
-                if (!buffer) throw new Error(`Tracker ${trackerName} battery info not found`);
-                const batteryRemaining = new DataView(buffer).getUint8(0);
-                let batteryVoltage,
-                    chargeStatus = undefined;
-                trackerBattery.set(trackerName, [batteryRemaining, batteryVoltage, chargeStatus]);
-                logBatteryInfo(trackerName, batteryRemaining, batteryVoltage, chargeStatus);
-                return { batteryRemaining, batteryVoltage, chargeStatus };
-            } catch (err) {
-                error(`Error getting battery info for ${trackerName}: ${err}`);
-                return null;
-            }
-        } else {
-            log(`Tracker ${trackerName} battery info not found`);
-            return null;
-        }
-    }
-
-    /**
      * Get the active trackers.
      * Supported trackers: wireless, wired
      * Supported connections: COM, Bluetooth
@@ -750,44 +646,6 @@ export default class HaritoraX extends EventEmitter {
     }
 
     /**
-     * Get the tracker's magnetometer status
-     * Supported trackers: wireless, wired
-     * Supported connections: COM, Bluetooth
-     *
-     * @function getTrackerMag
-     * @param {string} trackerName - The name of the tracker.
-     * @returns {string} The tracker's magnetometer status.
-     */
-    async getTrackerMag(trackerName: string) {
-        if (trackerMag.has(trackerName)) {
-            let magStatus = trackerMag.get(trackerName);
-            log(`Tracker ${trackerName} magnetometer status: ${magStatus}`);
-            this.emit("mag", trackerName, magStatus);
-            return magStatus;
-        } else {
-            // Read from BLE device
-            if (!isWirelessBT(trackerName)) {
-                log(`Tracker ${trackerName} magnetometer status not found`);
-                return null;
-            }
-
-            try {
-                const magBuffer = await bluetooth.read(
-                    trackerName,
-                    trackerService,
-                    magnetometerCharacteristic
-                );
-                const magStatus = magBuffer ? Buffer.from(magBuffer).toString("utf-8") : null;
-                this.emit("mag", trackerName, magStatus);
-                return processMagData(magStatus, trackerName);
-            } catch (err) {
-                error(`Error reading magnetometer status: ${err}`);
-                return null;
-            }
-        }
-    }
-
-    /**
      * Check whether the connection mode is active or not.
      * Supported trackers: wireless, wired
      * Supported connections: COM, Bluetooth
@@ -809,6 +667,142 @@ export default class HaritoraX extends EventEmitter {
 
     getActiveTrackerModel() {
         return trackerModelEnabled;
+    }
+
+    // !
+    // TODO: test if i broke these for COM (and wired, but will need to manually data or have people test)
+
+    /**
+     * Returns device info for the specified tracker or dongle.
+     * Supported trackers: wireless
+     * Supported connections: COM, Bluetooth
+     *
+     * @function fireDeviceInfo
+     * @param trackerName - The name of the tracker.
+     * @fires this#info
+     **/
+
+    async fireDeviceInfo(trackerName: string) {
+        // Global
+        let serial, model, version, comm, comm_next;
+
+        if (trackerModelEnabled === "wireless" && bluetoothEnabled && isWirelessBT(trackerName)) {
+            const trackerObject = bluetooth
+                .getActiveDevices()
+                .find((device) => device[0] === trackerName);
+            if (!trackerObject) {
+                log(`Tracker ${trackerName} not found`);
+                return null;
+            }
+
+            const decoder = new TextDecoder("utf-8");
+
+            const readCharacteristic = async (uuid: string) => {
+                const buffer = await bluetooth.read(trackerName, SERVICE_UUID, uuid);
+                return buffer ? decoder.decode(buffer) : undefined;
+            };
+
+            [version, model, serial] = await Promise.all([
+                readCharacteristic(VERSION_UUID),
+                readCharacteristic(MODEL_UUID),
+                readCharacteristic(SERIAL_UUID),
+            ]);
+        } else if (comEnabled) {
+            const deviceInfo = com.getDeviceInformation(trackerName);
+            [version, model, serial] = [
+                deviceInfo[VERSION_INDEX],
+                deviceInfo[MODEL_INDEX],
+                deviceInfo[SERIAL_INDEX],
+            ];
+
+            if (trackerModelEnabled === "wired") {
+                [comm, comm_next] = [deviceInfo[COMM_INDEX], deviceInfo[COMM_NEXT_INDEX]];
+            }
+        } else {
+            log(`Tracker ${trackerName} not found or unsupported model enabled`);
+            return null;
+        }
+
+        log(`Tracker ${trackerName} info: ${version}, ${model}, ${serial}, ${comm}, ${comm_next}`);
+        this.emit("info", trackerName, version, model, serial, comm, comm_next);
+        return true;
+    }
+
+    /**
+     * Get battery info from the trackers.
+     * Supported trackers: wireless
+     * Supported connections: COM, Bluetooth
+     *
+     * @function fireTrackerBattery
+     * @fires this#battery
+     **/
+
+    async fireTrackerBattery(trackerName: string) {
+        log(`Getting battery info for ${trackerName}`);
+        let batteryRemaining, batteryVoltage, chargeStatus;
+
+        // Check if battery info is already available
+        if (trackerBattery.has(trackerName))
+            [batteryRemaining, batteryVoltage, chargeStatus] = trackerBattery.get(trackerName);
+
+        // Attempt to read battery info for wireless BT trackers
+        if (isWirelessBT(trackerName)) {
+            log(`Reading battery info for ${trackerName}...`);
+            try {
+                const buffer = await bluetooth.read(
+                    trackerName,
+                    batteryService,
+                    batteryLevelCharacteristic
+                );
+                if (!buffer) throw new Error(`Tracker ${trackerName} battery info not found`);
+                batteryRemaining = new DataView(buffer).getUint8(0);
+                trackerBattery.set(trackerName, [batteryRemaining, batteryVoltage, chargeStatus]);
+            } catch (err) {
+                error(`Error getting battery info for ${trackerName}: ${err}`);
+                return null;
+            }
+        } else {
+            log(`Tracker ${trackerName} battery info not found`);
+            return null;
+        }
+
+        log(`Tracker ${trackerName} battery remaining: ${batteryRemaining}%`);
+        log(`Tracker ${trackerName} battery voltage: ${batteryVoltage}`);
+        log(`Tracker ${trackerName} charge status: ${chargeStatus}`);
+        main.emit("battery", trackerName, batteryRemaining, batteryVoltage, chargeStatus);
+        return true;
+    }
+
+    /**
+     * Get the tracker's magnetometer status
+     * Supported trackers: wireless, wired
+     * Supported connections: COM, Bluetooth
+     *
+     * @function fireTrackerMag
+     * @param {string} trackerName - The name of the tracker.
+     * @fires this#mag
+     */
+    async fireTrackerMag(trackerName: string) {
+        if (trackerMag.has(trackerName)) {
+            let magStatus = trackerMag.get(trackerName);
+            log(`Tracker ${trackerName} magnetometer status: ${magStatus}`);
+            main.emit("mag", trackerName, magStatus);
+        } else {
+            // Read from BLE device
+            if (!isWirelessBT(trackerName)) {
+                log(`Tracker ${trackerName} magnetometer status not found`);
+                return null;
+            }
+
+            try {
+                await bluetooth.read(trackerName, trackerService, magnetometerCharacteristic);
+            } catch (err) {
+                error(`Error reading magnetometer status: ${err}`);
+                return null;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -1837,21 +1831,6 @@ function updateTrackerSettings(
             ankleMotionDetection,
         ]);
     }
-}
-
-/*
- * getBatteryInfo() function helpers
- */
-
-function logBatteryInfo(
-    trackerName: string,
-    batteryRemaining: string | number | undefined,
-    batteryVoltage: string | number | undefined,
-    chargeStatus: string | undefined
-) {
-    log(`Tracker ${trackerName} battery remaining: ${batteryRemaining}%`);
-    log(`Tracker ${trackerName} battery voltage: ${batteryVoltage}`);
-    log(`Tracker ${trackerName} charge status: ${chargeStatus}`);
 }
 
 export { HaritoraX };
