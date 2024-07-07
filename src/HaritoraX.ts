@@ -292,11 +292,9 @@ export default class HaritoraX extends EventEmitter {
      * @example
      * device.startConnection("COM");
      **/
-    startConnection(connectionMode: string, portNames?: string[], heartbeatInterval: number = 10000): boolean {
-        if (!isConnectionModeSupported(connectionMode)) {
-            error(`Connection mode ${connectionMode} not supported for ${trackerModelEnabled}`);
-            return;
-        }
+    startConnection(connectionMode: string, portNames?: string[], heartbeatInterval: number = 10000) {
+        if (!isConnectionModeSupported(connectionMode))
+            error(`${connectionMode} connection not supported for ${trackerModelEnabled}`, true);
 
         if (connectionMode === "com") {
             com = new COM(trackerModelEnabled, heartbeatInterval);
@@ -741,7 +739,7 @@ export default class HaritoraX extends EventEmitter {
             try {
                 await bluetooth.read(trackerName, trackerService, magnetometerCharacteristic);
             } catch (err) {
-                error(`Error reading magnetometer status: ${err}`);
+                error(`Error reading mag status: ${err}`);
                 return null;
             }
         }
@@ -1436,7 +1434,7 @@ function processBatteryData(data: string, trackerName: string) {
             logBatteryInfo(batteryData[0], batteryData[1], batteryData[2]);
         } catch (err) {
             error(`Error parsing battery data JSON for ${trackerName}: ${err}`);
-            error(`Raw battery data: ${data}`);
+            log(`Raw battery data: ${data}`);
         }
     } else if (trackerModelEnabled === "wireless" && isWirelessBT(trackerName) && bluetoothEnabled) {
         try {
