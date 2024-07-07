@@ -84,9 +84,7 @@ export default class Bluetooth extends EventEmitter {
         } = peripheral;
         if (!localName || !localName.startsWith("HaritoraX")) return;
 
-        const deviceExists = activeDevices.some(
-            (device) => device[0] === localName || device[1] === peripheral
-        );
+        const deviceExists = activeDevices.some((device) => device[0] === localName || device[1] === peripheral);
         if (deviceExists) return;
 
         log(`Found device: ${localName}`);
@@ -98,9 +96,7 @@ export default class Bluetooth extends EventEmitter {
             log(`(bluetooth) Connected to ${localName}`);
             this.emit("connect", peripheral);
 
-            const { services, characteristics } = await discoverServicesAndCharacteristics(
-                peripheral
-            );
+            const { services, characteristics } = await discoverServicesAndCharacteristics(peripheral);
 
             updateActiveDevices(localName, peripheral, services, characteristics);
         } catch (err) {
@@ -148,12 +144,7 @@ export default class Bluetooth extends EventEmitter {
         return readCharacteristic(characteristicInstance);
     }
 
-    async write(
-        localName: string,
-        service: string,
-        characteristic: string,
-        data: any
-    ): Promise<void> {
+    async write(localName: string, service: string, characteristic: string, data: any): Promise<void> {
         const device = await getDevice(localName);
         const serviceInstance = getService(device, service);
         const characteristicInstance = getCharacteristic(serviceInstance, characteristic);
@@ -217,9 +208,7 @@ async function connectPeripheral(peripheral: Peripheral): Promise<void> {
 async function discoverServicesAndCharacteristics(peripheral: Peripheral): Promise<any> {
     const services = await discoverServices(peripheral);
     const characteristics = await Promise.all(
-        services.map((service) =>
-            discoverCharacteristics(peripheral.advertisement.localName, service)
-        )
+        services.map((service) => discoverCharacteristics(peripheral.advertisement.localName, service))
     );
 
     return { services, characteristics: characteristics.flat() };
@@ -246,8 +235,7 @@ async function discoverCharacteristics(localName: string, service: Service) {
                     emitData(main, localName, service.uuid, characteristic.uuid, data);
                 });
                 characteristic.subscribe((err) => {
-                    if (err)
-                        error(`Error subscribing to characteristic ${characteristic.uuid}: ${err}`);
+                    if (err) error(`Error subscribing to characteristic ${characteristic.uuid}: ${err}`);
                 });
             });
             resolve(characteristics);
@@ -284,10 +272,7 @@ async function readCharacteristic(characteristicInstance: Characteristic): Promi
     });
 }
 
-async function writeCharacteristic(
-    characteristicInstance: Characteristic,
-    data: any
-): Promise<void> {
+async function writeCharacteristic(characteristicInstance: Characteristic, data: any): Promise<void> {
     return new Promise((resolve, reject) => {
         characteristicInstance.write(data, false, (err) => {
             if (err) {
@@ -321,7 +306,10 @@ function getService(device: ActiveDevice, service: string): Service {
 
 function getCharacteristic(service: Service, characteristic: string): Characteristic {
     const characteristicInstance = service.characteristics.find((c) => c.uuid === characteristic);
-    if (!characteristicInstance) throw new Error(`Characteristic ${characteristic} not found for ${service.uuid}, characteristic list: ${service.characteristics}`);
+    if (!characteristicInstance)
+        throw new Error(
+            `Characteristic ${characteristic} not found for ${service.uuid}, characteristic list: ${service.characteristics}`
+        );
     return characteristicInstance;
 }
 
@@ -363,13 +351,7 @@ async function areAllBLEDiscovered(trackerName: string): Promise<boolean> {
     return true;
 }
 
-function emitData(
-    classInstance: Bluetooth,
-    localName: any,
-    service: string,
-    characteristic: string,
-    data: any
-) {
+function emitData(classInstance: Bluetooth, localName: any, service: string, characteristic: string, data: any) {
     classInstance.emit(
         "data",
         localName,
