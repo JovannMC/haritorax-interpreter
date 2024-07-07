@@ -1548,7 +1548,7 @@ function processBatteryData(data: string, trackerName: string) {
         if (status !== undefined) log(`Tracker ${trackerName} Status: ${status}`);
     };
 
-    if (comEnabled) {
+    if (comEnabled && !isWirelessBT(trackerName)) {
         try {
             const batteryInfo = JSON.parse(data);
             batteryData[0] = batteryInfo["battery remaining"];
@@ -1557,6 +1557,7 @@ function processBatteryData(data: string, trackerName: string) {
             logBatteryInfo(batteryData[0], batteryData[1], batteryData[2]);
         } catch (err) {
             error(`Error parsing battery data JSON for ${trackerName}: ${err}`);
+            error(`Raw battery data: ${data}`);
         }
     } else if (
         trackerModelEnabled === "wireless" &&
