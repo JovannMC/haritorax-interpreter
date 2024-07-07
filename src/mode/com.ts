@@ -50,8 +50,8 @@ export default class COM extends EventEmitter {
         log(`Initialized COM module with settings: ${trackerModelEnabled} ${heartbeatInterval}`);
     }
 
-    async startConnection(portNames: string[]): Promise<boolean> {
-        const initializeSerialPort = async (port: string) => {
+    startConnection(portNames: string[]) {
+        const initializeSerialPort = (port: string) => {
             try {
                 const serial = new SerialPort({ path: port, baudRate: BAUD_RATE });
                 const parser = serial.pipe(new ReadlineParser({ delimiter: "\n" }));
@@ -60,34 +60,35 @@ export default class COM extends EventEmitter {
                 serial.on("open", () => this.emit("connected", port));
                 parser.on("data", (data) => processData(data, port));
                 serial.on("close", () => this.emit("disconnected", port));
+                serial.on("error", (err) => {
+                    error(`Error on port ${port}: ${err}`, true);
+                });
 
                 if (trackerModelEnabled === "wired") setupHeartbeat(serial, port);
-
-                return true;
             } catch (err) {
-                error(`Error initializing serial port ${port}: ${err}`);
-                return false;
+                throw err;
             }
         };
 
         for (const port of portNames) {
-            await initializeSerialPort(port);
+            log(`Opening COM port: ${port}`);
+            initializeSerialPort(port);
         }
-
-        return true;
     }
 
     stopConnection() {
         Object.entries(activePorts).forEach(([port, serialPort]) => {
-            if (serialPort.isOpen) {
+            if (!serialPort.isOpen) return;
+            try {
                 log(`Closing COM port: ${port}`);
                 serialPort.close();
                 delete activePorts[port];
+            } catch (err) {
+                error(`Error closing COM port: ${port}: ${err}`, true);
             }
         });
 
         this.emit("disconnected");
-        return true;
     }
 
     getActiveTrackerModel() {
@@ -156,56 +157,71 @@ export default class COM extends EventEmitter {
  */
 
 function processData(data: string, port: string) {
-    let trackerName = null;
-    let identifier = null;
-    let portId = null;
-    let portData = null;
+    try {
+        let trackerName = null;
+        let identifier = null;
+        let portId = null;
+        let portData = null;
 
-    if (trackerModelEnabled === "wireless") {
-        const splitData = data.toString().split(/:(.+)/);
-        identifier = splitData[0].toLowerCase();
-        portId = identifier.match(/\d/) ? identifier.match(/\d/)[0] : "DONGLE";
-        portData = splitData[1];
+        if (trackerModelEnabled === "wireless") {
+            const splitData = data.toString().split(/:(.+)/);
+            if (splitData.length > 1) {
+                identifier = splitData[0].toLowerCase();
+                const match = identifier.match(/\d/);
+                portId = match ? match[0] : "DONGLE";
+                portData = splitData[1];
 
-        if (!trackersAssigned) {
-            for (let [key, value] of trackerAssignment.entries()) {
-                if (value[1] === "") {
-                    if (identifier.startsWith("r")) {
-                        const trackerId = parseInt(portData.charAt(4));
-                        if (parseInt(value[0]) == trackerId) {
-                            trackerAssignment.set(key, [trackerId.toString(), port, portId]);
-                            log(` Setting ${key} to port ${port} with port ID ${portId}`);
+                if (!trackersAssigned) {
+                    for (let [key, value] of trackerAssignment.entries()) {
+                        if (value[1] === "") {
+                            if (identifier.startsWith("r")) {
+                                const trackerId = parseInt(portData.charAt(4));
+                                if (!isNaN(trackerId) && parseInt(value[0]) == trackerId) {
+                                    trackerAssignment.set(key, [trackerId.toString(), port, portId]);
+                                    log(` Setting ${key} to port ${port} with port ID ${portId}`);
+                                }
+                            } else if (identifier.startsWith("i")) {
+                                try {
+                                    const info = JSON.parse(portData);
+                                    const version = info["version"];
+                                    const model = info["model"];
+                                    const serial = info["serial no"];
+
+                                    deviceInformation.set(key, [version, model, serial]);
+                                } catch (err) {
+                                    error(`Error parsing JSON data: ${err}`);
+                                }
+                            }
                         }
-                    } else if (identifier.startsWith("i")) {
-                        const info = JSON.parse(portData);
-                        const version = info["version"];
-                        const model = info["model"];
-                        const serial = info["serial no"];
+                    }
 
-                        deviceInformation.set(key, [version, model, serial]);
+                    if (Array.from(trackerAssignment.values()).every((value) => value[1] !== "")) {
+                        trackersAssigned = true;
+                        log(`All trackers have been assigned: ${Array.from(trackerAssignment.entries())}`);
+                    }
+                }
+
+                for (let [key, value] of trackerAssignment.entries()) {
+                    if (value[1] === port && value[2] === portId) {
+                        trackerName = key;
+                        break;
                     }
                 }
             }
-
-            if (Array.from(trackerAssignment.values()).every((value) => value[1] !== "")) {
-                trackersAssigned = true;
-                log(`All trackers have been assigned: ${Array.from(trackerAssignment.entries())}`);
+        } else if (trackerModelEnabled === "wired") {
+            const splitData = data.toString().split(/:(.+)/);
+            if (splitData.length > 1) {
+                identifier = splitData[0].toLowerCase();
+                portData = splitData[1];
             }
         }
 
-        for (let [key, value] of trackerAssignment.entries()) {
-            if (value[1] === port && value[2] === portId) {
-                trackerName = key;
-                break;
-            }
+        if (typeof main !== "undefined" && typeof main.emit === "function") {
+            main.emit("data", trackerName, port, portId, identifier, portData);
         }
-    } else if (trackerModelEnabled === "wired") {
-        const splitData = data.toString().split(/:(.+)/);
-        identifier = splitData[0].toLowerCase();
-        portData = splitData[1];
+    } catch (err) {
+        error(`An unexpected error occurred: ${err}`);
     }
-
-    main.emit("data", trackerName, port, portId, identifier, portData);
 }
 
 function setupHeartbeat(serial: SerialPort, port: string) {
@@ -229,8 +245,8 @@ function log(message: string) {
     main.emit("log", message);
 }
 
-function error(message: string) {
-    main.emit("logError", message);
+function error(message: string, exceptional = false) {
+    main.emit("logError", { message, exceptional });
 }
 
 /*

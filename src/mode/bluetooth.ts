@@ -56,10 +56,8 @@ export default class Bluetooth extends EventEmitter {
             try {
                 noble.startScanning([], true);
                 this.emit("connected");
-                return true;
             } catch (err) {
-                error(`Error starting scanning of BT devices:\n${err}`);
-                return false;
+                error(`Error starting bluetooth scanning: ${err}`, true);
             }
         };
 
@@ -73,8 +71,6 @@ export default class Bluetooth extends EventEmitter {
                     return startScanning();
                 }
             });
-
-            return true;
         }
     }
 
@@ -100,12 +96,12 @@ export default class Bluetooth extends EventEmitter {
 
             updateActiveDevices(localName, peripheral, services, characteristics);
         } catch (err) {
-            error(`Error during discovery or connection process: ${err}`);
+            error(`Error during discovery/connection process: ${err}`, true);
         }
 
         peripheral.on("disconnect", () => {
             if (!allowReconnect) return;
-            log(`Disconnected from ${localName}`);
+            log(`(bluetooth) Disconnected from ${localName}`);
             this.emit("disconnect", peripheral);
             const index = activeDevices.findIndex((device) => device[1] === peripheral);
             if (index !== -1) {
@@ -130,10 +126,8 @@ export default class Bluetooth extends EventEmitter {
             this.emit("disconnected");
             log("Disconnected from bluetooth");
         } catch (err) {
-            error(`Error while closing bluetooth connection: ${err}`);
-            return false;
+            error(`Error while closing bluetooth connection: ${err}`, true);
         }
-        return true;
     }
 
     async read(localName: string, service: string, characteristic: string): Promise<ArrayBufferLike> {
@@ -288,7 +282,7 @@ async function writeCharacteristic(characteristicInstance: Characteristic, data:
 
 async function getDevice(localName: string): Promise<ActiveDevice> {
     const device = activeDevices.find((device: ActiveDevice) => device[0] === localName);
-    if (!device) throw new Error(`Device ${localName} not found, list: ${activeDevices}`);
+    if (!device) error(`Device ${localName} not found, list: ${activeDevices}`, true);
 
     while (!(await areAllBLEDiscovered(localName))) {
         log(`Waiting for all services and characteristics to be discovered for ${localName}...`);
@@ -300,16 +294,15 @@ async function getDevice(localName: string): Promise<ActiveDevice> {
 
 function getService(device: ActiveDevice, service: string): Service {
     const serviceInstance = device[2].find((s) => s.uuid === service);
-    if (!serviceInstance) throw new Error(`Service ${service} not found for ${device[0]}, service list: ${device[2]}`);
+    if (!serviceInstance) error(`Service ${service} not found for ${device[0]}, service list: ${device[2]}`, true);
     return serviceInstance;
 }
 
 function getCharacteristic(service: Service, characteristic: string): Characteristic {
     const characteristicInstance = service.characteristics.find((c) => c.uuid === characteristic);
     if (!characteristicInstance)
-        throw new Error(
-            `Characteristic ${characteristic} not found for ${service.uuid}, characteristic list: ${service.characteristics}`
-        );
+        error(
+            `Characteristic ${characteristic} not found for ${service.uuid}, characteristic list: ${service.characteristics}`, true);
     return characteristicInstance;
 }
 
@@ -365,8 +358,8 @@ function log(message: string) {
     main.emit("log", message);
 }
 
-function error(message: string) {
-    main.emit("logError", message);
+function error(message: string, exceptional = false) {
+    main.emit("logError", { message, exceptional });
 }
 
 export { Bluetooth };
