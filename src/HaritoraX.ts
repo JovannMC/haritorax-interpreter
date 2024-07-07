@@ -1585,7 +1585,11 @@ function processBatteryData(data: string, trackerName: string) {
 function log(message: string) {
     if (!debug) return;
 
-    let emittedMessage = `(haritorax-interpreter) - ${message}`;
+    const stack = new Error().stack;
+    const callerLine = stack.split("\n")[2];
+    const lineNumber = callerLine.match(/:(\d+):/)[1];
+
+    let emittedMessage = `(haritorax-interpreter) - Line ${lineNumber} - ${message}`;
     console.log(emittedMessage);
     main.emit("log", emittedMessage);
 }

@@ -140,7 +140,7 @@ export default class Bluetooth extends EventEmitter {
         return true;
     }
 
-    async read(localName: string, service: string, characteristic: string): Promise<ArrayBuffer> {
+    async read(localName: string, service: string, characteristic: string): Promise<ArrayBufferLike> {
         const device = await getDevice(localName);
         const serviceInstance = getService(device, service);
         const characteristicInstance = getCharacteristic(serviceInstance, characteristic);
@@ -271,7 +271,7 @@ function updateActiveDevices(
  * read() and write() helper functions
  */
 
-async function readCharacteristic(characteristicInstance: Characteristic): Promise<ArrayBuffer> {
+async function readCharacteristic(characteristicInstance: Characteristic): Promise<ArrayBufferLike> {
     return new Promise((resolve, reject) => {
         characteristicInstance.read((err: any, data: any) => {
             if (err) {
