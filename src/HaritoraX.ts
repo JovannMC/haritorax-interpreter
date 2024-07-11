@@ -1399,9 +1399,9 @@ function processWiredTrackerData(data: string, trackerName: string, currentButto
 
 function logButtonPress(trackerName: string, buttonPressed: string | undefined, currentButtons: number[]) {
     if (buttonPressed) {
-        console.log(`Button ${buttonPressed} pressed on tracker ${trackerName}. Current state: ${currentButtons}`);
+        log(`Button ${buttonPressed} pressed on tracker ${trackerName}. Current state: ${currentButtons}`);
     } else {
-        console.log(`No button press detected for tracker ${trackerName}. Current state: ${currentButtons}`);
+        log(`No button press detected for tracker ${trackerName}. Current state: ${currentButtons}`);
     }
 }
 
@@ -1628,9 +1628,9 @@ function handleWirelessSettings(
         Object.values(com.getActivePorts()).forEach((port) => {
             port.write(trackerSettingsBuffer, (err) => {
                 if (err) {
-                    console.error(`Error writing data to serial port ${port.path}: ${err}`);
+                    error(`Error writing data to serial port ${port.path}: ${err}`);
                 } else {
-                    console.log(
+                    log(
                         `Data written to serial port ${port.path}: ${trackerSettingsBuffer
                             .toString()
                             .replace(/\r\n/g, " ")}`
