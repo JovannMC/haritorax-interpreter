@@ -1,9 +1,11 @@
-const fs = require('fs');
-const noble = require('@abandonware/noble');
+const fs = require("fs");
+const noble = require("@abandonware/noble");
 
 noble.on("discover", (peripheral) => {
-    const { advertisement: { localName } } = peripheral;
-    if (localName && localName.startsWith('HaritoraX')) {
+    const {
+        advertisement: { localName },
+    } = peripheral;
+    if (localName && localName.startsWith("HaritoraX")) {
         console.log(`Found device: ${localName}`);
         peripheral.connect((err) => {
             if (err) {
@@ -18,12 +20,12 @@ noble.on("discover", (peripheral) => {
                 }
                 const deviceInfo = {
                     deviceName: localName,
-                    services: services.map(service => ({
+                    services: services.map((service) => ({
                         uuid: service.uuid,
                         name: service.name,
                         characteristics: characteristics
-                            .filter(c => c._serviceUuid === service.uuid)
-                            .map(c => ({ uuid: c.uuid, name: c.name })),
+                            .filter((c) => c._serviceUuid === service.uuid)
+                            .map((c) => ({ uuid: c.uuid, name: c.name })),
                     })),
                 };
                 fs.writeFileSync(`${localName}.txt`, JSON.stringify(deviceInfo, null, 2));
@@ -35,9 +37,9 @@ noble.on("discover", (peripheral) => {
                             console.error(`Error reading data from characteristic ${characteristic.uuid}: ${err}`);
                             return;
                         }
-                        const hexData = data.toString('hex');
-                        const utf8Data = data.toString('utf8');
-                        const base64Data = data.toString('base64');
+                        const hexData = data.toString("hex");
+                        const utf8Data = data.toString("utf8");
+                        const base64Data = data.toString("base64");
                         let uint8Data;
                         if (data.length > 0) {
                             uint8Data = data.readUInt8(0);
@@ -51,7 +53,10 @@ noble.on("discover", (peripheral) => {
                             console.log(`Data as unsigned 8-bit integer: ${uint8Data}`);
                         }
 
-                        fs.appendFileSync(`${localName}.txt`, `\nData from characteristic ${characteristic.uuid}: ${hexData}`);
+                        fs.appendFileSync(
+                            `${localName}.txt`,
+                            `\nData from characteristic ${characteristic.uuid}: ${hexData}`
+                        );
                         fs.appendFileSync(`${localName}.txt`, `\nData in utf-8: ${utf8Data}`);
                         fs.appendFileSync(`${localName}.txt`, `\nData in hex: ${hexData}`);
                         fs.appendFileSync(`${localName}.txt`, `\nData in base64: ${base64Data}`);
@@ -65,5 +70,5 @@ noble.on("discover", (peripheral) => {
     }
 });
 
-console.log("Scanning for HaritoraX devices...")
+console.log("Scanning for HaritoraX devices...");
 noble.startScanning([], true);

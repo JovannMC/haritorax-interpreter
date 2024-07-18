@@ -176,7 +176,7 @@ export default class Bluetooth extends EventEmitter {
         return null;
     }
 
-    getDeviceInfo(localName: any) {
+    getDeviceInfo(localName: string) {
         for (let device of activeDevices) {
             if (device[0] === localName) {
                 return device;
@@ -302,7 +302,9 @@ function getCharacteristic(service: Service, characteristic: string): Characteri
     const characteristicInstance = service.characteristics.find((c) => c.uuid === characteristic);
     if (!characteristicInstance)
         error(
-            `Characteristic ${characteristic} not found for ${service.uuid}, characteristic list: ${service.characteristics}`, true);
+            `Characteristic ${characteristic} not found for ${service.uuid}, characteristic list: ${service.characteristics}`,
+            true
+        );
     return characteristicInstance;
 }
 
@@ -344,7 +346,7 @@ async function areAllBLEDiscovered(trackerName: string): Promise<boolean> {
     return true;
 }
 
-function emitData(classInstance: Bluetooth, localName: any, service: string, characteristic: string, data: any) {
+function emitData(classInstance: Bluetooth, localName: string, service: string, characteristic: string, data: any) {
     classInstance.emit(
         "data",
         localName,

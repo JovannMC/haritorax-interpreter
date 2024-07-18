@@ -67,15 +67,15 @@ const TRACKERS_GROUP_TWO = ["hip", "chest", "leftKnee", "rightElbow"];
  */
 
 const trackerButtons: Map<string, [number, number, number?]> = new Map([
-    // trackerName, [mainButton, subButton]
-    ["rightKnee", [0, 0]],
-    ["rightAnkle", [0, 0]],
-    ["hip", [0, 0]],
-    ["chest", [0, 0]],
-    ["leftKnee", [0, 0]],
-    ["leftAnkle", [0, 0]],
-    ["leftElbow", [0, 0]],
-    ["rightElbow", [0, 0]],
+    // trackerName, [mainButton, subButton, sub2Button]
+    ["rightKnee", [0, 0, 0]],
+    ["rightAnkle", [0, 0, 0]],
+    ["hip", [0, 0, 0]],
+    ["chest", [0, 0, 0]],
+    ["leftKnee", [0, 0, 0]],
+    ["leftAnkle", [0, 0, 0]],
+    ["leftElbow", [0, 0, 0]],
+    ["rightElbow", [0, 0, 0]],
 ]);
 
 const trackerSettingsRaw: Map<string, string> = new Map([
@@ -304,7 +304,7 @@ export default class HaritoraX extends EventEmitter {
             bluetooth = new Bluetooth();
             bluetoothEnabled = true;
             bluetooth.startConnection();
-            setupBluetoothServices();
+            if (!setupBluetoothServices()) error("Error setting up Bluetooth services", true);
         }
 
         if (com || bluetooth) {
@@ -350,7 +350,6 @@ export default class HaritoraX extends EventEmitter {
      * @param {number} fpsMode - The posture data transfer rate/FPS (50 or 100).
      * @param {string[]} sensorAutoCorrection - The sensor auto correction mode, multiple or none can be used (accel, gyro, mag).
      * @param {boolean} ankleMotionDetection - Whether ankle motion detection is enabled. (true or false)
-     * @returns {boolean} Whether the settings were successfully sent to the tracker.
      * @fires this#settings
      *
      * @example
@@ -429,7 +428,7 @@ export default class HaritoraX extends EventEmitter {
         }
 
         trackerSettings.set(trackerName, [sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection]);
-        return true;
+        return;
     }
 
     /**
@@ -441,7 +440,6 @@ export default class HaritoraX extends EventEmitter {
      * @param {number} fpsMode - The posture data transfer rate/FPS (50 or 100).
      * @param {string[]} sensorAutoCorrection - The sensor auto correction mode, multiple or none can be used (accel, gyro, mag).
      * @param {boolean} ankleMotionDetection - Whether ankle motion detection is enabled. (true or false)
-     * @returns {boolean} Whether the settings were successfully sent to all trackers.
      * @fires this#settings
      *
      * @example
@@ -461,11 +459,10 @@ export default class HaritoraX extends EventEmitter {
                 handleWirelessSettings(sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
             }
             updateTrackerSettings(sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
-            return true;
         } catch (err) {
             error(`Error sending tracker settings: ${err}`);
-            return false;
         }
+        return;
     }
 
     /**
@@ -477,7 +474,7 @@ export default class HaritoraX extends EventEmitter {
      * @returns {array} The active trackers.
      **/
 
-    getActiveTrackers() {
+    getActiveTrackers(): Array<any> {
         if (!comEnabled && !bluetoothEnabled) return null;
         const comTrackers = comEnabled ? activeDevices : [];
         const bluetoothTrackers = bluetoothEnabled ? bluetooth.getActiveTrackers() : [];
@@ -492,9 +489,9 @@ export default class HaritoraX extends EventEmitter {
      * @function getTrackerSettings
      * @param {string} trackerName - The name of the tracker.
      * @param {boolean} forceBluetoothRead - force reading settings data from BLE device
-     * @returns {Object} The tracker settings (sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection).
+     * @returns {object} The tracker settings (sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection).
      **/
-    async getTrackerSettings(trackerName?: string, forceBluetoothRead?: boolean) {
+    async getTrackerSettings(trackerName?: string, forceBluetoothRead?: boolean): Promise<object> {
         const logSettings = (
             name: string,
             sensorMode: number,
@@ -565,9 +562,9 @@ export default class HaritoraX extends EventEmitter {
      *
      * @function getTrackerSettingsRaw
      * @param {string} trackerName - The name of the tracker.
-     * @returns {Map} The tracker settings map.
+     * @returns {string} The tracker settings in raw hex.
      **/
-    getTrackerSettingsRaw(trackerName: string) {
+    getTrackerSettingsRaw(trackerName: string): String {
         const hexValue = trackerSettingsRaw.get(trackerName);
         if (hexValue) {
             log(`Tracker ${trackerName} raw hex settings: ${hexValue}`);
@@ -584,14 +581,16 @@ export default class HaritoraX extends EventEmitter {
      *
      * @function getTrackerButtons
      * @param {string} trackerName - The name of the tracker.
-     * @returns {Map} The tracker button map.
+     * @returns {object} The tracker buttons (mainButton, subButton, sub2Button).
      **/
-    getTrackerButtons(trackerName: string) {
+    getTrackerButtons(trackerName: string): Object {
         const buttons = trackerButtons.get(trackerName);
         if (buttons) {
-            const [mainButton, subButton] = buttons;
-            log(`Tracker ${trackerName} main button: ${mainButton}, sub button: ${subButton}`);
-            return { mainButton, subButton };
+            const [mainButton, subButton, sub2Button] = buttons;
+            log(
+                `Tracker ${trackerName} main button: ${mainButton}, sub button: ${subButton}, sub2 button: ${sub2Button}`
+            );
+            return { mainButton, subButton, sub2Button };
         }
         log(`Tracker ${trackerName} buttons not found`);
         return null;
@@ -606,7 +605,7 @@ export default class HaritoraX extends EventEmitter {
      * @param {string} connectionMode - The connection mode to check.
      * @returns {boolean} Whether the connection mode is active or not.
      **/
-    getConnectionModeActive(connectionMode: string) {
+    getConnectionModeActive(connectionMode: string): boolean {
         switch (connectionMode) {
             case "com":
                 return comEnabled;
@@ -621,11 +620,8 @@ export default class HaritoraX extends EventEmitter {
         return trackerModelEnabled;
     }
 
-    // !
-    // TODO: test if i broke these for COM (and wired, but will need to manually data or have people test)
-
     /**
-     * Returns device info for the specified tracker or dongle.
+     * Fires the "info" event to get the tracker info.
      * Supported trackers: wireless
      * Supported connections: COM, Bluetooth
      *
@@ -675,7 +671,7 @@ export default class HaritoraX extends EventEmitter {
     }
 
     /**
-     * Get battery info from the trackers.
+     * Fires the "battery" event to get the battery info of the trackers.
      * Supported trackers: wireless
      * Supported connections: COM, Bluetooth
      *
@@ -716,7 +712,7 @@ export default class HaritoraX extends EventEmitter {
     }
 
     /**
-     * Get the tracker's magnetometer status
+     * Fires the "mag" event to get the magnetometer status of the trackers.
      * Supported trackers: wireless, wired
      * Supported connections: COM, Bluetooth
      *
@@ -1545,7 +1541,7 @@ async function removeActiveDevices(deviceTypeToRemove: string) {
         }
     }
 
-    return true;
+    return;
 }
 
 /*
