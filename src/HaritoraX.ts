@@ -221,7 +221,7 @@ let trackerModelEnabled: string;
  * @type {object}
  * @property {string} trackerName - The name of the tracker.
  * @property {number} batteryRemaining - The remaining battery percentage of the tracker.
- * @property {number} batteryVoltage - The voltage of the tracker's battery. (GX only)
+ * @property {number} batteryVoltage - The voltage (in mV) of the tracker's battery. (GX only)
  * @property {string} chargeStatus - The charge status of the tracker. (GX only)
  **/
 
