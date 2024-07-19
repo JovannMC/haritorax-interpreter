@@ -54,6 +54,7 @@ export default class Bluetooth extends EventEmitter {
     startConnection() {
         const startScanning = () => {
             try {
+                allowReconnect = true;
                 noble.startScanning([], true);
                 this.emit("connected");
             } catch (err) {
@@ -100,7 +101,6 @@ export default class Bluetooth extends EventEmitter {
         }
 
         peripheral.on("disconnect", () => {
-            if (!allowReconnect) return;
             log(`(bluetooth) Disconnected from ${localName}`);
             this.emit("disconnect", peripheral);
             const index = activeDevices.findIndex((device) => device[1] === peripheral);
@@ -108,6 +108,7 @@ export default class Bluetooth extends EventEmitter {
                 activeDevices.splice(index, 1);
             }
 
+            if (!allowReconnect) return;
             setTimeout(() => {
                 noble.startScanning([], true);
             }, 3000);
@@ -285,6 +286,7 @@ async function getDevice(localName: string): Promise<ActiveDevice> {
     if (!device) error(`Device ${localName} not found, list: ${activeDevices}`, true);
 
     while (!(await areAllBLEDiscovered(localName))) {
+        if (!allowReconnect) return;
         log(`Waiting for all services and characteristics to be discovered for ${localName}...`);
         await new Promise((resolve) => setTimeout(resolve, 1000));
     }
