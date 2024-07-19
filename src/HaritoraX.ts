@@ -16,6 +16,8 @@ let comEnabled = false;
 let bluetoothEnabled = false;
 let main: HaritoraX;
 let canSendButtonData = false;
+let canProcessComData = false;
+let canProcessBluetoothData = false;
 
 /*
  * Constants
@@ -300,11 +302,17 @@ export default class HaritoraX extends EventEmitter {
             com = new COM(trackerModelEnabled, heartbeatInterval);
             comEnabled = true;
             com.startConnection(portNames);
+            canProcessComData = true;
         } else if (connectionMode === "bluetooth") {
             bluetooth = new Bluetooth();
             bluetoothEnabled = true;
             bluetooth.startConnection();
-            if (!setupBluetoothServices()) error("Error setting up Bluetooth services", true);
+
+            if (setupBluetoothServices()) {
+                canProcessBluetoothData = true;
+            } else {
+                error("Error setting up Bluetooth services", true);
+            }
         }
 
         if (com || bluetooth) {
@@ -326,11 +334,13 @@ export default class HaritoraX extends EventEmitter {
      **/
     async stopConnection(connectionMode: string) {
         if (connectionMode === "com" && comEnabled) {
+            canProcessComData = false;
             await removeActiveDevices("com");
 
             com.stopConnection();
             comEnabled = false;
         } else if (connectionMode === "bluetooth" && bluetoothEnabled) {
+            canProcessBluetoothData = false;
             await removeActiveDevices("bluetooth");
 
             bluetooth.stopConnection();
@@ -751,6 +761,8 @@ function listenToDeviceEvents() {
 
     if (com) {
         com.on("data", (trackerName: string, port: string, _portId: string, identifier: string, portData: string) => {
+            if (!canProcessComData) return;
+
             if (trackerModelEnabled === "wireless") {
                 switch (identifier[0]) {
                     case "x":
@@ -829,7 +841,7 @@ function listenToDeviceEvents() {
 
     if (bluetooth) {
         bluetooth.on("data", (localName: string, service: string, characteristic: string, data: string) => {
-            if (service === "Device Information") return;
+            if (!canProcessBluetoothData || service === "Device Information") return;
 
             switch (characteristic) {
                 case "Sensor":
@@ -964,6 +976,8 @@ function processWiredData(identifier: string, data: string) {
  **/
 
 function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) {
+    if (!trackerName || !data) return;
+
     // If tracker isn't in activeDevices, add it and emit "connect" event
     if (trackerName && !activeDevices.includes(trackerName) && (comEnabled || bluetoothEnabled)) {
         log(`Tracker ${trackerName} isn't in active devices, adding and emitting connect event`);
