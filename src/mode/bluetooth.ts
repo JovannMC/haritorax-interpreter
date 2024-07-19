@@ -26,16 +26,25 @@ const characteristics = new Map([
     ["2a24", "ModelNumber"],
     // Tracker Service
     ["00dbf1c690aa11eda1eb0242ac120002", "Sensor"],
+    ["00dbf07c90aa11eda1eb0242ac120002", "NumberOfImu"],
     ["00dbf30690aa11eda1eb0242ac120002", "Magnetometer"],
     ["00dbf45090aa11eda1eb0242ac120002", "MainButton"],
     ["00dbf58690aa11eda1eb0242ac120002", "SecondaryButton"],
+    ["00dbf6a890aa11eda1eb0242ac120002", "TertiaryButton"],
     // Setting Service
     ["ef84420290a911eda1eb0242ac120002", "FpsSetting"],
     ["ef8443f690a911eda1eb0242ac120002", "TofSetting"],
     ["ef8445c290a911eda1eb0242ac120002", "SensorModeSetting"],
     ["ef84c30090a911eda1eb0242ac120002", "WirelessModeSetting"],
     ["ef84c30590a911eda1eb0242ac120002", "AutoCalibrationSetting"],
-    //["ef843b5490a911eda1eb0242ac120002", "Something"], unsure what this is, reports randomly like battery level
+    ["ef84476690a911eda1eb0242ac120002", "SensorDataControl"], // unknown what this is
+    ["ef843b5490a911eda1eb0242ac120002", "BatteryVoltage"],
+    ["ef843cb290a911eda1eb0242ac120002", "ChargeStatus"],
+
+    // Unknown characteristics
+    ["0c900914a85e11edafa10242ac120002", "CommandMode"],
+    ["0c900c84a85e11edafa10242ac120002", "Command"],
+    ["0c900df6a85e11edafa10242ac120002", "Response"]
 ]);
 
 type ActiveDevice = [string, Peripheral, Service[], Characteristic[]];
