@@ -377,7 +377,6 @@ export default class HaritoraX extends EventEmitter {
             writeToBluetooth(trackerName, fpsModeCharacteristic, fpsMode === 50 ? 1 : 2);
             writeToBluetooth(trackerName, correctionCharacteristic, sensorAutoCorrectionBit);
             writeToBluetooth(trackerName, ankleCharacteristic, ankleMotionDetection ? 1 : 0);
-            logSettings(trackerName, settings);
         } else {
             // GX dongle(s)
             const sensorModeBit = sensorMode === 1 ? SENSOR_MODE_1 : SENSOR_MODE_2; // Default to mode 2
@@ -395,16 +394,6 @@ export default class HaritoraX extends EventEmitter {
                 log(`Invalid tracker name: ${trackerName}`);
                 return;
             }
-
-            logSettings(trackerName, {
-                sensorMode,
-                fpsMode,
-                sensorAutoCorrection,
-                ankleMotionDetection,
-                hexValue,
-            });
-
-            trackerSettings.set(trackerName, [sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection]);
 
             try {
                 let ports = com.getActivePorts();
@@ -427,6 +416,15 @@ export default class HaritoraX extends EventEmitter {
             }
         }
 
+        logSettings(trackerName, settings);
+        log(
+            `Tracker ${trackerName} settings applied: ${JSON.stringify([
+                sensorMode,
+                fpsMode,
+                sensorAutoCorrection,
+                ankleMotionDetection,
+            ])}`
+        );
         trackerSettings.set(trackerName, [sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection]);
         return;
     }
@@ -507,14 +505,7 @@ export default class HaritoraX extends EventEmitter {
         };
 
         if (trackerModelEnabled === "wired") {
-            const settings = trackerSettings.get("HaritoraXWired");
-            logSettings("HaritoraX", ...settings);
-            return {
-                sensorMode: settings[0],
-                fpsMode: settings[1],
-                sensorAutoCorrection: settings[2],
-                ankleMotionDetection: settings[3],
-            };
+            return getTrackerSettingsFromMap("HaritoraXWired");
         } else if (trackerModelEnabled === "wireless" && bluetoothEnabled && isWirelessBT(trackerName)) {
             if (forceBluetoothRead || !trackerSettings.has(trackerName)) {
                 try {
@@ -540,17 +531,12 @@ export default class HaritoraX extends EventEmitter {
                     error(`Error reading characteristic: ${err}`);
                 }
             } else {
-                const settings = trackerSettings.get(trackerName);
-                logSettings(trackerName, ...settings);
-                return {
-                    sensorMode: settings[0],
-                    fpsMode: settings[1],
-                    sensorAutoCorrection: settings[2],
-                    ankleMotionDetection: settings[3],
-                };
+                return getTrackerSettingsFromMap(trackerName);
             }
+        } else if (trackerModelEnabled === "wireless" && comEnabled && !isWirelessBT(trackerName)) {
+            return getTrackerSettingsFromMap(trackerName);
         } else {
-            log(`Tracker ${trackerName} settings not found`);
+            error(`Cannot get settings for ${trackerName} settings.`);
             return null;
         }
     }
@@ -1008,7 +994,7 @@ function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) 
         main.emit("imu", trackerName, rotation, gravity, ankle ? ankle : ankleValue);
         if (!isWirelessBT(trackerName)) main.emit("mag", trackerName, magStatus);
     } catch (err) {
-        error(`Error decoding tracker ${trackerName} IMU packet data: ${err}`);
+        error(`Error decoding tracker ${trackerName} IMU packet data: ${err}`, false);
     }
 }
 
@@ -1020,6 +1006,8 @@ function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) 
  **/
 
 function decodeIMUPacket(data: Buffer, trackerName: string) {
+    if (!trackerName) return;
+
     try {
         if (data.length < 14) {
             error(`Too few bytes to decode IMU packet, data: ${data.toString("utf-8")}`);
@@ -1108,7 +1096,7 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
 
         return { rotation, gravity, ankle, magStatus };
     } catch (err) {
-        error(`Error decoding IMU packet: ${err}`, true);
+        error(`Error decoding IMU packet: ${err}`, false);
     }
 }
 
@@ -1542,6 +1530,21 @@ async function removeActiveDevices(deviceTypeToRemove: string) {
     }
 
     return;
+}
+
+/*
+ * getTrackerSettings() function helpers
+ */
+
+function getTrackerSettingsFromMap(trackerName: string) {
+    const settings = trackerSettings.get(trackerName);
+    logSettings(trackerName, settings);
+    return {
+        sensorMode: settings[0],
+        fpsMode: settings[1],
+        sensorAutoCorrection: settings[2],
+        ankleMotionDetection: settings[3],
+    };
 }
 
 /*
