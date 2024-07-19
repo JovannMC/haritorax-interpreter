@@ -216,9 +216,7 @@ function processData(data: string, port: string) {
             }
         }
 
-        if (typeof main !== "undefined" && typeof main.emit === "function") {
-            main.emit("data", trackerName, port, portId, identifier, portData);
-        }
+        if (typeof main !== "undefined") main.emit("data", trackerName, port, portId, identifier, portData);
     } catch (err) {
         error(`An unexpected error occurred: ${err}`);
     }

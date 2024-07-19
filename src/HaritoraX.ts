@@ -572,7 +572,7 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Get the tracker's buttons.
-     * Supported trackers: wireless
+     * Supported trackers: wireless, wired
      * Supported connections: COM, Bluetooth
      *
      * @function getTrackerButtons
@@ -618,7 +618,7 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Fires the "info" event to get the tracker info.
-     * Supported trackers: wireless
+     * Supported trackers: wireless, wired
      * Supported connections: COM, Bluetooth
      *
      * @function fireDeviceInfo
@@ -745,12 +745,12 @@ export default class HaritoraX extends EventEmitter {
      * @function emitData
      * @param trackerName - The name of the tracker.
      * @param port - COM port that data was sent by.
-     * @param _portId - ID of tracker in the port for data (0/1).
+     * @param portId - ID of tracker in the port for data (0/1).
      * @param identifier - Identifier of the data.
      * @param data - The data to be processed.
      */
-    emitData(trackerName: string, port: string, _portId: string, identifier: string, data: string) {
-        com.emit("data", trackerName, port, _portId, identifier, data);
+    emitData(trackerName: string, port: string, portId: string, identifier: string, data: string) {
+        com.emit("data", trackerName, port, portId, identifier, data);
     }
 }
 
@@ -779,9 +779,10 @@ function listenToDeviceEvents() {
                         break;
                     case "o":
                         // Let the person set the tracker settings manually
+                        // TODO: figure out a non-scuffed way to re-implement this so that it doesn't screw with user-set settings
                         break;
                     case "i":
-                        // Handled by com.ts
+                        // Handled by com.ts, because I don't know how else I could've handled it before
                         break;
                     default:
                         log(`${port} - Unknown data from ${trackerName} (identifier: ${identifier}): ${portData}`);
@@ -793,7 +794,11 @@ function listenToDeviceEvents() {
                     // x = 5 trackers
                     // p = 6 trackers
                     // r = 6 trackers (w/ ankle motion)
-                    // unknown if same applies to 8 trackers (5+1+2) or 7 trackers (5+2), but likely the same, along with ankle on/off
+                    // e = 7 trackers
+                    // h = 7 trackers (w/ ankle motion)
+                    // g = 8 trackers
+                    // h = 8 trackers (w/ ankle motion)
+                    // (yes. duplicates.)
                     case "x":
                     case "r":
                     case "p":
@@ -859,7 +864,7 @@ function listenToDeviceEvents() {
                 case "AutoCalibrationSetting":
                 case "TofSetting":
                     // No need to process, we add the case here but don't do anything because it's not "unknown data".
-                    // Not sure why it randomly reports its current settings.
+                    // Not sure why it randomly reports its current settings, we can just read them manually if wanted.
                     break;
                 case "Magnetometer":
                     processMagData(data, localName);
@@ -912,12 +917,11 @@ function processWiredData(identifier: string, data: string) {
     let trackerNames = ["chest", "leftKnee", "leftAnkle", "rightKnee", "rightAnkle"];
     const buffer = Buffer.from(data, "base64");
 
-    let trackerCount = 0;
     let ankleEnabled = false;
 
     for (let [key, value] of wiredTrackerAssignments) {
         if (value === identifier) {
-            [trackerCount, ankleEnabled] = key;
+            [, ankleEnabled] = key;
             break;
         }
     }
@@ -1118,7 +1122,7 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
  * Processes other tracker data received from the tracker by the dongle.
  * Read function comments for more information.
  * Supported trackers: wireless
- * Supported connections: COM, Bluetooth
+ * Supported connections: COM
  *
  * @function processTrackerData
  * @param {string} data - The data to process.
@@ -1129,7 +1133,7 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
 function processTrackerData(data: string, trackerName: string) {
     /*
      * Currently unsure what other data a0/a1 could represent other than trying to find the trackers, I see other values for it too reporting every second.
-     * This could also be used to report calibration data when running the calibration through the software.
+     * This could also be used to report calibration data when running the calibration through the software, or a "heartbeat" packet.
      */
 
     if (data === "7f7f7f7f7f7f") {
