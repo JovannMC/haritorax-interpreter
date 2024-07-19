@@ -1469,12 +1469,12 @@ function error(message: string, exceptional = false) {
     if (!debug && !exceptional) return;
 
     const emittedError = `(haritorax-interpreter) - ${message}`;
+    main.emit("error", emittedError, exceptional);
     exceptional
         ? console.error(emittedError)
         : (() => {
               throw new Error(emittedError);
           })();
-    main.emit("error", emittedError, exceptional);
 }
 
 function isWirelessBT(trackerName: string): boolean {
