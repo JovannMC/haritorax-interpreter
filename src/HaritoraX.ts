@@ -1670,7 +1670,7 @@ function handleWirelessSettings(
             ankleMotionDetection
         );
         Object.values(com.getActivePorts()).forEach((port) => {
-            port.write(trackerSettingsBuffer, (err) => {
+            port.write(trackerSettingsBuffer, (err: Error) => {
                 if (err) {
                     error(`Error writing data to serial port ${port.path}: ${err}`);
                 } else {

@@ -1,7 +1,11 @@
 "use strict";
 
-import { SerialPort, ReadlineParser } from "serialport";
+import { SerialPortStream } from "@serialport/stream";
+import { autoDetect } from "@serialport/bindings-cpp";
+import { ReadlineParser } from "@serialport/parser-readline";
 import { EventEmitter } from "events";
+
+const Binding = autoDetect();
 
 let main: COM = undefined;
 let heartbeatInterval: number; // in milliseconds
@@ -53,7 +57,7 @@ export default class COM extends EventEmitter {
     startConnection(portNames: string[]) {
         const initializeSerialPort = (port: string) => {
             try {
-                const serial = new SerialPort({ path: port, baudRate: BAUD_RATE });
+                const serial = new SerialPortStream({ path: port, baudRate: BAUD_RATE, binding: Binding });
                 const parser = serial.pipe(new ReadlineParser({ delimiter: "\n" }));
                 activePorts[port] = serial;
 
@@ -222,7 +226,7 @@ function processData(data: string, port: string) {
     }
 }
 
-function setupHeartbeat(serial: SerialPort, port: string) {
+function setupHeartbeat(serial: SerialPortStream, port: string) {
     setInterval(() => {
         if (serial.isOpen) {
             log(`Sending heartbeat to port ${port}`);
@@ -252,7 +256,7 @@ function error(message: string, exceptional = false) {
  */
 
 interface ActivePorts {
-    [key: string]: SerialPort;
+    [key: string]: SerialPortStream;
 }
 
 export { COM };
