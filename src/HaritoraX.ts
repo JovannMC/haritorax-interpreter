@@ -655,7 +655,7 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Fires the "battery" event to get the battery info of the trackers.
-     * Supported trackers: wireless
+     * Supported trackers: wireless, wired
      * Supported connections: COM, Bluetooth
      *
      * @function fireTrackerBattery
@@ -1384,7 +1384,7 @@ function processWiredTrackerData(data: string, trackerName: string, currentButto
     // example data: t:{"id":"button2", "type":"click", "start_time":6937744, "option":""}
     // TODO: do more testing with wired trackers, find different "type"(s) and what "start_time" and "option" mean
     const buttonData = JSON.parse(data);
-    if (trackerName.startsWith("HaritoraXWired")) {
+    if (trackerName === "HaritoraXWired") {
         if (buttonData.id === "button1") {
             currentButtons[MAIN_BUTTON_INDEX] += 1;
             return "main";
