@@ -147,6 +147,8 @@ let settingsService: string;
 let batteryService: string;
 let magnetometerCharacteristic: string;
 let batteryLevelCharacteristic: string;
+let batteryVoltageCharacteristic: string;
+let chargeStatusCharacteristic: string;
 let sensorModeCharacteristic: string;
 let fpsModeCharacteristic: string;
 let correctionCharacteristic: string;
@@ -217,7 +219,7 @@ let trackerModelEnabled: string;
 /**
  * The "battery" event which provides info about the tracker's battery data.
  * Supported trackers: wireless, wired
- * Supported connections: COM, Bluetooth (partial)
+ * Supported connections: COM, Bluetooth
  *
  * @event this#battery
  * @type {object}
@@ -687,9 +689,44 @@ export default class HaritoraX extends EventEmitter {
         if (isWirelessBT(trackerName)) {
             log(`Reading battery info for ${trackerName}...`);
             try {
-                const buffer = await bluetooth.read(trackerName, batteryService, batteryLevelCharacteristic);
-                if (!buffer) error(`Tracker ${trackerName} battery info not found`);
-                batteryRemaining = new DataView(buffer).getUint8(0);
+                const batteryLevelBuffer = await bluetooth.read(
+                    trackerName,
+                    batteryService,
+                    batteryLevelCharacteristic
+                );
+                if (!batteryLevelBuffer) error(`Tracker ${trackerName} battery level not found`);
+                batteryRemaining = new DataView(batteryLevelBuffer).getUint8(0);
+
+                const batteryVoltageBuffer = await bluetooth.read(
+                    trackerName,
+                    settingsService,
+                    batteryVoltageCharacteristic
+                );
+                if (!batteryVoltageBuffer) error(`Tracker ${trackerName} battery voltage not found`);
+                batteryVoltage = new DataView(batteryVoltageBuffer).getInt16(0, true);
+
+                const chargeStatusBuffer = await bluetooth.read(
+                    trackerName,
+                    settingsService,
+                    chargeStatusCharacteristic
+                );
+                const chargeStatusHex = Buffer.from(chargeStatusBuffer).toString("hex");
+                if (!chargeStatusBuffer) error(`Tracker ${trackerName} charge status not found`);
+                switch (chargeStatusHex) {
+                    case "00":
+                        chargeStatus = "discharging";
+                        break;
+                    case "01":
+                        chargeStatus = "charging";
+                        break;
+                    case "02":
+                        chargeStatus = "charged";
+                        break;
+                    default:
+                        chargeStatus = "unknown";
+                        break;
+                }
+
                 trackerBattery.set(trackerName, [batteryRemaining, batteryVoltage, chargeStatus]);
             } catch (err) {
                 error(`Error getting battery info for ${trackerName}: ${err}`);
@@ -857,7 +894,9 @@ function listenToDeviceEvents() {
                     processButtonData(data, localName, characteristic);
                     break;
                 case "BatteryLevel":
-                    processBatteryData(data, localName);
+                case "BatteryVoltage":
+                case "ChargeStatus":
+                    processBatteryData(data, localName, characteristic);
                     break;
                 case "SensorModeSetting":
                 case "FpsSetting":
@@ -1374,6 +1413,9 @@ function processWirelessBTTrackerData(characteristic: string, currentButtons: nu
         case "SecondaryButton":
             currentButtons[1]++;
             return "sub";
+        case "TertiaryButton":
+            currentButtons[2]++;
+            return "sub2";
         default:
             return undefined;
     }
@@ -1411,7 +1453,7 @@ function logButtonPress(trackerName: string, buttonPressed: string | undefined, 
  * Processes the battery data received from the tracker by the dongle.
  * It contains the information about the battery percentage, voltage, and charge status of the tracker.
  * Supported trackers: wireless, wired
- * Supported connections: COM, Bluetooth (partial)
+ * Supported connections: COM, Bluetooth
  *
  * @function processBatteryData
  * @param {string} data - The data to process.
@@ -1419,7 +1461,7 @@ function logButtonPress(trackerName: string, buttonPressed: string | undefined, 
  * @fires haritora#battery
  **/
 
-function processBatteryData(data: string, trackerName: string) {
+function processBatteryData(data: string, trackerName: string, characteristic?: string) {
     const batteryData: [number | undefined, number | undefined, string | undefined] = [undefined, undefined, undefined];
     const logBatteryInfo = (remaining: number | undefined, voltage: number | undefined, status: string | undefined) => {
         if (remaining !== undefined) log(`Tracker ${trackerName} remaining: ${remaining}%`);
@@ -1438,14 +1480,49 @@ function processBatteryData(data: string, trackerName: string) {
             error(`Error parsing battery data JSON for ${trackerName}: ${err}`);
             log(`Raw battery data: ${data}`);
         }
-    } else if (trackerModelEnabled === "wireless" && isWirelessBT(trackerName) && bluetoothEnabled) {
-        try {
-            const batteryRemainingHex = Buffer.from(data, "base64").toString("hex");
-            batteryData[0] = parseInt(batteryRemainingHex, 16);
-            log(`Tracker ${trackerName} battery remaining: ${batteryData[0]}%`);
-            log(`Tracker ${trackerName} battery remaining (hex): ${batteryRemainingHex}`);
-        } catch (err) {
-            error(`Error converting battery data to hex for ${trackerName}: ${err}`);
+    } else if (trackerModelEnabled === "wireless" && isWirelessBT(trackerName) && bluetoothEnabled && characteristic) {
+        if (characteristic === "BatteryLevel") {
+            try {
+                const batteryRemainingHex = Buffer.from(data, "base64").toString("hex");
+                batteryData[0] = parseInt(batteryRemainingHex, 16);
+                log(`Tracker ${trackerName} battery remaining: ${batteryData[0]}%`);
+                log(`Tracker ${trackerName} battery remaining (hex): ${batteryRemainingHex}`);
+            } catch (err) {
+                error(`Error converting battery data to hex for ${trackerName}: ${err}`);
+            }
+        } else if (characteristic === "BatteryVoltage") {
+            try {
+                const batteryVoltage = Buffer.from(data, "base64").readInt16LE(0);
+                batteryData[1] = batteryVoltage;
+                log(`Tracker ${trackerName} battery voltage: ${batteryVoltage}`);
+            } catch (err) {
+                error(`Error converting battery data for ${trackerName}: ${err}`);
+            }
+        } else if (characteristic === "ChargeStatus") {
+            try {
+                // 0 = discharging
+                // 1 = charging
+                // 2 = charged
+                const chargeStatusHex = Buffer.from(data, "base64").toString("hex");
+                batteryData[2] = chargeStatusHex;
+
+                switch (chargeStatusHex) {
+                    case "00":
+                        log(`Tracker ${trackerName} charge status: Discharging`);
+                        break;
+                    case "01":
+                        log(`Tracker ${trackerName} charge status: Charging`);
+                        break;
+                    case "02":
+                        log(`Tracker ${trackerName} charge status: Charged`);
+                        break;
+                    default:
+                        log(`Tracker ${trackerName} charge status: Unknown`);
+                        break;
+                }
+            } catch (err) {
+                error(`Error converting charge status data for ${trackerName}: ${err}`);
+            }
         }
     }
 
@@ -1460,24 +1537,18 @@ function processBatteryData(data: string, trackerName: string) {
 function log(message: string) {
     if (!debug) return;
 
-    const stack = new Error().stack;
-    const callerLine = stack.split("\n")[2];
-    const lineNumber = callerLine.match(/:(\d+):/)[1];
-
-    let emittedMessage = `(haritorax-interpreter) - Line ${lineNumber} - ${message}`;
-    console.log(emittedMessage);
-    main.emit("log", emittedMessage);
+    console.log(message);
+    main.emit("log", message);
 }
 
 function error(message: string, exceptional = false) {
     if (!debug && !exceptional) return;
 
-    const emittedError = `(haritorax-interpreter) - ${message}`;
-    main.emit("error", emittedError, exceptional);
+    main.emit("error", message, exceptional);
     exceptional
-        ? console.error(emittedError)
+        ? console.error(message)
         : (() => {
-              throw new Error(emittedError);
+              throw new Error(message);
           })();
 }
 
@@ -1515,6 +1586,8 @@ function setupBluetoothServices(): boolean {
 
     magnetometerCharacteristic = bluetooth.getCharacteristicUUID("Magnetometer");
     batteryLevelCharacteristic = bluetooth.getCharacteristicUUID("BatteryLevel");
+    batteryVoltageCharacteristic = bluetooth.getCharacteristicUUID("BatteryVoltage");
+    chargeStatusCharacteristic = bluetooth.getCharacteristicUUID("ChargeStatus");
     sensorModeCharacteristic = bluetooth.getCharacteristicUUID("SensorModeSetting");
     fpsModeCharacteristic = bluetooth.getCharacteristicUUID("FpsSetting");
     correctionCharacteristic = bluetooth.getCharacteristicUUID("AutoCalibrationSetting");
