@@ -47,7 +47,7 @@ const characteristics = new Map([
     ["0c900df6a85e11edafa10242ac120002", "Response"],
 ]);
 
-type ActiveDevice = [string, Peripheral, Service[], Characteristic[], boolean];
+type ActiveDevice = [string, Peripheral, Service[], Characteristic[]];
 let activeDevices: ActiveDevice[] = [];
 
 let allowReconnect = true;
@@ -99,20 +99,12 @@ export default class Bluetooth extends EventEmitter {
 
         try {
             await connectPeripheral(peripheral);
-            log(`(bluetooth) Connected to ${localName}`);
-            this.emit("connect", peripheral);
 
             const { services, characteristics } = await discoverServicesAndCharacteristics(peripheral);
-
             updateActiveDevices(localName, peripheral, services, characteristics);
 
-            while (!(await areAllBLEDiscovered(localName))) {
-                if (activeDevices.find((device) => device[0] === localName)[4]) break;
-                log(`Waiting for all services and characteristics to be discovered for ${localName}...`);
-                await new Promise((resolve) => setTimeout(resolve, 1000));
-            }
-
-            this.emit("ready", localName);
+            log(`(bluetooth) Connected to ${localName}`);
+            this.emit("connect", peripheral);
         } catch (err) {
             error(`Error during discovery/connection process: ${err}`, true);
         }
@@ -255,9 +247,9 @@ async function discoverCharacteristics(localName: string, service: Service) {
     });
 }
 
-function updateActiveDevices(localName: string, peripheral: Peripheral, services: Service[], characteristics: Characteristic[], isReady = false) {
+function updateActiveDevices(localName: string, peripheral: Peripheral, services: Service[], characteristics: Characteristic[]) {
     const deviceIndex = activeDevices.findIndex((device) => device[0] === localName);
-    const deviceData: ActiveDevice = [localName, peripheral, services, characteristics, isReady];
+    const deviceData: ActiveDevice = [localName, peripheral, services, characteristics];
     if (deviceIndex !== -1) activeDevices[deviceIndex] = deviceData;
     else activeDevices.push(deviceData);
 }
@@ -296,7 +288,6 @@ async function writeCharacteristic(characteristicInstance: Characteristic, data:
 async function getDevice(localName: string): Promise<ActiveDevice> {
     const device = activeDevices.find((device: ActiveDevice) => device[0] === localName);
     if (!device) error(`Device ${localName} not found, list: ${activeDevices}`, true);
-    if (!device[4]) error(`Device ${localName} not ready yet`, true);
 
     return device;
 }
@@ -320,41 +311,6 @@ function getCharacteristic(service: Service, characteristic: string): Characteri
 /*
  * General helper functions
  */
-
-const importantServices = ["ef84369a90a911eda1eb0242ac120002", "180f"];
-const importantCharacteristics = [
-    "2a19",
-    "ef84420290a911eda1eb0242ac120002",
-    "ef8443f690a911eda1eb0242ac120002",
-    "ef8445c290a911eda1eb0242ac120002",
-    "ef84c30090a911eda1eb0242ac120002",
-    "ef84c30590a911eda1eb0242ac120002",
-];
-
-async function areAllBLEDiscovered(trackerName: string): Promise<boolean> {
-    const device = activeDevices.find((device: ActiveDevice) => device[0] === trackerName);
-    if (!device) return false;
-
-    const [, , services, characteristics] = device;
-
-    // Check if all important services are discovered
-    for (const serviceUuid of importantServices) {
-        if (!services.find((service: Service) => service.uuid === serviceUuid)) {
-            return false;
-        }
-    }
-
-    // Check if all important characteristics are discovered
-    for (const characteristicUuid of importantCharacteristics) {
-        if (!characteristics.find((characteristic: Characteristic) => characteristic.uuid === characteristicUuid)) {
-            return false;
-        }
-    }
-
-    log(`All services and characteristics discovered for ${trackerName}`);
-    activeDevices.find((device) => device[0] === trackerName)[4] = true;
-    return true;
-}
 
 function emitData(localName: string, service: string, characteristic: string, data: any) {
     main.emit(
