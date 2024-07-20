@@ -901,6 +901,10 @@ function listenToDeviceEvents() {
             main.emit("disconnect", trackerName);
         });
 
+        bluetooth.on("ready", (trackerName) => {
+            main.emit("initialized", trackerName);
+        });
+
         bluetooth.on("log", (message: string) => {
             log(message);
         });
@@ -998,6 +1002,10 @@ function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) 
         log(`Tracker ${trackerName} isn't in active devices, adding and emitting connect event`);
         activeDevices.push(trackerName);
         main.emit("connect", trackerName);
+        // there is no waiting for the tracker to be initialized for COM wireless trackers - emitting it here after a second for consistency with BLE
+        setTimeout(() => {
+            main.emit("initialized", trackerName);
+        }, 1000);
     }
 
     // Decode and log the data
@@ -1588,7 +1596,8 @@ async function removeActiveDevices(deviceTypeToRemove: string) {
 
 function getTrackerSettingsFromMap(trackerName: string) {
     const settings = trackerSettings.get(trackerName);
-    logSettings(trackerName, settings);
+    const settingsToLog = { "Sensor mode": settings[0], "FPS mode": settings[1], "Sensor auto correction": settings[2], "Ankle motion detection": settings[3] };
+    logSettings(trackerName, settingsToLog);
     return {
         sensorMode: settings[0],
         fpsMode: settings[1],

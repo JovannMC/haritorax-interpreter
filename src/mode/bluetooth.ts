@@ -47,7 +47,7 @@ const characteristics = new Map([
     ["0c900df6a85e11edafa10242ac120002", "Response"],
 ]);
 
-type ActiveDevice = [string, Peripheral, Service[], Characteristic[]];
+type ActiveDevice = [string, Peripheral, Service[], Characteristic[], boolean];
 let activeDevices: ActiveDevice[] = [];
 
 let allowReconnect = true;
@@ -105,6 +105,14 @@ export default class Bluetooth extends EventEmitter {
             const { services, characteristics } = await discoverServicesAndCharacteristics(peripheral);
 
             updateActiveDevices(localName, peripheral, services, characteristics);
+
+            while (!(await areAllBLEDiscovered(localName))) {
+                if (activeDevices.find((device) => device[0] === localName)[4]) break;
+                log(`Waiting for all services and characteristics to be discovered for ${localName}...`);
+                await new Promise((resolve) => setTimeout(resolve, 1000));
+            }
+
+            this.emit("ready", localName);
         } catch (err) {
             error(`Error during discovery/connection process: ${err}`, true);
         }
@@ -236,7 +244,7 @@ async function discoverCharacteristics(localName: string, service: Service) {
             }
             characteristics.forEach((characteristic) => {
                 characteristic.on("data", (data) => {
-                    emitData(main, localName, service.uuid, characteristic.uuid, data);
+                    emitData(localName, service.uuid, characteristic.uuid, data);
                 });
                 characteristic.subscribe((err) => {
                     if (err) error(`Error subscribing to characteristic ${characteristic.uuid}: ${err}`);
@@ -247,9 +255,9 @@ async function discoverCharacteristics(localName: string, service: Service) {
     });
 }
 
-function updateActiveDevices(localName: string, peripheral: Peripheral, services: Service[], characteristics: Characteristic[]) {
+function updateActiveDevices(localName: string, peripheral: Peripheral, services: Service[], characteristics: Characteristic[], isReady = false) {
     const deviceIndex = activeDevices.findIndex((device) => device[0] === localName);
-    const deviceData: ActiveDevice = [localName, peripheral, services, characteristics];
+    const deviceData: ActiveDevice = [localName, peripheral, services, characteristics, isReady];
     if (deviceIndex !== -1) activeDevices[deviceIndex] = deviceData;
     else activeDevices.push(deviceData);
 }
@@ -288,12 +296,7 @@ async function writeCharacteristic(characteristicInstance: Characteristic, data:
 async function getDevice(localName: string): Promise<ActiveDevice> {
     const device = activeDevices.find((device: ActiveDevice) => device[0] === localName);
     if (!device) error(`Device ${localName} not found, list: ${activeDevices}`, true);
-
-    while (!(await areAllBLEDiscovered(localName))) {
-        if (!allowReconnect) return;
-        log(`Waiting for all services and characteristics to be discovered for ${localName}...`);
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
+    if (!device[4]) error(`Device ${localName} not ready yet`, true);
 
     return device;
 }
@@ -348,12 +351,13 @@ async function areAllBLEDiscovered(trackerName: string): Promise<boolean> {
         }
     }
 
-    // If all checks pass, return true
+    log(`All services and characteristics discovered for ${trackerName}`);
+    activeDevices.find((device) => device[0] === trackerName)[4] = true;
     return true;
 }
 
-function emitData(classInstance: Bluetooth, localName: string, service: string, characteristic: string, data: any) {
-    classInstance.emit(
+function emitData(localName: string, service: string, characteristic: string, data: any) {
+    main.emit(
         "data",
         localName,
         services.get(service) || service,
