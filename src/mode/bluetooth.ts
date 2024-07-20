@@ -44,7 +44,7 @@ const characteristics = new Map([
     // Unknown characteristics
     ["0c900914a85e11edafa10242ac120002", "CommandMode"],
     ["0c900c84a85e11edafa10242ac120002", "Command"],
-    ["0c900df6a85e11edafa10242ac120002", "Response"]
+    ["0c900df6a85e11edafa10242ac120002", "Response"],
 ]);
 
 type ActiveDevice = [string, Peripheral, Service[], Characteristic[]];
@@ -247,12 +247,7 @@ async function discoverCharacteristics(localName: string, service: Service) {
     });
 }
 
-function updateActiveDevices(
-    localName: string,
-    peripheral: Peripheral,
-    services: Service[],
-    characteristics: Characteristic[]
-) {
+function updateActiveDevices(localName: string, peripheral: Peripheral, services: Service[], characteristics: Characteristic[]) {
     const deviceIndex = activeDevices.findIndex((device) => device[0] === localName);
     const deviceData: ActiveDevice = [localName, peripheral, services, characteristics];
     if (deviceIndex !== -1) activeDevices[deviceIndex] = deviceData;
