@@ -8,23 +8,18 @@ if (mode === "bt" || mode === "bluetooth") {
 
     setInterval(async () => {
         console.log("Active trackers for BT:", device.getActiveTrackers());
-        console.log("Info: ", await device.getDeviceInfo("HaritoraXW-(SERIAL)"));
-        console.log("Mag: ", await device.getTrackerMag("HaritoraXW-(SERIAL)"));
-        console.log("Battery: ", await device.getBatteryInfo("HaritoraXW-(SERIAL)"));
     }, 5000);
 
     /*setInterval(async () => {
         try {
             console.log("Active trackers for BT:", device.getActiveTrackers());
-            console.log("Device info:", await device.getDeviceInfo("HaritoraXW-(SERIAL)"));
-            console.log("Device battery:", await device.getBatteryInfo("HaritoraXW-(SERIAL)"));
             console.log("Device settings:", await device.getTrackerSettings("HaritoraXW-(SERIAL)"));
         } catch (error) {
             console.error("Error getting device data:", error);
         }
     }, 3000);*/
 } else {
-    device.startConnection("com", ["COM3", "COM4", "COM5"]);
+    device.startConnection("com", true);
 
     device.on("connect", (trackerName) => {
         console.log(`Connected to tracker ${trackerName}`);
@@ -34,9 +29,6 @@ if (mode === "bt" || mode === "bluetooth") {
     setInterval(async () => {
         try {
             console.log("Active trackers for COM:", device.getActiveTrackers());
-            console.log("Device info:", await device.getDeviceInfo("rightAnkle"));
-            console.log("Device battery:", await device.getBatteryInfo("rightAnkle"));
-            console.log("Device magnetometer:", await device.getTrackerMag("rightAnkle"));
         } catch (error) {
             console.error("Error getting device data:", error);
         }
@@ -47,12 +39,11 @@ if (mode === "bt" || mode === "bluetooth") {
         console.log(`Tracker settings map:`, device.getTrackerSettings("rightAnkle"));
         console.log(`Tracker raw hex settings map:`, device.getTrackerSettingsRaw("rightAnkle"));
         console.log(`Tracker buttons map:`, device.getTrackerButtons("rightAnkle"));
-        console.log(`Tracker battery map:`, device.getBatteryInfo("rightAnkle"));
     }, 5000);
 
     /*setTimeout(() => {
     console.log("Stopping connection");
-    device.stopConnection("gx");
+    device.stopConnection("com");
     }, 5000);
 
     setTimeout(() => {

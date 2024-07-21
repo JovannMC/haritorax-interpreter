@@ -8,7 +8,6 @@ import { EventEmitter } from "events";
 const Binding = autoDetect();
 
 let main: COM = undefined;
-let heartbeatInterval: number; // in milliseconds
 
 const BAUD_RATE = 500000; // from the haritora_setting.json in the HaritoraConfigurator
 
@@ -44,24 +43,33 @@ const deviceInformation: Map<string, string[]> = new Map([
 let activePorts: ActivePorts = {};
 let trackersAssigned = false;
 let trackerModelEnabled: String;
+let heartbeatInterval: number; // in milliseconds
 
 export default class COM extends EventEmitter {
-    constructor(trackerModel: string, heartbeat = 10000) {
+    constructor(trackerModel: string, heartbeat: number) {
         super();
-        heartbeatInterval = heartbeat;
         main = this;
         trackerModelEnabled = trackerModel;
+        heartbeatInterval = heartbeat;
         log(`Initialized COM module with settings: ${trackerModelEnabled} ${heartbeatInterval}`);
     }
 
-    startConnection(portNames: string[]) {
-        const initializeSerialPort = (port: string) => {
+    async startConnection(autoFind: boolean, portNames: string[]) {
+        const devices = [
+            { name: "GX2", vid: "1915", pid: "520F" },
+            { name: "GX6", vid: "04DA", pid: "3F18" },
+        ];
+
+        const initializeSerialPort = (port: string, deviceName: string) => {
             try {
                 const serial = new SerialPortStream({ path: port, baudRate: BAUD_RATE, binding: Binding });
                 const parser = serial.pipe(new ReadlineParser({ delimiter: "\n" }));
                 activePorts[port] = serial;
 
-                serial.on("open", () => this.emit("connected", port));
+                serial.on("open", () => {
+                    this.emit("connected", port);
+                    log(`Connected to COM port for ${deviceName}: ${port}`);
+                });
                 parser.on("data", (data) => processData(data, port));
                 serial.on("close", () => this.emit("disconnected", port));
                 serial.on("error", (err) => {
@@ -74,9 +82,28 @@ export default class COM extends EventEmitter {
             }
         };
 
-        for (const port of portNames) {
-            log(`Opening COM port: ${port}`);
-            initializeSerialPort(port);
+        if (autoFind) {
+            const ports = await Binding.list();
+            const availablePorts = ports
+                .map((port) => {
+                    const device = devices.find((device) => port.vendorId === device.vid && port.productId === device.pid);
+                    return {
+                        ...port,
+                        deviceName: device ? device.name : undefined,
+                    };
+                })
+                .filter((port) => port.deviceName !== undefined);
+
+            for (const port of availablePorts) {
+                log(`Found COM port for ${port.deviceName}: ${port.path}`);
+                initializeSerialPort(port.path, port.deviceName);
+            }
+        } else {
+            for (const port of portNames) {
+                // For manual selection, device name is not logged since VID/PID matching is not performed
+                log(`Opening COM port: ${port}`);
+                initializeSerialPort(port, "Unknown Device");
+            }
         }
     }
 
