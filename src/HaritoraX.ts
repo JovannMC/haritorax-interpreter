@@ -667,10 +667,10 @@ export default class HaritoraX extends EventEmitter {
         let batteryRemaining, batteryVoltage, chargeStatus;
 
         // Check if battery info is already available
-        if (trackerBattery.has(trackerName)) [batteryRemaining, batteryVoltage, chargeStatus] = trackerBattery.get(trackerName);
-
-        // Attempt to read battery info for wireless BT trackers
-        if (isWirelessBT(trackerName)) {
+        if (trackerBattery.has(trackerName)) {
+            [batteryRemaining, batteryVoltage, chargeStatus] = trackerBattery.get(trackerName);
+        } else if (isWirelessBT(trackerName)) {
+            // Attempt to read battery info for wireless BT trackers
             log(`Reading battery info for ${trackerName}...`);
             try {
                 const batteryLevelBuffer = await bluetooth.read(trackerName, batteryService, batteryLevelCharacteristic);
@@ -705,7 +705,7 @@ export default class HaritoraX extends EventEmitter {
                 return null;
             }
         } else {
-            log(`Tracker ${trackerName} battery info not found`);
+            error(`Tracker ${trackerName} battery info not found`);
             return null;
         }
 
@@ -1440,53 +1440,55 @@ function processBatteryData(data: string, trackerName: string, characteristic?: 
             log(`Raw battery data: ${data}`);
         }
     } else if (trackerModelEnabled === "wireless" && isWirelessBT(trackerName) && bluetoothEnabled && characteristic) {
-        if (characteristic === "BatteryLevel") {
-            try {
-                const batteryRemainingHex = Buffer.from(data, "base64").toString("hex");
-                batteryData[0] = parseInt(batteryRemainingHex, 16);
-                log(`Tracker ${trackerName} battery remaining: ${batteryData[0]}%`);
-                log(`Tracker ${trackerName} battery remaining (hex): ${batteryRemainingHex}`);
-            } catch (err) {
-                error(`Error converting battery data to hex for ${trackerName}: ${err}`);
-            }
-        } else if (characteristic === "BatteryVoltage") {
-            try {
+        try {
+            if (characteristic === "BatteryLevel") {
+                const batteryRemaining = parseInt(Buffer.from(data, "base64").toString("hex"), 16);
+                updateAndEmitBatteryInfo(trackerName, "BatteryLevel", batteryRemaining);
+            } else if (characteristic === "BatteryVoltage") {
                 const batteryVoltage = Buffer.from(data, "base64").readInt16LE(0);
-                batteryData[1] = batteryVoltage;
-                log(`Tracker ${trackerName} battery voltage: ${batteryVoltage}`);
-            } catch (err) {
-                error(`Error converting battery data for ${trackerName}: ${err}`);
-            }
-        } else if (characteristic === "ChargeStatus") {
-            try {
-                // 0 = discharging
-                // 1 = charging
-                // 2 = charged
-                const chargeStatusHex = Buffer.from(data, "base64").toString("hex");
-                batteryData[2] = chargeStatusHex;
-
-                switch (chargeStatusHex) {
-                    case "00":
-                        log(`Tracker ${trackerName} charge status: Discharging`);
-                        break;
-                    case "01":
-                        log(`Tracker ${trackerName} charge status: Charging`);
-                        break;
-                    case "02":
-                        log(`Tracker ${trackerName} charge status: Charged`);
-                        break;
-                    default:
-                        log(`Tracker ${trackerName} charge status: Unknown`);
-                        break;
+                updateAndEmitBatteryInfo(trackerName, "BatteryVoltage", batteryVoltage);
+            } else if (characteristic === "ChargeStatus") {
+                const chargeStatus = Buffer.from(data, "base64").toString("hex");
+                let chargeStatusReadable;
+                switch (chargeStatus) {
+                    case "00": chargeStatusReadable = "discharging"; break;
+                    case "01": chargeStatusReadable = "charging"; break;
+                    case "02": chargeStatusReadable = "charged"; break;
+                    default: chargeStatusReadable = "unknown"; break;
                 }
-            } catch (err) {
-                error(`Error converting charge status data for ${trackerName}: ${err}`);
+                updateAndEmitBatteryInfo(trackerName, "ChargeStatus", chargeStatusReadable);
             }
+        } catch (err) {
+            error(`Error processing battery data for ${trackerName}: ${err}`);
         }
     }
 
     trackerBattery.set(trackerName, batteryData);
     main.emit("battery", trackerName, ...batteryData);
+}
+
+let batteryInfo: any = {};
+function updateAndEmitBatteryInfo(trackerName: string, characteristic: string, value: string | number) {
+    if (!batteryInfo[trackerName]) {
+        batteryInfo[trackerName] = {
+            BatteryLevel: null,
+            BatteryVoltage: null,
+            ChargeStatus: null,
+        };
+    }
+
+    batteryInfo[trackerName][characteristic] = value;
+
+    const info = batteryInfo[trackerName];
+    if (info.BatteryLevel !== null && info.BatteryVoltage !== null && info.ChargeStatus !== null) {
+        main.emit("battery", trackerName, info.BatteryLevel, info.BatteryVoltage, info.ChargeStatus);
+
+        batteryInfo[trackerName] = {
+            BatteryLevel: null,
+            BatteryVoltage: null,
+            // ChargeStatus is not reset because it's not a value that will really change often (if at all)
+        };
+    }
 }
 
 /*
