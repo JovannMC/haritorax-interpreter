@@ -55,9 +55,50 @@ let allowReconnect = true;
 export default class Bluetooth extends EventEmitter {
     constructor() {
         super();
+        this.setMaxListeners(1); // Prevent memory leaks
         noble.on("discover", this.onDiscover.bind(this));
         main = this;
         log(`Initialized Bluetooth module.`);
+    }
+
+    async isDeviceAvailable() {
+        return new Promise<Boolean>((resolve) => {
+            let found = false;
+    
+            const discoverListener = (peripheral: Peripheral) => {
+                if (peripheral.advertisement.localName && peripheral.advertisement.localName.startsWith("HaritoraXW-")) {
+                    found = true;
+                    noble.stopScanning();
+                    cleanupListeners();
+                    resolve(true);
+                }
+            };
+    
+            const stateChangeListener = (state: string) => {
+                if (state === "poweredOn" && !found) {
+                    noble.startScanning([], true);
+    
+                    setTimeout(() => {
+                        if (!found) {
+                            noble.stopScanning();
+                            cleanupListeners();
+                            resolve(false);
+                        }
+                    }, 3000);
+                } else {
+                    cleanupListeners();
+                    resolve(false);
+                }
+            };
+    
+            const cleanupListeners = () => {
+                noble.removeListener("discover", discoverListener);
+                noble.removeListener("stateChange", stateChangeListener);
+            };
+    
+            noble.on("discover", discoverListener);
+            noble.on("stateChange", stateChangeListener);
+        });
     }
 
     startConnection() {
@@ -84,11 +125,11 @@ export default class Bluetooth extends EventEmitter {
         }
     }
 
-    async onDiscover(peripheral: Peripheral) {
+    private async onDiscover(peripheral: Peripheral) {
         const {
             advertisement: { localName },
         } = peripheral;
-        if (!localName || !localName.startsWith("HaritoraX")) return;
+        if (!localName || !localName.startsWith("HaritoraXW-")) return;
 
         const deviceExists = activeDevices.some((device) => device[0] === localName || device[1] === peripheral);
         if (deviceExists) return;
@@ -313,13 +354,7 @@ function getCharacteristic(service: Service, characteristic: string): Characteri
  */
 
 function emitData(localName: string, service: string, characteristic: string, data: any) {
-    main.emit(
-        "data",
-        localName,
-        services.get(service) || service,
-        characteristics.get(characteristic) || characteristic,
-        data
-    );
+    main.emit("data", localName, services.get(service) || service, characteristics.get(characteristic) || characteristic, data);
 }
 
 function log(message: string) {

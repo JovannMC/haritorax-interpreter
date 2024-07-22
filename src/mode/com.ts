@@ -57,23 +57,56 @@ let heartbeatInterval: number; // in milliseconds
 export default class COM extends EventEmitter {
     constructor(trackerModel: string, heartbeat: number) {
         super();
+        this.setMaxListeners(1); // Prevent memory leaks
         main = this;
         trackerModelEnabled = trackerModel;
         heartbeatInterval = heartbeat;
         log(`Initialized COM module with settings: ${trackerModelEnabled} ${heartbeatInterval}`);
     }
 
+    async isDeviceAvailable() {
+        const ports = await Binding.list();
+        for (const device of devices) {
+            if (ports.some((port) => port.vendorId === device.vid && port.productId === device.pid)) {
+                return true;
+            }
+        }
+    }
+
+    async getAvailableDevices() {
+        const ports = await Binding.list();
+        const availableDeviceNames: Set<string> = new Set();
+        let gxDevicesFound = false;
+        for (const device of devices) {
+            const matchingPort = ports.find((port) => port.vendorId === device.vid && port.productId === device.pid);
+            if (matchingPort) {
+                if (device.name === "GX6" || device.name === "GX2") {
+                    gxDevicesFound = true;
+                    availableDeviceNames.add(device.name);
+                } else {
+                    availableDeviceNames.add(device.name);
+                }
+            }
+        }
+    
+        if (gxDevicesFound) availableDeviceNames.add("HaritoraX Wireless");
+    
+        return Array.from(availableDeviceNames);
+    }
+
     async getDevicePorts(device: string) {
         const ports = await Binding.list();
         const availablePorts = ports
-            .map(port => {
-                const deviceMatch = devices.find(deviceItem => port.vendorId === deviceItem.vid && port.productId === deviceItem.pid);
+            .map((port) => {
+                const deviceMatch = devices.find(
+                    (deviceItem) => port.vendorId === deviceItem.vid && port.productId === deviceItem.pid
+                );
                 return {
                     ...port,
                     deviceName: deviceMatch ? deviceMatch.name : undefined,
                 };
             })
-            .filter(port_1 => port_1.deviceName !== undefined);
+            .filter((port_1) => port_1.deviceName !== undefined);
         let foundPorts = [];
         for (const port_2 of availablePorts) {
             if (port_2.deviceName === device) foundPorts.push(port_2.path);

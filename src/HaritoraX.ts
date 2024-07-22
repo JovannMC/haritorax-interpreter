@@ -305,32 +305,6 @@ export default class HaritoraX extends EventEmitter {
             com = new COM(trackerModelEnabled, heartbeatInterval);
             comEnabled = true;
 
-            if (!portNames) {
-                log("No port names provided, attempting to get device ports...");
-                if (trackerModelEnabled === "wired") {
-                    log("Wired model enabled, getting their ports...");
-                    //const HaritoraPorts = await com.getDevicePorts("Haritora");
-                    const HaritoraX10Ports = await com.getDevicePorts("HaritoraX 1.0");
-                    const HaritoraX11Ports = await com.getDevicePorts("HaritoraX 1.1");
-                    const HaritoraX11bPorts = await com.getDevicePorts("HaritoraX 1.1b");
-
-                    //log(`Got Haritora ports: ${HaritoraPorts}`);
-                    log(`Got HaritoraX 1.0 ports: ${HaritoraX10Ports}`);
-                    log(`Got HaritoraX 1.1 ports: ${HaritoraX11Ports}`);
-                    log(`Got HaritoraX 1.1b ports: ${HaritoraX11bPorts}`);
-                    //portNames = HaritoraPorts.concat(HaritoraX10Ports, HaritoraX11Ports, HaritoraX11bPorts);
-                    portNames = HaritoraX10Ports.concat(HaritoraX11Ports, HaritoraX11bPorts);
-                } else if (trackerModelEnabled === "wireless") {
-                    log("Wireless model enabled, getting their dongles' ports...");
-                    const GX6Ports = await com.getDevicePorts("GX6");
-                    const GX2Ports = await com.getDevicePorts("GX2");
-
-                    log(`Got GX6 ports: ${GX6Ports}`);
-                    log(`Got GX2 ports: ${GX2Ports}`);
-                    portNames = GX6Ports.concat(GX2Ports);
-                }
-            }
-
             com.startConnection(portNames);
             canProcessComData = true;
         } else if (connectionMode === "bluetooth") {
@@ -788,6 +762,58 @@ export default class HaritoraX extends EventEmitter {
      */
     emitData(trackerName: string, port: string, portId: string, identifier: string, data: string) {
         com.emit("data", trackerName, port, portId, identifier, data);
+    }
+
+    /**
+     * Gets the available devices
+     *
+     * @function getAvailableDevices
+     * @returns {string} The available devices to connect to/with (HaritoraX Wired/HaritoraX Wireless/GX6/GX2/Bluetooth).
+     */
+    async getAvailableDevices(): Promise<string[]> {
+        let availableDevices: string[] = [];
+
+        const com = new COM("wireless", 100000);
+        const bluetooth = new Bluetooth();
+
+        if (await com.isDeviceAvailable()) {
+            const devices = await com.getAvailableDevices();
+            // for each device, add the device name to the available devices
+            devices.forEach((device) => {
+                if (device === "HaritoraX 1.0" || device === "HaritoraX 1.1" || device === "HaritoraX 1.1b") {
+                    availableDevices.push("HaritoraX Wired");
+                } else {
+                    availableDevices.push(device);
+                }
+            });
+        }
+        if (await bluetooth.isDeviceAvailable()) {
+            availableDevices.push("Bluetooth");
+            availableDevices.push("HaritoraX Wireless");
+        }
+
+        return availableDevices;
+    }
+
+    /**
+     * Gets the available ports for the specified device
+     *
+     * @function getDevicePorts
+     * @param {string} device - The device to get the ports for.
+     * @returns {string[]} The available ports for the specified device.
+     */
+    async getDevicePorts(device: string): Promise<string[]> {
+        const com = new COM("wireless", 100000);
+        
+        if (device === "HaritoraX Wired") {
+            return (
+                (await com.getDevicePorts("HaritoraX 1.0")) ||
+                (await com.getDevicePorts("HaritoraX 1.1")) ||
+                (await com.getDevicePorts("HaritoraX 1.1b"))
+            );
+        } else {
+            return await com.getDevicePorts(device);
+        }
     }
 }
 
@@ -1479,10 +1505,18 @@ function processBatteryData(data: string, trackerName: string, characteristic?: 
                 const chargeStatus = Buffer.from(data, "base64").toString("hex");
                 let chargeStatusReadable;
                 switch (chargeStatus) {
-                    case "00": chargeStatusReadable = "discharging"; break;
-                    case "01": chargeStatusReadable = "charging"; break;
-                    case "02": chargeStatusReadable = "charged"; break;
-                    default: chargeStatusReadable = "unknown"; break;
+                    case "00":
+                        chargeStatusReadable = "discharging";
+                        break;
+                    case "01":
+                        chargeStatusReadable = "charging";
+                        break;
+                    case "02":
+                        chargeStatusReadable = "charged";
+                        break;
+                    default:
+                        chargeStatusReadable = "unknown";
+                        break;
                 }
                 updateAndEmitBatteryInfo(trackerName, "ChargeStatus", chargeStatusReadable);
             }
@@ -1618,7 +1652,12 @@ async function removeActiveDevices(deviceTypeToRemove: string) {
 
 function getTrackerSettingsFromMap(trackerName: string) {
     const settings = trackerSettings.get(trackerName);
-    const settingsToLog = { "Sensor mode": settings[0], "FPS mode": settings[1], "Sensor auto correction": settings[2], "Ankle motion detection": settings[3] };
+    const settingsToLog = {
+        "Sensor mode": settings[0],
+        "FPS mode": settings[1],
+        "Sensor auto correction": settings[2],
+        "Ankle motion detection": settings[3],
+    };
     logSettings(trackerName, settingsToLog);
     return {
         sensorMode: settings[0],
