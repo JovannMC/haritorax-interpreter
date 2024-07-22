@@ -39,6 +39,15 @@ const deviceInformation: Map<string, string[]> = new Map([
     ["rightElbow", ["", "", "", "", ""]],
 ]);
 
+const devices = [
+    { name: "GX2", vid: "1915", pid: "520F" },
+    { name: "GX6", vid: "04DA", pid: "3F18" },
+    { name: "HaritoraX 1.1b", vid: "", pid: "" },
+    { name: "HaritoraX 1.1", vid: "", pid: "" },
+    { name: "HaritoraX 1.0", vid: "", pid: "" },
+    // { name: "Haritora", vid: "", pid: "" }, - these were before Shiftall (and users had to build it themselves), so they may not have the same VID/PID
+];
+
 // Stores the ports that are currently active as objects for access later
 let activePorts: ActivePorts = {};
 let trackersAssigned = false;
@@ -54,22 +63,32 @@ export default class COM extends EventEmitter {
         log(`Initialized COM module with settings: ${trackerModelEnabled} ${heartbeatInterval}`);
     }
 
-    async startConnection(autoFind: boolean, portNames: string[]) {
-        const devices = [
-            { name: "GX2", vid: "1915", pid: "520F" },
-            { name: "GX6", vid: "04DA", pid: "3F18" },
-        ];
+    async getDevicePorts(device: string) {
+        const ports = await Binding.list();
+        const availablePorts = ports
+            .map(port => {
+                const deviceMatch = devices.find(deviceItem => port.vendorId === deviceItem.vid && port.productId === deviceItem.pid);
+                return {
+                    ...port,
+                    deviceName: deviceMatch ? deviceMatch.name : undefined,
+                };
+            })
+            .filter(port_1 => port_1.deviceName !== undefined);
+        let foundPorts = [];
+        for (const port_2 of availablePorts) {
+            if (port_2.deviceName === device) foundPorts.push(port_2.path);
+        }
+        return foundPorts;
+    }
 
-        const initializeSerialPort = (port: string, deviceName: string) => {
+    startConnection(portNames: string[]) {
+        const initializeSerialPort = (port: string) => {
             try {
                 const serial = new SerialPortStream({ path: port, baudRate: BAUD_RATE, binding: Binding });
                 const parser = serial.pipe(new ReadlineParser({ delimiter: "\n" }));
                 activePorts[port] = serial;
 
-                serial.on("open", () => {
-                    this.emit("connected", port);
-                    log(`Connected to COM port for ${deviceName}: ${port}`);
-                });
+                serial.on("open", () => this.emit("connected", port));
                 parser.on("data", (data) => processData(data, port));
                 serial.on("close", () => this.emit("disconnected", port));
                 serial.on("error", (err) => {
@@ -82,28 +101,9 @@ export default class COM extends EventEmitter {
             }
         };
 
-        if (autoFind) {
-            const ports = await Binding.list();
-            const availablePorts = ports
-                .map((port) => {
-                    const device = devices.find((device) => port.vendorId === device.vid && port.productId === device.pid);
-                    return {
-                        ...port,
-                        deviceName: device ? device.name : undefined,
-                    };
-                })
-                .filter((port) => port.deviceName !== undefined);
-
-            for (const port of availablePorts) {
-                log(`Found COM port for ${port.deviceName}: ${port.path}`);
-                initializeSerialPort(port.path, port.deviceName);
-            }
-        } else {
-            for (const port of portNames) {
-                // For manual selection, device name is not logged since VID/PID matching is not performed
-                log(`Opening COM port: ${port}`);
-                initializeSerialPort(port, "Unknown Device");
-            }
+        for (const port of portNames) {
+            log(`Opening COM port: ${port}`);
+            initializeSerialPort(port);
         }
     }
 

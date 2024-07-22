@@ -291,19 +291,47 @@ export default class HaritoraX extends EventEmitter {
      * Starts the connection to the trackers with the specified mode.
      *
      * @param {string} connectionMode - Connect to the trackers with the specified mode (COM or bluetooth).
-     * @param {string[]} [portNames] - The port names to connect to. (COM only)
+     * @param {string[]} portNames - The port names to connect to. (COM only)
+     * @param {number} heartbeatInterval - The interval to send the heartbeat signal to the trackers. (COM only)
      *
      * @example
      * device.startConnection("COM");
      **/
-    startConnection(connectionMode: string, autoFind: boolean = false, portNames?: string[], heartbeatInterval: number = 10000) {
+    async startConnection(connectionMode: string, portNames?: string[], heartbeatInterval: number = 10000) {
         if (!isConnectionModeSupported(connectionMode))
             error(`${connectionMode} connection not supported for ${trackerModelEnabled}`, true);
 
         if (connectionMode === "com") {
             com = new COM(trackerModelEnabled, heartbeatInterval);
             comEnabled = true;
-            com.startConnection(autoFind, portNames);
+
+            if (!portNames) {
+                log("No port names provided, attempting to get device ports...");
+                if (trackerModelEnabled === "wired") {
+                    log("Wired model enabled, getting their ports...");
+                    //const HaritoraPorts = await com.getDevicePorts("Haritora");
+                    const HaritoraX10Ports = await com.getDevicePorts("HaritoraX 1.0");
+                    const HaritoraX11Ports = await com.getDevicePorts("HaritoraX 1.1");
+                    const HaritoraX11bPorts = await com.getDevicePorts("HaritoraX 1.1b");
+
+                    //log(`Got Haritora ports: ${HaritoraPorts}`);
+                    log(`Got HaritoraX 1.0 ports: ${HaritoraX10Ports}`);
+                    log(`Got HaritoraX 1.1 ports: ${HaritoraX11Ports}`);
+                    log(`Got HaritoraX 1.1b ports: ${HaritoraX11bPorts}`);
+                    //portNames = HaritoraPorts.concat(HaritoraX10Ports, HaritoraX11Ports, HaritoraX11bPorts);
+                    portNames = HaritoraX10Ports.concat(HaritoraX11Ports, HaritoraX11bPorts);
+                } else if (trackerModelEnabled === "wireless") {
+                    log("Wireless model enabled, getting their dongles' ports...");
+                    const GX6Ports = await com.getDevicePorts("GX6");
+                    const GX2Ports = await com.getDevicePorts("GX2");
+
+                    log(`Got GX6 ports: ${GX6Ports}`);
+                    log(`Got GX2 ports: ${GX2Ports}`);
+                    portNames = GX6Ports.concat(GX2Ports);
+                }
+            }
+
+            com.startConnection(portNames);
             canProcessComData = true;
         } else if (connectionMode === "bluetooth") {
             bluetooth = new Bluetooth();

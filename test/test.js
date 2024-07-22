@@ -19,7 +19,7 @@ if (mode === "bt" || mode === "bluetooth") {
         }
     }, 3000);*/
 } else {
-    device.startConnection("com", true);
+    device.startConnection("com");
 
     device.on("connect", (trackerName) => {
         console.log(`Connected to tracker ${trackerName}`);
