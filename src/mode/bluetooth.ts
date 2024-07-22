@@ -1,6 +1,6 @@
 "use strict";
 
-import noble, { Peripheral, Service, Characteristic } from "@abandonware/noble";
+import noble, { Peripheral, Service, Characteristic, _state } from "@abandonware/noble";
 import { EventEmitter } from "events";
 
 let main: Bluetooth = undefined;
@@ -64,40 +64,27 @@ export default class Bluetooth extends EventEmitter {
     async isDeviceAvailable() {
         return new Promise<Boolean>((resolve) => {
             let found = false;
-    
-            const discoverListener = (peripheral: Peripheral) => {
+
+            noble.on("discover", (peripheral) => {
                 if (peripheral.advertisement.localName && peripheral.advertisement.localName.startsWith("HaritoraXW-")) {
                     found = true;
                     noble.stopScanning();
-                    cleanupListeners();
                     resolve(true);
                 }
-            };
-    
-            const stateChangeListener = (state: string) => {
-                if (state === "poweredOn" && !found) {
-                    noble.startScanning([], true);
-    
-                    setTimeout(() => {
-                        if (!found) {
-                            noble.stopScanning();
-                            cleanupListeners();
-                            resolve(false);
-                        }
-                    }, 3000);
-                } else {
-                    cleanupListeners();
-                    resolve(false);
-                }
-            };
-    
-            const cleanupListeners = () => {
-                noble.removeListener("discover", discoverListener);
-                noble.removeListener("stateChange", stateChangeListener);
-            };
-    
-            noble.on("discover", discoverListener);
-            noble.on("stateChange", stateChangeListener);
+            });
+
+            if (noble._state === "poweredOn" && !found) {
+                noble.startScanning([], true);
+
+                setTimeout(() => {
+                    if (!found) {
+                        noble.stopScanning();
+                        resolve(false);
+                    }
+                }, 3000);
+            } else if (noble._state !== "poweredOn") {
+                resolve(false);
+            }
         });
     }
 

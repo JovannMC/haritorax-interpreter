@@ -773,8 +773,8 @@ export default class HaritoraX extends EventEmitter {
     async getAvailableDevices(): Promise<string[]> {
         let availableDevices: string[] = [];
 
-        const com = new COM("wireless", 100000);
-        const bluetooth = new Bluetooth();
+        let com = new COM("wireless");
+        let bluetooth = new Bluetooth();
 
         if (await com.isDeviceAvailable()) {
             const devices = await com.getAvailableDevices();
@@ -792,6 +792,12 @@ export default class HaritoraX extends EventEmitter {
             availableDevices.push("HaritoraX Wireless");
         }
 
+        com.removeAllListeners();
+        bluetooth.removeAllListeners();
+
+        com = null;
+        bluetooth = null;
+
         return availableDevices;
     }
 
@@ -803,16 +809,20 @@ export default class HaritoraX extends EventEmitter {
      * @returns {string[]} The available ports for the specified device.
      */
     async getDevicePorts(device: string): Promise<string[]> {
-        const com = new COM("wireless", 100000);
-        
-        if (device === "HaritoraX Wired") {
-            return (
-                (await com.getDevicePorts("HaritoraX 1.0")) ||
-                (await com.getDevicePorts("HaritoraX 1.1")) ||
-                (await com.getDevicePorts("HaritoraX 1.1b"))
-            );
-        } else {
-            return await com.getDevicePorts(device);
+        let com = new COM("wireless");
+        try {
+            if (device === "HaritoraX Wired") {
+                return (
+                    (await com.getDevicePorts("HaritoraX 1.0")) ||
+                    (await com.getDevicePorts("HaritoraX 1.1")) ||
+                    (await com.getDevicePorts("HaritoraX 1.1b"))
+                );
+            } else {
+                return await com.getDevicePorts(device);
+            }
+        } finally {
+            com.removeAllListeners();
+            com = null;
         }
     }
 }
@@ -1652,19 +1662,25 @@ async function removeActiveDevices(deviceTypeToRemove: string) {
 
 function getTrackerSettingsFromMap(trackerName: string) {
     const settings = trackerSettings.get(trackerName);
-    const settingsToLog = {
-        "Sensor mode": settings[0],
-        "FPS mode": settings[1],
-        "Sensor auto correction": settings[2],
-        "Ankle motion detection": settings[3],
-    };
-    logSettings(trackerName, settingsToLog);
-    return {
-        sensorMode: settings[0],
-        fpsMode: settings[1],
-        sensorAutoCorrection: settings[2],
-        ankleMotionDetection: settings[3],
-    };
+    if (settings) {
+        const settingsToLog = {
+            "Sensor mode": settings[0],
+            "FPS mode": settings[1],
+            "Sensor auto correction": settings[2],
+            "Ankle motion detection": settings[3],
+        };
+        logSettings(trackerName, settingsToLog);
+
+        return {
+            sensorMode: settings[0],
+            fpsMode: settings[1],
+            sensorAutoCorrection: settings[2],
+            ankleMotionDetection: settings[3],
+        };
+    } else {
+        error(`Tracker ${trackerName} settings not found in trackerSettings map.`);
+        return null;
+    }
 }
 
 /*

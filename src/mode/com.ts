@@ -55,7 +55,7 @@ let trackerModelEnabled: String;
 let heartbeatInterval: number; // in milliseconds
 
 export default class COM extends EventEmitter {
-    constructor(trackerModel: string, heartbeat: number) {
+    constructor(trackerModel: string, heartbeat?: number) {
         super();
         this.setMaxListeners(1); // Prevent memory leaks
         main = this;
