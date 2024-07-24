@@ -73,18 +73,20 @@ export default class Bluetooth extends EventEmitter {
                 }
             });
 
-            if (noble._state === "poweredOn" && !found) {
-                noble.startScanning([], true);
+            noble.on("stateChange", (state) => {
+                if (state === "poweredOn" && !found) {
+                    noble.startScanning([], true);
 
-                setTimeout(() => {
-                    if (!found) {
-                        noble.stopScanning();
-                        resolve(false);
-                    }
-                }, 3000);
-            } else if (noble._state !== "poweredOn") {
-                resolve(false);
-            }
+                    setTimeout(() => {
+                        if (!found) {
+                            noble.stopScanning();
+                            resolve(false);
+                        }
+                    }, 3000);
+                } else if (noble._state !== "poweredOn") {
+                    resolve(false);
+                }
+            });
         });
     }
 

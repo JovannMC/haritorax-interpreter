@@ -773,7 +773,7 @@ export default class HaritoraX extends EventEmitter {
     async getAvailableDevices(): Promise<string[]> {
         let availableDevices: string[] = [];
 
-        let com = new COM("wireless");
+        let com = new COM("wireless"); // variable doesn't matter, just need to initialize it to get the available devices
         let bluetooth = new Bluetooth();
 
         if (await com.isDeviceAvailable()) {
