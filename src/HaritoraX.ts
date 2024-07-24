@@ -252,6 +252,8 @@ let trackerModelEnabled: string;
  * @event this#connect
  * @type {string}
  * @property {string} trackerName - The name of the tracker.
+ * @property {string} connectionMode - The connection mode the tracker is using - useful if multiple connection modes are used.
+ * @property {string} port - The COM port used the tracker is using (COM only)
  **/
 
 /**
@@ -956,7 +958,7 @@ function listenToDeviceEvents() {
             const trackerName = peripheral.advertisement.localName;
             if (trackerName && !activeDevices.includes(trackerName)) {
                 activeDevices.push(trackerName);
-                main.emit("connect", trackerName);
+                main.emit("connect", trackerName, "bluetooth");
             }
         });
 
@@ -1059,9 +1061,15 @@ function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) 
 
     // If tracker isn't in activeDevices, add it and emit "connect" event
     if (trackerName && !activeDevices.includes(trackerName) && (comEnabled || bluetoothEnabled)) {
-        log(`Tracker ${trackerName} isn't in active devices, adding and emitting connect event`);
+        console.log(`Tracker ${trackerName} isn't in active devices, adding and emitting connect event`);
+        
+        const mode = isWirelessBT(trackerName) ? "bluetooth" : "com";
+        const port = isWirelessBT(trackerName) ? undefined : com.getTrackerPort(trackerName);
+
+        console.log(`Tracker ${trackerName} mode: ${mode}, port: ${port}`);
+        
         activeDevices.push(trackerName);
-        main.emit("connect", trackerName);
+        main.emit("connect", trackerName, mode, port);
     }
 
     // Decode and log the data

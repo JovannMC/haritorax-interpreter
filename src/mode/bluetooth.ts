@@ -55,7 +55,6 @@ let allowReconnect = true;
 export default class Bluetooth extends EventEmitter {
     constructor() {
         super();
-        this.setMaxListeners(1); // Prevent memory leaks
         noble.on("discover", this.onDiscover.bind(this));
         main = this;
         log(`Initialized Bluetooth module.`);
