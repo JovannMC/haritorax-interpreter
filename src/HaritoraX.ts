@@ -382,7 +382,7 @@ export default class HaritoraX extends EventEmitter {
         const settings = {
             "Sensor mode": sensorMode,
             "FPS mode": fpsMode,
-            "Sensor auto correction": sensorAutoCorrection.join(", "),
+            "Sensor auto correction": sensorAutoCorrection,
             "Ankle motion detection": ankleMotionDetection,
         };
 
@@ -853,8 +853,7 @@ function listenToDeviceEvents() {
                         processBatteryData(portData, trackerName);
                         break;
                     case "o":
-                        // Let the person set the tracker settings manually
-                        // TODO: figure out a non-scuffed way to re-implement this so that it doesn't screw with user-set settings
+                        processSettingsData(portData, trackerName);
                         break;
                     case "i":
                         // Handled by com.ts, because I don't know how else I could've handled it before
@@ -1062,12 +1061,12 @@ function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) 
     // If tracker isn't in activeDevices, add it and emit "connect" event
     if (trackerName && !activeDevices.includes(trackerName) && (comEnabled || bluetoothEnabled)) {
         console.log(`Tracker ${trackerName} isn't in active devices, adding and emitting connect event`);
-        
+
         const mode = isWirelessBT(trackerName) ? "bluetooth" : "com";
         const port = isWirelessBT(trackerName) ? undefined : com.getTrackerPort(trackerName);
 
         console.log(`Tracker ${trackerName} mode: ${mode}, port: ${port}`);
-        
+
         activeDevices.push(trackerName);
         main.emit("connect", trackerName, mode, port);
     }
@@ -1301,7 +1300,7 @@ function getMagStatus(magData: number) {
 
 /**
  * Processes the settings data received from the trackers.
- * Supported trackers: wired
+ * Supported trackers: wireless, wired
  * Supported connections: COM
  *
  * @function processSettingsData
@@ -1313,23 +1312,70 @@ function getMagStatus(magData: number) {
 function processSettingsData(data: string, trackerName: string) {
     // TODO: implement this for wireless BT trackers
     // example: s:{"imu_mode":1, "imu_num":6, "magf_status":"020200", "speed_mode":2, "dcal_flags":"04", "detected":"04004C6C"}
+    if (!trackerName || !data) return;
+    
+    const SENSOR_MODE_INDEX = 6;
+    const POSTURE_DATA_RATE_INDEX = 5;
+    const SENSOR_AUTO_CORRECTION_INDEX = 10;
+    const ANKLE_MOTION_DETECTION_INDEX = 13;
+
     try {
-        const { imu_mode: sensorMode, speed_mode: speedMode, dcal_flags: dcalFlags } = JSON.parse(data);
-        const fpsMode = speedMode === 1 ? 100 : 50;
-        const sensorAutoCorrectionList = ["accel", "gyro", "mag"].filter((_, i) => dcalFlags & (1 << i));
+        if (trackerModelEnabled === "wireless" && !isWirelessBT(trackerName)) {
+            const sensorMode = parseInt(data[SENSOR_MODE_INDEX]);
+            const fpsMode = parseInt(data[POSTURE_DATA_RATE_INDEX]);
+            const sensorAutoCorrection = parseInt(data[SENSOR_AUTO_CORRECTION_INDEX]);
+            const ankleMotionDetection = parseInt(data[ANKLE_MOTION_DETECTION_INDEX]);
 
-        log(`Tracker ${trackerName} settings:`);
-        log(`Sensor mode: ${sensorMode}`);
-        log(`FPS mode: ${fpsMode}`);
-        log(`Sensor auto correction: ${sensorAutoCorrectionList.join(", ")}`);
+            const sensorModeText = sensorMode === 0 ? 2 : 1;
+            const postureDataRateText = fpsMode === 0 ? 50 : 100;
+            const ankleMotionDetectionText = ankleMotionDetection !== 0;
+            const sensorAutoCorrectionComponents = ["accel", "gyro", "mag"].filter((_, i) => sensorAutoCorrection & (1 << i));
 
-        trackerSettings.set(trackerName, [sensorMode, fpsMode, sensorAutoCorrectionList, false]);
-        main.emit("settings", trackerName, sensorMode, fpsMode, dcalFlags);
+            const settings = {
+                "Sensor mode": sensorMode,
+                "FPS mode": fpsMode,
+                "Sensor auto correction": sensorAutoCorrection,
+                "Ankle motion detection": ankleMotionDetection,
+            };
 
-        return { sensorMode, fpsMode, sensorAutoCorrectionList };
-    } catch (err) {
-        error(`Error processing settings data for ${trackerName}: ${err}`);
-        return null;
+            logSettings(trackerName, settings, data);
+
+            if (!trackerSettingsRaw.has(trackerName) || trackerSettingsRaw.get(trackerName) !== data) {
+                trackerSettingsRaw.set(trackerName, data);
+                trackerSettings.set(trackerName, [
+                    sensorModeText,
+                    postureDataRateText,
+                    sensorAutoCorrectionComponents,
+                    ankleMotionDetectionText,
+                ]);
+                main.emit(
+                    "settings",
+                    trackerName,
+                    sensorModeText,
+                    postureDataRateText,
+                    sensorAutoCorrectionComponents,
+                    ankleMotionDetectionText
+                );
+            }
+        } else if (trackerModelEnabled === "wired") {
+            const { imu_mode: sensorMode, speed_mode: speedMode, dcal_flags: dcalFlags } = JSON.parse(data);
+            const fpsMode = speedMode === 1 ? 100 : 50;
+            const sensorAutoCorrectionList = ["accel", "gyro", "mag"].filter((_, i) => dcalFlags & (1 << i));
+
+            const settings = {
+                "Sensor mode": sensorMode,
+                "FPS mode": speedMode,
+                "Sensor auto correction": sensorAutoCorrectionList,
+                "Ankle motion detection": "N/A",
+            };
+
+            logSettings(trackerName, settings, data);
+
+            trackerSettings.set(trackerName, [sensorMode, fpsMode, sensorAutoCorrectionList, false]);
+            main.emit("settings", trackerName, sensorMode, fpsMode, sensorAutoCorrectionList);
+        }
+    } catch (error) {
+        console.error(`Error processing tracker settings for ${trackerName}:`, error);
     }
 }
 
@@ -1606,10 +1652,10 @@ function writeToBluetooth(trackerName: string, characteristic: string, value: nu
     bluetooth.write(trackerName, settingsService, characteristic, buffer);
 }
 
-function logSettings(trackerName: string, settings: any, rawHexData?: string) {
-    log(`Setting the following settings onto tracker ${trackerName}:`);
+function logSettings(trackerName: string, settings: Object, rawHexData?: string) {
+    log(`Tracker ${trackerName} settings:`);
     Object.entries(settings).forEach(([key, value]) => log(`${key}: ${value}`));
-    if (rawHexData) log(`Raw hex data calculated to be sent: ${rawHexData}`);
+    if (rawHexData) log(`Raw hex data: ${rawHexData}`);
 }
 
 /*
@@ -1677,7 +1723,8 @@ function getTrackerSettingsFromMap(trackerName: string) {
             "Sensor auto correction": settings[2],
             "Ankle motion detection": settings[3],
         };
-        logSettings(trackerName, settingsToLog);
+        const rawHexData = trackerSettingsRaw.get(trackerName);
+        logSettings(trackerName, settingsToLog, rawHexData);
 
         return {
             sensorMode: settings[0],
