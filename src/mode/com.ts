@@ -90,6 +90,7 @@ export default class COM extends EventEmitter {
 
         if (gxDevicesFound) availableDeviceNames.add("HaritoraX Wireless");
 
+
         return Array.from(availableDeviceNames);
     }
 
@@ -144,6 +145,7 @@ export default class COM extends EventEmitter {
             if (!serialPort.isOpen) return;
             try {
                 log(`Closing COM port: ${port}`);
+                serialPort.removeAllListeners();
                 serialPort.close();
                 delete activePorts[port];
             } catch (err) {

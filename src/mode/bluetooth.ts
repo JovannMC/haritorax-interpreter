@@ -62,13 +62,37 @@ export default class Bluetooth extends EventEmitter {
 
     async isDeviceAvailable() {
         return new Promise<Boolean>((resolve) => {
+            if (noble._state === "poweredOn") {
+                resolve(true);
+            } else {
+                const timeout = setTimeout(() => {
+                    resolve(false);
+                }, 3000);
+
+                noble.on("stateChange", (state) => {
+                    clearTimeout(timeout);
+                    if (state === "poweredOn") {
+                        resolve(true);
+                    } else {
+                        resolve(false);
+                    }
+                });
+            }
+        });
+    }
+
+    async getAvailableDevices() {
+        return new Promise<string[]>((resolve) => {
             let found = false;
+            let availableDevices = [];
 
             noble.on("discover", (peripheral) => {
                 if (peripheral.advertisement.localName && peripheral.advertisement.localName.startsWith("HaritoraXW-")) {
+                    availableDevices.push("HaritoraX Wireless");
                     found = true;
+                    noble.removeAllListeners();
                     noble.stopScanning();
-                    resolve(true);
+                    resolve(availableDevices);
                 }
             });
 
@@ -79,17 +103,21 @@ export default class Bluetooth extends EventEmitter {
                     setTimeout(() => {
                         if (!found) {
                             noble.stopScanning();
-                            resolve(false);
+                            noble.removeAllListeners();
+                            resolve(null);
                         }
                     }, 3000);
                 } else if (noble._state !== "poweredOn") {
-                    resolve(false);
+                    noble.removeAllListeners();
+                    resolve(null);
                 }
             });
 
             // Fail-safe if noble never initializes properly (no "stateChange" event fired)
             setTimeout(() => {
-                resolve(false);
+                noble.stopScanning();
+                noble.removeAllListeners();
+                resolve(null);
             }, 3500);
         });
     }

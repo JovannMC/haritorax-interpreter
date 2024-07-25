@@ -785,7 +785,7 @@ export default class HaritoraX extends EventEmitter {
             const devices = await com.getAvailableDevices();
             log(`Got COM devices: ${devices}`);
             // for each device, add the device name to the available devices
-            devices.forEach((device) => {
+            devices.forEach((device: string) => {
                 if (device === "HaritoraX 1.0" || device === "HaritoraX 1.1" || device === "HaritoraX 1.1b") {
                     availableDevices.push("HaritoraX Wired");
                 } else {
@@ -793,11 +793,19 @@ export default class HaritoraX extends EventEmitter {
                 }
             });
         }
-        log("Checking if Bluetooth & HaritoraX Wireless are available")
+        log("Checking if any Bluetooth devices is available")
         if (await bluetooth.isDeviceAvailable()) {
-            log("Bluetooth & HaritoraX Wireless devices available")
+            log("Bluetooth available")
             availableDevices.push("Bluetooth");
-            availableDevices.push("HaritoraX Wireless");
+
+            const devices = await bluetooth.getAvailableDevices();
+            log(`Got Bluetooth devices: ${devices}`);
+
+            if (devices) {
+                devices.forEach((device: string) => {
+                    availableDevices.push(device);
+                });
+            }
         }
 
         com.removeAllListeners();
