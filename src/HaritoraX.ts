@@ -779,8 +779,11 @@ export default class HaritoraX extends EventEmitter {
         let com = new COM("wireless"); // variable doesn't matter, just need to initialize it to get the available devices
         let bluetooth = new Bluetooth();
 
+        console.log("Checking if any COM devices is available")
         if (await com.isDeviceAvailable()) {
+            log("COM devices available")
             const devices = await com.getAvailableDevices();
+            log(`Got COM devices: ${devices}`);
             // for each device, add the device name to the available devices
             devices.forEach((device) => {
                 if (device === "HaritoraX 1.0" || device === "HaritoraX 1.1" || device === "HaritoraX 1.1b") {
@@ -790,7 +793,9 @@ export default class HaritoraX extends EventEmitter {
                 }
             });
         }
+        log("Checking if Bluetooth & HaritoraX Wireless are available")
         if (await bluetooth.isDeviceAvailable()) {
+            log("Bluetooth & HaritoraX Wireless devices available")
             availableDevices.push("Bluetooth");
             availableDevices.push("HaritoraX Wireless");
         }

@@ -86,6 +86,11 @@ export default class Bluetooth extends EventEmitter {
                     resolve(false);
                 }
             });
+
+            // Fail-safe if noble never initializes properly (no "stateChange" event fired)
+            setTimeout(() => {
+                resolve(false);
+            }, 3500);
         });
     }
 
