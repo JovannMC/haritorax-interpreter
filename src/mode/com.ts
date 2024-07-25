@@ -87,9 +87,9 @@ export default class COM extends EventEmitter {
                 }
             }
         }
-    
+
         if (gxDevicesFound) availableDeviceNames.add("HaritoraX Wireless");
-    
+
         return Array.from(availableDeviceNames);
     }
 
@@ -219,12 +219,14 @@ export default class COM extends EventEmitter {
  * startConnection() helper functions
  */
 
-function processData(data: string, port: string) {
+const dataQueue: { data: string; port: string }[] = [];
+
+async function processData(data: string, port: string) {
     try {
         let trackerName = null;
         let identifier = null;
-        let portId = null;
-        let portData = null;
+        let portId: string = null;
+        let portData: string = null;
 
         if (trackerModelEnabled === "wireless") {
             const splitData = data.toString().split(/:(.+)/);
@@ -241,26 +243,38 @@ function processData(data: string, port: string) {
                                 const trackerId = parseInt(portData.charAt(4));
                                 if (!isNaN(trackerId) && parseInt(value[0]) == trackerId) {
                                     trackerAssignment.set(key, [trackerId.toString(), port, portId]);
-                                    log(` Setting ${key} to port ${port} with port ID ${portId}`);
-                                }
-                            } else if (identifier.startsWith("i")) {
-                                try {
-                                    const info = JSON.parse(portData);
-                                    const version = info["version"];
-                                    const model = info["model"];
-                                    const serial = info["serial no"];
-
-                                    deviceInformation.set(key, [version, model, serial]);
-                                } catch (err) {
-                                    error(`Error parsing JSON data: ${err}`);
+                                    log(`Setting ${key} to port ${port} with port ID ${portId}`);
                                 }
                             }
                         }
                     }
 
-                    if (Array.from(trackerAssignment.values()).every((value) => value[1] !== "")) {
+                    // Check if all trackers are assigned and queue if not
+                    if (!trackersAssigned) {
+                        dataQueue.push({ data, port });
+                        log(`Trackers not assigned yet, data in queue: ${dataQueue.length}`);
+                    }
+
+                    const numberOfPorts = Object.keys(activePorts).length;
+                    const requiredAssignments = numberOfPorts * 2;
+
+                    if (
+                        Array.from(trackerAssignment.values()).filter((value) => value[1] !== "" && value[2] !== "DONGLE")
+                            .length >= requiredAssignments
+                    ) {
+                        log(`Required assignments completed: ${Array.from(trackerAssignment.entries())}`);
                         trackersAssigned = true;
-                        log(`All trackers have been assigned: ${Array.from(trackerAssignment.entries())}`);
+
+                        // Process the queued data
+                        while (dataQueue.length > 0) {
+                            const queuedData = dataQueue.shift();
+                            if (queuedData) {
+                                log(`Processing queued data: ${queuedData.data}`);
+                                await processData(queuedData.data, queuedData.port);
+                            }
+                        }
+
+                        main.emit("assigned");
                     }
                 }
 
@@ -279,7 +293,9 @@ function processData(data: string, port: string) {
             }
         }
 
-        if (typeof main !== "undefined") main.emit("data", trackerName, port, portId, identifier, portData);
+        if (portId === "DONGLE") trackerName = "DONGLE";
+
+        main.emit("data", trackerName, port, portId, identifier, portData);
     } catch (err) {
         error(`An unexpected error occurred: ${err}`);
     }
@@ -288,6 +304,7 @@ function processData(data: string, port: string) {
 function setupHeartbeat(serial: SerialPortStream, port: string) {
     setInterval(() => {
         if (serial.isOpen) {
+            // TODO: find another way to send heartbeat instead of requesting info from the tracker
             log(`Sending heartbeat to port ${port}`);
             serial.write("report send info\r\nblt send info\r\n", (err) => {
                 if (err) {

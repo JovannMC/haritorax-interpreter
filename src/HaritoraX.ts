@@ -9,6 +9,7 @@ type TrackerModel = "wireless" | "wired";
 
 let debug = false;
 let printIMU = false;
+let trackersAssigned = false;
 
 let com: COM;
 let bluetooth: Bluetooth;
@@ -508,7 +509,7 @@ export default class HaritoraX extends EventEmitter {
         };
 
         if (trackerModelEnabled === "wired") {
-            return getTrackerSettingsFromMap("HaritoraXWired");
+            return await getTrackerSettingsFromMap("HaritoraXWired");
         } else if (trackerModelEnabled === "wireless" && bluetoothEnabled && isWirelessBT(trackerName)) {
             if (forceBluetoothRead || !trackerSettings.has(trackerName)) {
                 try {
@@ -534,7 +535,7 @@ export default class HaritoraX extends EventEmitter {
                     error(`Error reading characteristic: ${err}`);
                 }
             } else {
-                return getTrackerSettingsFromMap(trackerName);
+                return await getTrackerSettingsFromMap(trackerName);
             }
         } else if (trackerModelEnabled === "wireless" && comEnabled && !isWirelessBT(trackerName)) {
             return getTrackerSettingsFromMap(trackerName);
@@ -856,7 +857,7 @@ function listenToDeviceEvents() {
                         processSettingsData(portData, trackerName);
                         break;
                     case "i":
-                        // Handled by com.ts, because I don't know how else I could've handled it before
+                        processInfoData(portData, trackerName);
                         break;
                     default:
                         log(`${port} - Unknown data from ${trackerName} (identifier: ${identifier}): ${portData}`);
@@ -903,6 +904,10 @@ function listenToDeviceEvents() {
                         log(`${port} - Unknown data from ${trackerName} (identifier: ${identifier}): ${portData}`);
                 }
             }
+        });
+
+        com.on("assigned", () => {
+            trackersAssigned = true;
         });
 
         com.on("log", (message: string) => {
@@ -1313,7 +1318,7 @@ function processSettingsData(data: string, trackerName: string) {
     // TODO: implement this for wireless BT trackers
     // example: s:{"imu_mode":1, "imu_num":6, "magf_status":"020200", "speed_mode":2, "dcal_flags":"04", "detected":"04004C6C"}
     if (!trackerName || !data) return;
-    
+
     const SENSOR_MODE_INDEX = 6;
     const POSTURE_DATA_RATE_INDEX = 5;
     const SENSOR_AUTO_CORRECTION_INDEX = 10;
@@ -1327,15 +1332,15 @@ function processSettingsData(data: string, trackerName: string) {
             const ankleMotionDetection = parseInt(data[ANKLE_MOTION_DETECTION_INDEX]);
 
             const sensorModeText = sensorMode === 0 ? 2 : 1;
-            const postureDataRateText = fpsMode === 0 ? 50 : 100;
+            const fpsModeText = fpsMode === 0 ? 50 : 100;
             const ankleMotionDetectionText = ankleMotionDetection !== 0;
             const sensorAutoCorrectionComponents = ["accel", "gyro", "mag"].filter((_, i) => sensorAutoCorrection & (1 << i));
 
             const settings = {
-                "Sensor mode": sensorMode,
-                "FPS mode": fpsMode,
-                "Sensor auto correction": sensorAutoCorrection,
-                "Ankle motion detection": ankleMotionDetection,
+                "Sensor mode": sensorModeText,
+                "FPS mode": fpsModeText,
+                "Sensor auto correction": sensorAutoCorrectionComponents,
+                "Ankle motion detection": ankleMotionDetectionText,
             };
 
             logSettings(trackerName, settings, data);
@@ -1344,7 +1349,7 @@ function processSettingsData(data: string, trackerName: string) {
                 trackerSettingsRaw.set(trackerName, data);
                 trackerSettings.set(trackerName, [
                     sensorModeText,
-                    postureDataRateText,
+                    fpsModeText,
                     sensorAutoCorrectionComponents,
                     ankleMotionDetectionText,
                 ]);
@@ -1352,7 +1357,7 @@ function processSettingsData(data: string, trackerName: string) {
                     "settings",
                     trackerName,
                     sensorModeText,
-                    postureDataRateText,
+                    fpsModeText,
                     sensorAutoCorrectionComponents,
                     ankleMotionDetectionText
                 );
@@ -1653,6 +1658,7 @@ function writeToBluetooth(trackerName: string, characteristic: string, value: nu
 }
 
 function logSettings(trackerName: string, settings: Object, rawHexData?: string) {
+    if (trackerName === "DONGLE") return;
     log(`Tracker ${trackerName} settings:`);
     Object.entries(settings).forEach(([key, value]) => log(`${key}: ${value}`));
     if (rawHexData) log(`Raw hex data: ${rawHexData}`);
@@ -1714,7 +1720,16 @@ async function removeActiveDevices(deviceTypeToRemove: string) {
  * getTrackerSettings() function helpers
  */
 
-function getTrackerSettingsFromMap(trackerName: string) {
+async function delay(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function getTrackerSettingsFromMap(trackerName: string) {
+    while (!trackersAssigned) {
+        log("Trackers not assigned yet, retrying in 1 second...");
+        await delay(1000);
+    }
+
     const settings = trackerSettings.get(trackerName);
     if (settings) {
         const settingsToLog = {
@@ -1726,15 +1741,15 @@ function getTrackerSettingsFromMap(trackerName: string) {
         const rawHexData = trackerSettingsRaw.get(trackerName);
         logSettings(trackerName, settingsToLog, rawHexData);
 
-        return {
+        return Promise.resolve({
             sensorMode: settings[0],
             fpsMode: settings[1],
             sensorAutoCorrection: settings[2],
             ankleMotionDetection: settings[3],
-        };
+        });
     } else {
-        error(`Tracker ${trackerName} settings not found in trackerSettings map.`);
-        return null;
+        console.error(`Tracker ${trackerName} settings not found in trackerSettings map.`);
+        return Promise.reject(`Tracker ${trackerName} settings not found in trackerSettings map.`);
     }
 }
 
