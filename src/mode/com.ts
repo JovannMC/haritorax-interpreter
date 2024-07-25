@@ -221,7 +221,8 @@ export default class COM extends EventEmitter {
  * startConnection() helper functions
  */
 
-const dataQueue: { data: string; port: string }[] = [];
+let isOverThreshold = false;
+let dataQueue: { data: string; port: string }[] = [];
 
 async function processData(data: string, port: string) {
     try {
@@ -252,7 +253,14 @@ async function processData(data: string, port: string) {
                     }
 
                     // Check if all trackers are assigned and queue if not
-                    if (!trackersAssigned) {
+                    if (!trackersAssigned && !isOverThreshold) {
+                        if (dataQueue && dataQueue.length >= 100) {
+                            isOverThreshold = true;
+                            log(`Data queue is over threshold, assuming not all trackers have been connected.`);
+                            dataQueue = null;
+                            return;
+                        }
+
                         dataQueue.push({ data, port });
                         log(`Trackers not assigned yet, data in queue: ${dataQueue.length}`);
                     }
