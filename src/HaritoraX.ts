@@ -779,7 +779,7 @@ export default class HaritoraX extends EventEmitter {
         let com = new COM("wireless"); // variable doesn't matter, just need to initialize it to get the available devices
         let bluetooth = new Bluetooth();
 
-        console.log("Checking if any COM devices is available")
+        log("Checking if any COM devices is available")
         if (await com.isDeviceAvailable()) {
             log("COM devices available")
             const devices = await com.getAvailableDevices();
@@ -1078,12 +1078,12 @@ function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) 
 
     // If tracker isn't in activeDevices, add it and emit "connect" event
     if (trackerName && !activeDevices.includes(trackerName) && (comEnabled || bluetoothEnabled)) {
-        console.log(`Tracker ${trackerName} isn't in active devices, adding and emitting connect event`);
+        log(`Tracker ${trackerName} isn't in active devices, adding and emitting connect event`);
 
         const mode = isWirelessBT(trackerName) ? "bluetooth" : "com";
         const port = isWirelessBT(trackerName) ? undefined : com.getTrackerPort(trackerName);
 
-        console.log(`Tracker ${trackerName} mode: ${mode}, port: ${port}`);
+        log(`Tracker ${trackerName} mode: ${mode}, port: ${port}`);
 
         activeDevices.push(trackerName);
         main.emit("connect", trackerName, mode, port);
