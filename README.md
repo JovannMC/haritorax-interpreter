@@ -2,9 +2,10 @@
 
 ![Showcase of the package output with debug logs on, showing the data such as tracker settings, info, and interpreted IMU data via the GX6 dongle](showcase.png)
 
-A node.js package that allows you to communicate and interact with the HaritoraX FBT trackers to interpret the data how you want it. No HaritoraConfigurator software needed (mostly)!
+A node.js package that enables communication with the HaritoraX FBT trackers to read/write data to the trackers. No HaritoraConfigurator software needed (mostly)!
 
 Check out the Haritora-GX(6/2) proof-of-concept repository here: https://github.com/JovannMC/haritora-gx-poc
+-  A new proof-of-concept repo will be made soon, including all the information I've found about the trackers while developing this package!
 
 ## Installation
 
@@ -12,7 +13,7 @@ Check out the Haritora-GX(6/2) proof-of-concept repository here: https://github.
 
 ## Documentation
 
-Will write actual documentation at some point, for now refer to the source code, examples, and JSDoc comments.
+Will write actual documentation at some point, for now refer to the source code, examples, and JSDoc comments. You may also see how it's used in [SlimeTora](https://github.com/OCSYT/SlimeTora)!
 
 ## Supported devices
 
@@ -22,7 +23,7 @@ Will write actual documentation at some point, for now refer to the source code,
 | HaritoraX 1.1B     |     Y     |         Y         |
 | HaritoraX 1.1      |     Y     |         Y         |
 | HaritoraX 1.0      |     Y     |         Y         |
-| Haritora           |     X     |         X         |
+| Haritora           |     ?     |         ?         |
 
 | Communication mode        | Supported |
 |---------------------------|-----------|
@@ -35,7 +36,7 @@ Will write actual documentation at some point, for now refer to the source code,
 ```js
 import { HaritoraX } from "haritorax-interpreter";
 
-let device = new HaritoraX("wireless", 2, true); // connect to haritorax wireless, enable debug mode w/ function & line info, allow printing of processIMUData() logs (lots of spam!)
+let device = new HaritoraX("wireless", true, true); // connect to haritorax wireless, enable debug mode, allow printing of processIMUData() logs (lots of spam!)
 device.startConnection("gx", ["COM4", "COM5", "COM6", "COM7"]); // start connecting to dongles via GX dongles (COM connection), with the ports COM4, COM5, COM6, and COM7
 
 device.on("imu", (trackerName, rotation, gravity, ankle) => {
@@ -58,7 +59,7 @@ setTimeout(() => {
 
 ## Projects using package
 
-- [SlimeTora](https://github.com/OCSYT/SlimeTora) - A program that connects the HaritoraX Wireless trackers to the SlimeVR server, supporting Bluetooth and the GX6 communication dongle.
+- [SlimeTora](https://github.com/OCSYT/SlimeTora) - A program that connects any of the HaritoraX trackers to the SlimeVR server, supporting Bluetooth (classic), Bluetooth (low energy), and the GX(6/2) communication dongles.
 
 Let me know if you want to be featured here, if you are using this package in any project!
 
