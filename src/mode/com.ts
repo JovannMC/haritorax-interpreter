@@ -90,7 +90,6 @@ export default class COM extends EventEmitter {
 
         if (gxDevicesFound) availableDeviceNames.add("HaritoraX Wireless");
 
-
         return Array.from(availableDeviceNames);
     }
 
@@ -225,6 +224,8 @@ let isOverThreshold = false;
 let dataQueue: { data: string; port: string }[] = [];
 
 async function processData(data: string, port: string) {
+    main.emit("dataRaw", data, port);
+
     try {
         let trackerName = null;
         let identifier = null;
@@ -254,7 +255,7 @@ async function processData(data: string, port: string) {
 
                     // Check if all trackers are assigned and queue if not
                     if (!trackersAssigned && !isOverThreshold) {
-                        if (dataQueue && dataQueue.length >= 100) {
+                        if (dataQueue && dataQueue.length >= 200) {
                             isOverThreshold = true;
                             log(`Data queue is over threshold, assuming not all trackers have been connected.`);
                             dataQueue = null;
@@ -262,7 +263,7 @@ async function processData(data: string, port: string) {
                         }
 
                         dataQueue.push({ data, port });
-                        log(`Trackers not assigned yet, data in queue: ${dataQueue.length}`);
+                        log(`Trackers not assigned yet - ${data} - Queue length: ${dataQueue.length}`);
                     }
 
                     const numberOfPorts = Object.keys(activePorts).length;

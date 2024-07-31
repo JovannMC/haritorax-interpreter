@@ -376,6 +376,13 @@ function getCharacteristic(service: Service, characteristic: string): Characteri
 
 function emitData(localName: string, service: string, characteristic: string, data: any) {
     main.emit("data", localName, services.get(service) || service, characteristics.get(characteristic) || characteristic, data);
+    main.emit(
+        "dataRaw",
+        localName,
+        services.get(service) || service,
+        characteristics.get(characteristic) || characteristic,
+        data
+    );
 }
 
 function log(message: string) {

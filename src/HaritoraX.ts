@@ -9,6 +9,7 @@ type TrackerModel = "wireless" | "wired";
 
 let debug = false;
 let printIMU = false;
+let printRaw = false;
 let trackersAssigned = false;
 
 let com: COM;
@@ -278,16 +279,23 @@ let trackerModelEnabled: string;
  * let device = new HaritoraXWireless(2);
  **/
 export default class HaritoraX extends EventEmitter {
-    constructor(trackerModel: TrackerModel, debugMode: boolean = false, printIMUData: boolean = false) {
+    constructor(
+        trackerModel: TrackerModel,
+        debugMode: boolean = false,
+        printIMUData: boolean = false,
+        printRawData: boolean = false
+    ) {
         super();
 
         trackerModelEnabled = trackerModel;
         debug = debugMode;
         printIMU = printIMUData;
+        printRaw = printRawData;
         main = this;
 
         log(`Set debug mode: ${debug}`);
         log(`Print tracker IMU processing: ${printIMU}`);
+        log(`Print raw data: ${printRaw}`);
     }
 
     /**
@@ -779,9 +787,9 @@ export default class HaritoraX extends EventEmitter {
         let com = new COM("wireless"); // variable doesn't matter, just need to initialize it to get the available devices
         let bluetooth = new Bluetooth();
 
-        log("Checking if any COM devices is available")
+        log("Checking if any COM devices is available");
         if (await com.isDeviceAvailable()) {
-            log("COM devices available")
+            log("COM devices available");
             const devices = await com.getAvailableDevices();
             log(`Got COM devices: ${devices}`);
             // for each device, add the device name to the available devices
@@ -793,9 +801,9 @@ export default class HaritoraX extends EventEmitter {
                 }
             });
         }
-        log("Checking if any Bluetooth devices is available")
+        log("Checking if any Bluetooth devices is available");
         if (await bluetooth.isDeviceAvailable()) {
-            log("Bluetooth available")
+            log("Bluetooth available");
             availableDevices.push("Bluetooth");
 
             const devices = await bluetooth.getAvailableDevices();
@@ -930,6 +938,11 @@ function listenToDeviceEvents() {
         com.on("logError", ({ message, exceptional }) => {
             error(message, exceptional);
         });
+
+        com.on("dataRaw", (data, port) => {
+            if (!printRaw) return;
+            log(`${port} - Raw data: ${data}`);
+        });
     }
 
     /*
@@ -990,6 +1003,11 @@ function listenToDeviceEvents() {
 
         bluetooth.on("logError", ({ message, exceptional }) => {
             error(message, exceptional);
+        });
+
+        bluetooth.on("dataRaw", (localName, service, characteristic, data) => {
+            if (!printRaw) return;
+            log(`${localName} - Raw data: - ${data} - ${data.toString("base64")} - ${characteristic} - ${service}`);
         });
     }
 }
