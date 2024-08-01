@@ -4,6 +4,7 @@ import { SerialPortStream } from "@serialport/stream";
 import { autoDetect } from "@serialport/bindings-cpp";
 import { ReadlineParser } from "@serialport/parser-readline";
 import { EventEmitter } from "events";
+import { getPairedDevices, BluetoothDevice } from "../libs/btspp";
 
 const Binding = autoDetect();
 
@@ -42,10 +43,10 @@ const deviceInformation: Map<string, string[]> = new Map([
 const devices = [
     { name: "GX2", vid: "1915", pid: "520F" },
     { name: "GX6", vid: "04DA", pid: "3F18" },
-    { name: "HaritoraX 1.1b", vid: "", pid: "" },
+    /*{ name: "HaritoraX 1.1b", vid: "", pid: "" },
     { name: "HaritoraX 1.1", vid: "", pid: "" },
     { name: "HaritoraX 1.0", vid: "", pid: "" },
-    // { name: "Haritora", vid: "", pid: "" }, - these were before Shiftall (and users had to build it themselves), so they may not have the same VID/PID
+    // { name: "Haritora", vid: "", pid: "" }, - these were before Shiftall (and users had to build it themselves), so they may not have the same VID/PID*/
 ];
 
 // Stores the ports that are currently active as objects for access later
@@ -65,8 +66,15 @@ export default class COM extends EventEmitter {
 
     async isDeviceAvailable() {
         const ports = await Binding.list();
-        for (const device of devices) {
-            if (ports.some((port) => port.vendorId === device.vid && port.productId === device.pid)) {
+        const btsppDevices = await getPairedDevices();
+        const allDevices = [...devices, ...btsppDevices];
+
+        for (const device of allDevices) {
+            if (
+                ports.some((port) => "pid" in device && port.vendorId === device.vid && port.productId === device.pid) ||
+                device.name.startsWith("HaritoraX-") ||
+                device.name.startsWith("Haritora-")
+            ) {
                 return true;
             }
         }
@@ -74,17 +82,23 @@ export default class COM extends EventEmitter {
 
     async getAvailableDevices() {
         const ports = await Binding.list();
+        const btsppDevices = await getPairedDevices();
         const availableDeviceNames: Set<string> = new Set();
         let gxDevicesFound = false;
+
         for (const device of devices) {
             const matchingPort = ports.find((port) => port.vendorId === device.vid && port.productId === device.pid);
             if (matchingPort) {
                 if (device.name === "GX6" || device.name === "GX2") {
                     gxDevicesFound = true;
                     availableDeviceNames.add(device.name);
-                } else {
-                    availableDeviceNames.add(device.name);
                 }
+            }
+        }
+
+        for (const btDevice of btsppDevices) {
+            if (btDevice.name.startsWith("HaritoraX-") || btDevice.name.startsWith("Haritora-")) {
+                availableDeviceNames.add("HaritoraX Wired");
             }
         }
 
@@ -95,6 +109,7 @@ export default class COM extends EventEmitter {
 
     async getDevicePorts(device: string) {
         const ports = await Binding.list();
+        const bluetoothDevices = await getPairedDevices();
         const availablePorts = ports
             .map((port) => {
                 const deviceMatch = devices.find(
@@ -106,10 +121,18 @@ export default class COM extends EventEmitter {
                 };
             })
             .filter((port_1) => port_1.deviceName !== undefined);
+
         let foundPorts = [];
         for (const port_2 of availablePorts) {
             if (port_2.deviceName === device) foundPorts.push(port_2.path);
         }
+
+        for (const btDevice of bluetoothDevices) {
+            if ((btDevice.name.startsWith("HaritoraX-") || btDevice.name.startsWith("Haritora-")) && btDevice.comPort) {
+                foundPorts.push(btDevice.comPort);
+            }
+        }
+
         return foundPorts;
     }
 

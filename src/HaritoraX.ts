@@ -836,11 +836,12 @@ export default class HaritoraX extends EventEmitter {
         let com = new COM("wireless");
         try {
             if (device === "HaritoraX Wired") {
-                return (
+                /*return (
                     (await com.getDevicePorts("HaritoraX 1.0")) ||
                     (await com.getDevicePorts("HaritoraX 1.1")) ||
                     (await com.getDevicePorts("HaritoraX 1.1b"))
-                );
+                );*/
+                return await com.getDevicePorts("HaritoraX Wired");
             } else {
                 return await com.getDevicePorts(device);
             }

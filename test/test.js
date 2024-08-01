@@ -1,4 +1,5 @@
 const { HaritoraX } = require("../dist/index.js");
+const { getPairedDevices } = require("../dist/libs/btspp.js");
 
 let mode = process.argv[2] || "com";
 let device = new HaritoraX("wireless", true, false, true);
@@ -29,6 +30,7 @@ if (mode === "bt" || mode === "bluetooth") {
     setInterval(async () => {
         try {
             console.log("Active trackers for COM:", device.getActiveTrackers());
+            console.log(`Paired: ${JSON.stringify(await getPairedDevices())}`);
         } catch (error) {
             console.error("Error getting device data:", error);
         }
