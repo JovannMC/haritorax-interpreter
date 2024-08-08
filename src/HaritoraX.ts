@@ -853,6 +853,18 @@ export default class HaritoraX extends EventEmitter {
 }
 
 function listenToDeviceEvents() {
+    const trackerTimeouts: { [key: string]: NodeJS.Timeout } = {};
+
+    const resetTrackerTimeout = (trackerName: string) => {
+        if (trackerTimeouts[trackerName]) {
+            clearTimeout(trackerTimeouts[trackerName]);
+        }
+        trackerTimeouts[trackerName] = setTimeout(() => {
+            main.emit("disconnect", trackerName);
+            log(`Tracker ${trackerName} assumed disconnected due to inactivity.`);
+        }, 5000);
+    };
+
     /*
      * COM events
      */
@@ -860,6 +872,8 @@ function listenToDeviceEvents() {
     if (com) {
         com.on("data", (trackerName: string, port: string, _portId: string, identifier: string, portData: string) => {
             if (!canProcessComData) return;
+
+            if (activeDevices.includes(trackerName)) resetTrackerTimeout(trackerName);
 
             if (trackerModelEnabled === "wireless") {
                 switch (identifier[0]) {
@@ -953,6 +967,8 @@ function listenToDeviceEvents() {
     if (bluetooth) {
         bluetooth.on("data", (localName: string, service: string, characteristic: string, data: string) => {
             if (!canProcessBluetoothData || service === "Device Information") return;
+
+            if (activeDevices.includes(localName)) resetTrackerTimeout(localName);
 
             switch (characteristic) {
                 case "Sensor":
