@@ -251,7 +251,7 @@ async function processData(data: string, port: string) {
 
     try {
         let trackerName = null;
-        let identifier = null;
+        let identifier: string = null;
         let portId: string = null;
         let portData: string = null;
 
@@ -278,17 +278,19 @@ async function processData(data: string, port: string) {
 
                     // Check if all trackers are assigned and queue if not
                     if (!trackersAssigned && !isOverThreshold) {
-                        if (dataQueue && dataQueue.length >= 200) {
+                        if (dataQueue && dataQueue.length >= 50) {
                             isOverThreshold = true;
                             log(`Data queue is over threshold, assuming not all trackers have been connected.`);
                             dataQueue = null;
                             return;
                         }
 
+                        // Skip IMU data for trackers, not needed to be processed after trackers are assigned
+                        if (identifier.startsWith('x')) return;
+                    
                         dataQueue.push({ data, port });
                         log(`Trackers not assigned yet - ${data} - Queue length: ${dataQueue.length}`);
                     }
-
                     const numberOfPorts = Object.keys(activePorts).length;
                     const requiredAssignments = numberOfPorts * 2;
 
