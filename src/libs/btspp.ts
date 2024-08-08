@@ -17,8 +17,6 @@ const getPairedDevicesWindows = (): Promise<BluetoothDevice[]> => {
             const devices: BluetoothDevice[] = [];
             const lines = stdout.split("\n").filter((line) => line.trim() !== "" && !line.includes("Name"));
 
-            console.log(lines);
-
             lines.forEach((line) => {
                 const [name, deviceId] = line.trim().split(/\s{2,}/);
                 if (name && deviceId) {
@@ -31,8 +29,6 @@ const getPairedDevicesWindows = (): Promise<BluetoothDevice[]> => {
                     reject(error);
                     return;
                 }
-
-                console.log(stdout);
 
                 const comPorts = stdout.split("\n").filter((line) => line.trim() !== "" && !line.includes("DeviceID"));
 
