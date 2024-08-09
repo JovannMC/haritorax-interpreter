@@ -264,6 +264,23 @@ async function processData(data: string, port: string) {
                 portData = splitData[1];
 
                 if (!trackersAssigned) {
+                    function processQueue(): Promise<void> {
+                        return new Promise(async (resolve, reject) => {
+                            try {
+                                while (dataQueue.length > 0) {
+                                    const queuedData = dataQueue.shift();
+                                    if (queuedData) {
+                                        log(`Processing queued data: ${queuedData.data}`);
+                                        await processData(queuedData.data, queuedData.port);
+                                    }
+                                }
+                                resolve();
+                            } catch (error) {
+                                reject(error);
+                            }
+                        });
+                    }
+
                     for (let [key, value] of trackerAssignment.entries()) {
                         if (value[1] === "") {
                             if (identifier.startsWith("r")) {
@@ -281,13 +298,14 @@ async function processData(data: string, port: string) {
                         if (dataQueue && dataQueue.length >= 50) {
                             isOverThreshold = true;
                             log(`Data queue is over threshold, assuming not all trackers have been connected.`);
+                            await processQueue();
                             dataQueue = null;
                             return;
                         }
 
                         // Skip IMU data for trackers, not needed to be processed after trackers are assigned
-                        if (identifier.startsWith('x')) return;
-                    
+                        if (identifier.startsWith("x")) return;
+
                         dataQueue.push({ data, port });
                         log(`Trackers not assigned yet - ${data} - Queue length: ${dataQueue.length}`);
                     }
@@ -300,15 +318,7 @@ async function processData(data: string, port: string) {
                     ) {
                         log(`Required assignments completed: ${Array.from(trackerAssignment.entries())}`);
                         trackersAssigned = true;
-
-                        // Process the queued data
-                        while (dataQueue.length > 0) {
-                            const queuedData = dataQueue.shift();
-                            if (queuedData) {
-                                log(`Processing queued data: ${queuedData.data}`);
-                                await processData(queuedData.data, queuedData.port);
-                            }
-                        }
+                        processQueue();
                     }
                 }
 
