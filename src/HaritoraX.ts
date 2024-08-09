@@ -347,20 +347,28 @@ export default class HaritoraX extends EventEmitter {
      * device.stopConnection("com");
      **/
     async stopConnection(connectionMode: string) {
+        let removedDevices: string[] = [];
         if (connectionMode === "com" && comEnabled) {
             canProcessComData = false;
-            await removeActiveDevices("com");
-
+            removedDevices = await removeActiveDevices("com");
+    
             com.stopConnection();
             comEnabled = false;
         } else if (connectionMode === "bluetooth" && bluetoothEnabled) {
             canProcessBluetoothData = false;
-            await removeActiveDevices("bluetooth");
-
+            removedDevices = await removeActiveDevices("bluetooth");
+    
             bluetooth.stopConnection();
             bluetoothEnabled = false;
         }
-
+    
+        for (let [key, trackerTimeout] of Object.entries(trackerTimeouts)) {
+            if (removedDevices.includes(key)) {
+                clearTimeout(trackerTimeout);
+                delete trackerTimeouts[key];
+            }
+        }
+    
         canSendButtonData = false;
     }
 
@@ -847,9 +855,8 @@ export default class HaritoraX extends EventEmitter {
     }
 }
 
+const trackerTimeouts: { [key: string]: NodeJS.Timeout } = {};
 function listenToDeviceEvents() {
-    const trackerTimeouts: { [key: string]: NodeJS.Timeout } = {};
-
     const resetTrackerTimeout = (trackerName: string) => {
         if (trackerTimeouts[trackerName]) {
             clearTimeout(trackerTimeouts[trackerName]);
@@ -1002,6 +1009,7 @@ function listenToDeviceEvents() {
 
         bluetooth.on("disconnect", (peripheral) => {
             const trackerName = peripheral.advertisement.localName;
+            delete trackerTimeouts[trackerName];
             main.emit("disconnect", trackerName);
         });
 
@@ -1738,17 +1746,20 @@ function setupBluetoothServices(): boolean {
  * stopConnection() function helpers
  */
 
-async function removeActiveDevices(deviceTypeToRemove: string) {
+async function removeActiveDevices(deviceTypeToRemove: string): Promise<string[]> {
     let devices = deviceTypeToRemove === "bluetooth" ? bluetooth.getActiveDevices() : com.getTrackers();
+    let removedDevices: string[] = [];
+
     for (let device of devices) {
         let deviceName = device[0];
         let index = activeDevices.indexOf(deviceName);
         if (index !== -1) {
             activeDevices.splice(index, 1);
+            removedDevices.push(deviceName);
         }
     }
 
-    return;
+    return removedDevices;
 }
 
 /*
