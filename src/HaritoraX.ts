@@ -10,7 +10,6 @@ type TrackerModel = "wireless" | "wired";
 let debug = false;
 let printIMU = false;
 let printRaw = false;
-let trackersAssigned = false;
 
 let com: COM;
 let bluetooth: Bluetooth;
@@ -938,10 +937,6 @@ function listenToDeviceEvents() {
             }
         });
 
-        com.on("assigned", () => {
-            trackersAssigned = true;
-        });
-
         com.on("log", (message: string) => {
             log(message);
         });
@@ -1760,16 +1755,7 @@ async function removeActiveDevices(deviceTypeToRemove: string) {
  * getTrackerSettings() function helpers
  */
 
-async function delay(ms: number) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function getTrackerSettingsFromMap(trackerName: string) {
-    while (!trackersAssigned) {
-        log("Trackers not assigned yet, retrying in 1 second...");
-        await delay(1000);
-    }
-
     const settings = trackerSettings.get(trackerName);
     if (settings) {
         const settingsToLog = {

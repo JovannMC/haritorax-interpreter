@@ -309,8 +309,6 @@ async function processData(data: string, port: string) {
                                 await processData(queuedData.data, queuedData.port);
                             }
                         }
-
-                        main.emit("assigned");
                     }
                 }
 
