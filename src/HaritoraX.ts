@@ -1470,7 +1470,7 @@ function processInfoData(data: string, trackerName: string) {
  **/
 
 function processButtonData(data: string, trackerName: string, characteristic?: string) {
-    if (!canSendButtonData) return false;
+    if (!canSendButtonData || !trackerName || trackerName === "DONGLE") return;
 
     let currentButtons = trackerButtons.get(trackerName) || [0, 0, 0];
     let buttonPressed = undefined;
