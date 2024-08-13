@@ -362,13 +362,6 @@ export default class HaritoraX extends EventEmitter {
             bluetoothEnabled = false;
         }
     
-        for (let [key, trackerTimeout] of Object.entries(trackerTimeouts)) {
-            if (removedDevices.includes(key)) {
-                clearTimeout(trackerTimeout);
-                delete trackerTimeouts[key];
-            }
-        }
-    
         canSendButtonData = false;
     }
 
@@ -855,18 +848,7 @@ export default class HaritoraX extends EventEmitter {
     }
 }
 
-const trackerTimeouts: { [key: string]: NodeJS.Timeout } = {};
 function listenToDeviceEvents() {
-    const resetTrackerTimeout = (trackerName: string) => {
-        if (trackerTimeouts[trackerName]) {
-            clearTimeout(trackerTimeouts[trackerName]);
-        }
-        trackerTimeouts[trackerName] = setTimeout(() => {
-            main.emit("disconnect", trackerName);
-            log(`Tracker ${trackerName} assumed disconnected due to inactivity.`);
-        }, 5000);
-    };
-
     /*
      * COM events
      */
@@ -874,8 +856,6 @@ function listenToDeviceEvents() {
     if (com) {
         com.on("data", (trackerName: string, port: string, _portId: string, identifier: string, portData: string) => {
             if (!canProcessComData) return;
-
-            if (activeDevices.includes(trackerName)) resetTrackerTimeout(trackerName);
 
             if (trackerModelEnabled === "wireless") {
                 switch (identifier[0]) {
@@ -966,8 +946,6 @@ function listenToDeviceEvents() {
         bluetooth.on("data", (localName: string, service: string, characteristic: string, data: string) => {
             if (!canProcessBluetoothData || service === "Device Information") return;
 
-            if (activeDevices.includes(localName)) resetTrackerTimeout(localName);
-
             switch (characteristic) {
                 case "Sensor":
                     processIMUData(Buffer.from(data, "base64"), localName);
@@ -1009,7 +987,6 @@ function listenToDeviceEvents() {
 
         bluetooth.on("disconnect", (peripheral) => {
             const trackerName = peripheral.advertisement.localName;
-            delete trackerTimeouts[trackerName];
             main.emit("disconnect", trackerName);
         });
 
