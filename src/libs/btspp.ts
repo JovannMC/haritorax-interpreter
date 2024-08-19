@@ -48,7 +48,7 @@ const getPairedDevicesWindows = (): Promise<BluetoothDevice[]> => {
 
 const getPairedDevicesLinux = (): Promise<BluetoothDevice[]> => {
     return new Promise((resolve, reject) => {
-        exec("bluetoothctl paired-devices", (error, stdout, _stderr) => {
+        exec("bluetoothctl devices Paired", (error, stdout, _stderr) => {
             if (error) {
                 reject(error);
                 return;
