@@ -838,7 +838,6 @@ export default class HaritoraX extends EventEmitter {
             if (device === "HaritoraX Wired") {
                 return await com.getDevicePorts("HaritoraX Wired");
             } else {
-                log("1 Getting available ports for " + device);
                 return await com.getDevicePorts(device);
             }
         } finally {
