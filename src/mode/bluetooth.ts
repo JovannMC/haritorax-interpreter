@@ -143,6 +143,13 @@ export default class Bluetooth extends EventEmitter {
                     return startScanning();
                 }
             });
+
+            // Fail-safe if noble never initializes properly (no "stateChange" event fired)
+            setTimeout(() => {
+                noble.stopScanning();
+                noble.removeAllListeners();
+                error("Bluetooth initialization failed (timeout)", true);
+            }, 3500);
         }
     }
 
