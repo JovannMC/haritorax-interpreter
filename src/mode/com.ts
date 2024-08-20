@@ -113,7 +113,13 @@ export default class COM extends EventEmitter {
         const availablePorts = ports
             .map((port) => {
                 const deviceMatch = devices.find(
-                    (deviceItem) => port.vendorId === deviceItem.vid && port.productId === deviceItem.pid
+                    (deviceItem) =>
+                        deviceItem.vid &&
+                        deviceItem.pid &&
+                        port.vendorId &&
+                        port.productId &&
+                        port.vendorId.toLowerCase() === deviceItem.vid.toLowerCase() &&
+                        port.productId.toLowerCase() === deviceItem.pid.toLowerCase()
                 );
                 return {
                     ...port,
@@ -124,7 +130,7 @@ export default class COM extends EventEmitter {
 
         let foundPorts = [];
         for (const port_2 of availablePorts) {
-            if (port_2.deviceName === device) foundPorts.push(port_2.path);
+            if (port_2.deviceName?.toLowerCase() === device.toLowerCase()) foundPorts.push(port_2.path);
         }
 
         for (const btDevice of bluetoothDevices) {
@@ -132,7 +138,7 @@ export default class COM extends EventEmitter {
                 foundPorts.push(btDevice.comPort);
             }
         }
-
+        
         return foundPorts;
     }
 
