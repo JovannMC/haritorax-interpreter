@@ -140,12 +140,13 @@ export default class Bluetooth extends EventEmitter {
         } else {
             noble.on("stateChange", (state) => {
                 if (state === "poweredOn") {
+                    clearTimeout(connectionTimeout);
                     return startScanning();
                 }
             });
 
             // Fail-safe if noble never initializes properly (no "stateChange" event fired)
-            setTimeout(() => {
+            const connectionTimeout = setTimeout(() => {
                 noble.stopScanning();
                 noble.removeAllListeners();
                 error("Bluetooth initialization failed (timeout)", true);
