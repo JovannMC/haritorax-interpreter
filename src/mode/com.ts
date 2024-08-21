@@ -281,8 +281,8 @@ async function processData(data: string, port: string) {
                                     }
                                 }
                                 resolve();
-                            } catch (error) {
-                                reject(error);
+                            } catch (err) {
+                                reject(err);
                             }
                         });
                     }

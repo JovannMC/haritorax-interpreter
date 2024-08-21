@@ -1402,8 +1402,8 @@ function processSettingsData(data: string, trackerName: string) {
             trackerSettings.set(trackerName, [sensorMode, fpsMode, sensorAutoCorrectionList, false]);
             main.emit("settings", trackerName, sensorMode, fpsMode, sensorAutoCorrectionList);
         }
-    } catch (error) {
-        console.error(`Error processing tracker settings for ${trackerName}:`, error);
+    } catch (err) {
+        error(`Error processing tracker settings for ${trackerName}: ${err}`);
     }
 }
 
@@ -1426,8 +1426,8 @@ function processInfoData(data: string, trackerName: string) {
         main.emit("info", trackerName, version, model, serial, comm, comm_next);
         deviceInformation.set(trackerName, [version, model, serial, comm, comm_next]);
         return { version, model, serial, comm, comm_next };
-    } catch (error) {
-        log(`Error processing info data for tracker ${trackerName}: ${error}`);
+    } catch (err) {
+        log(`Error processing info data for tracker ${trackerName}: ${err}`);
         return null;
     }
 }
@@ -1761,7 +1761,7 @@ async function getTrackerSettingsFromMap(trackerName: string) {
             ankleMotionDetection: settings[3],
         });
     } else {
-        console.error(`Tracker ${trackerName} settings not found in trackerSettings map.`);
+        error(`Tracker ${trackerName} settings not found in trackerSettings map.`);
         return Promise.reject(`Tracker ${trackerName} settings not found in trackerSettings map.`);
     }
 }
