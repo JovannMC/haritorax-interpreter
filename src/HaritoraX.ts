@@ -4,7 +4,7 @@ import { Buffer } from "buffer";
 import { EventEmitter } from "events";
 import { COM } from "./mode/com.js";
 import Bluetooth from "./mode/bluetooth.js";
-import { TrackerModel, SensorMode, FPSMode, SensorAutoCorrection } from "./types.js";
+import { TrackerModel, SensorMode, FPSMode, SensorAutoCorrection, MagStatus } from "./types.js";
 
 let debug = false;
 let printIMU = false;
@@ -23,10 +23,10 @@ let canProcessBluetoothData = false;
  * Constants
  */
 
-const GREEN = 3;
-const YELLOW = 2;
-const RED_2 = 1;
-const RED = 0;
+const GREAT = 3;
+const OKAY = 2;
+const BAD = 1;
+const VERY_BAD = 0;
 
 const SENSOR_MODE_1 = 1;
 const SENSOR_MODE_2 = 0;
@@ -136,7 +136,7 @@ let correctionCharacteristic: string;
 let ankleCharacteristic: string;
 
 let activeDevices: string[] = [];
-let trackerModelEnabled: string;
+let trackerModelEnabled: TrackerModel;
 
 // JSDoc comments for events
 
@@ -172,7 +172,7 @@ let trackerModelEnabled: string;
  **/
 
 /**
- * The "mag" event which provides the tracker's magnetometer status
+ * The SensorAutoCorrection.Magnetometer event which provides the tracker's magnetometer status
  * Supported trackers: wireless, wired
  * Supported connections: COM, Bluetooth
  *
@@ -1128,19 +1128,19 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
 
                 switch (magnetometerData) {
                     case "A":
-                        magStatus = "red";
+                        magStatus = MagStatus.VERY_BAD;
                         break;
                     case "B":
-                        magStatus = "red";
+                        magStatus = MagStatus.BAD;
                         break;
                     case "C":
-                        magStatus = "yellow";
+                        magStatus = MagStatus.OKAY;
                         break;
                     case "D":
-                        magStatus = "green";
+                        magStatus = MagStatus.GREAT;
                         break;
                     default:
-                        magStatus = "unknown";
+                        magStatus = MagStatus.Unknown;
                         break;
                 }
 
@@ -1281,15 +1281,16 @@ function processMagData(data: string, trackerName: string) {
 
 function getMagStatus(magData: number) {
     switch (magData) {
-        case GREEN:
-            return "green";
-        case YELLOW:
-            return "yellow";
-        case RED:
-        case RED_2:
-            return "red";
+        case GREAT:
+            return MagStatus.GREAT;
+        case OKAY:
+            return MagStatus.OKAY;
+        case BAD:
+            return MagStatus.BAD;
+        case VERY_BAD:
+            return MagStatus.VERY_BAD;
         default:
-            return "unknown";
+            return MagStatus.Unknown;
     }
 }
 
