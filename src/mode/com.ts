@@ -197,7 +197,7 @@ export default class COM extends EventEmitter {
     }
 
     getTrackerId(tracker: string) {
-        const trackerId: number = parseInt(trackerAssignment.get(tracker)[0]);
+        const trackerId = trackerAssignment.get(tracker)[0];
         if (trackerId) {
             return trackerId;
         }
@@ -213,7 +213,7 @@ export default class COM extends EventEmitter {
     }
 
     getTrackerPortId(tracker: string) {
-        const portId = parseInt(trackerAssignment.get(tracker)[2]);
+        const portId = trackerAssignment.get(tracker)[2];
         if (portId) {
             return portId;
         }
