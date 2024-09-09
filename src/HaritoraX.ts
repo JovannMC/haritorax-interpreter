@@ -1695,12 +1695,12 @@ function setupBluetoothServices(): boolean {
  * stopConnection() function helpers
  */
 
-async function removeActiveDevices(deviceTypeToRemove: string): Promise<string[]> {
+function removeActiveDevices(deviceTypeToRemove: string) {
     let devices = deviceTypeToRemove === "bluetooth" ? bluetooth.getActiveDevices() : com.getTrackers();
     let removedDevices: string[] = [];
 
     for (let device of devices) {
-        let deviceName = device[0];
+        let deviceName = device.toString();
         let index = activeDevices.indexOf(deviceName);
         if (index !== -1) {
             activeDevices.splice(index, 1);
