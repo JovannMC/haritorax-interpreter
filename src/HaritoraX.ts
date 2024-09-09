@@ -2,10 +2,9 @@
 
 import { Buffer } from "buffer";
 import { EventEmitter } from "events";
-import { COM, ActivePorts } from "./mode/com.js";
+import { COM } from "./mode/com.js";
 import Bluetooth from "./mode/bluetooth.js";
-
-type TrackerModel = "wireless" | "wired";
+import { TrackerModel, SensorMode, FPSMode, SensorAutoCorrection } from "./types.js";
 
 let debug = false;
 let printIMU = false;
@@ -34,8 +33,7 @@ const SENSOR_MODE_2 = 0;
 const FPS_MODE_100 = 1;
 const FPS_MODE_50 = 0;
 
-type SensorCorrectionKey = "accel" | "gyro" | "mag";
-const SENSOR_CORRECTION_BITS: Record<SensorCorrectionKey, number> = {
+const SENSOR_CORRECTION_BITS: Record<SensorAutoCorrection, number> = {
     accel: 1,
     gyro: 2,
     mag: 4,
@@ -58,8 +56,6 @@ const SERIAL_UUID = "2a25";
 const MAIN_BUTTON_INDEX = 0;
 const SUB_BUTTON_INDEX = 1;
 const SUB2_BUTTON_INDEX = 2;
-const TRACKER_OFF = false;
-const TRACKER_ON = true;
 
 /*
  * Maps
@@ -367,12 +363,12 @@ export default class HaritoraX extends EventEmitter {
      **/
     setTrackerSettings(
         trackerName: string,
-        sensorMode: number,
-        fpsMode: number,
-        sensorAutoCorrection: string[],
+        sensorMode: SensorMode,
+        fpsMode: FPSMode,
+        sensorAutoCorrection: SensorAutoCorrection[],
         ankleMotionDetection: boolean
     ) {
-        const sensorAutoCorrectionBit = calculateSensorAutoCorrectionBits(sensorAutoCorrection as SensorCorrectionKey[]);
+        const sensorAutoCorrectionBit = sensorAutoCorrection.reduce((acc, curr) => acc | SENSOR_CORRECTION_BITS[curr], 0);
         const settings = {
             "Sensor mode": sensorMode,
             "FPS mode": fpsMode,
@@ -387,16 +383,12 @@ export default class HaritoraX extends EventEmitter {
             writeToBluetooth(trackerName, ankleCharacteristic, ankleMotionDetection ? 1 : 0);
         } else {
             // GX dongle(s)
-            const sensorModeBit = sensorMode === 1 ? SENSOR_MODE_1 : SENSOR_MODE_2; // Default to mode 2
-            const postureDataRateBit = fpsMode === 100 ? FPS_MODE_100 : FPS_MODE_50; // Default to 50 FPS
-            const ankleMotionDetectionBit = ankleMotionDetection ? 1 : 0; // Default to false
-
             const trackerPort = com.getTrackerPort(trackerName);
             const trackerPortId = com.getTrackerPortId(trackerName);
 
             const identifierValue = `o${trackerPortId}:`;
-            const dataValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
-            const finalValue = `${identifierValue}${dataValue}`;
+            const hexValue = getSettingsHexValue(sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
+            const finalValue = `${identifierValue}${hexValue}`;
 
             writeToPort(trackerPort, finalValue, trackerName);
             writeToPort(trackerPort, identifierValue, trackerName);
@@ -430,7 +422,12 @@ export default class HaritoraX extends EventEmitter {
      * trackers.setAllTrackerSettings(2, 50, ['mag'], false);
      **/
 
-    setAllTrackerSettings(sensorMode: number, fpsMode: number, sensorAutoCorrection: string[], ankleMotionDetection: boolean) {
+    setAllTrackerSettings(
+        sensorMode: SensorMode,
+        fpsMode: FPSMode,
+        sensorAutoCorrection: SensorAutoCorrection[],
+        ankleMotionDetection: boolean
+    ) {
         try {
             if (trackerModelEnabled === "wired") {
                 handleWiredSettings(sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
@@ -471,7 +468,13 @@ export default class HaritoraX extends EventEmitter {
      * @returns {object} The tracker settings (sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection).
      **/
     async getTrackerSettings(trackerName?: string, forceBluetoothRead?: boolean): Promise<object> {
-        const logSettings = (name: string, sensorMode: number, fpsMode: number, correction: string[], ankle: boolean) => {
+        const logSettings = (
+            name: string,
+            sensorMode: SensorMode,
+            fpsMode: FPSMode,
+            correction: string[],
+            ankle: boolean
+        ) => {
             log(`Tracker ${name} settings:`);
             log(`Sensor mode: ${sensorMode}`);
             log(`FPS mode: ${fpsMode}`);
@@ -1461,11 +1464,11 @@ function processWirelessTrackerData(data: string, trackerName: string, currentBu
     if (data[0] === "0" || data[7] === "f" || data[8] === "f" || data[10] === "f" || data[11] === "f") {
         log(`Tracker ${trackerName} is off/turning off...`);
         log(`Raw data: ${data}`);
-        isOn = TRACKER_OFF;
+        isOn = false;
     } else {
         log(`Tracker ${trackerName} is on/turning on...`);
         log(`Raw data: ${data}`);
-        isOn = TRACKER_ON;
+        isOn = true;
     }
 
     return { buttonPressed, isOn };
@@ -1642,8 +1645,21 @@ function writeToPort(port: string, rawData: String, trackerName = "unknown") {
     });
 }
 
-function calculateSensorAutoCorrectionBits(sensorAutoCorrection: SensorCorrectionKey[]): number {
-    return sensorAutoCorrection.reduce((acc, curr) => acc | SENSOR_CORRECTION_BITS[curr], 0);
+function getSettingsHexValue(
+    sensorMode: SensorMode,
+    fpsMode: FPSMode,
+    sensorAutoCorrection: SensorAutoCorrection[],
+    ankleMotionDetection: boolean
+): string {
+    const sensorModeBit = sensorMode === 1 ? SENSOR_MODE_1 : SENSOR_MODE_2;
+    const postureDataRateBit = fpsMode === 100 ? FPS_MODE_100 : FPS_MODE_50;
+    const ankleMotionDetectionBit = ankleMotionDetection ? 1 : 0;
+    let sensorAutoCorrectionBit = 0;
+    if (sensorAutoCorrection.includes("accel")) sensorAutoCorrectionBit |= 0x01;
+    if (sensorAutoCorrection.includes("gyro")) sensorAutoCorrectionBit |= 0x02;
+    if (sensorAutoCorrection.includes("mag")) sensorAutoCorrectionBit |= 0x04;
+
+    return `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
 }
 
 function writeToBluetooth(trackerName: string, characteristic: string, value: number) {
@@ -1740,7 +1756,12 @@ async function getTrackerSettingsFromMap(trackerName: string) {
     }
 }
 
-function handleWiredSettings(sensorMode: number, fpsMode: number, sensorAutoCorrection: string[], ankleMotionDetection: boolean) {
+function handleWiredSettings(
+    sensorMode: SensorMode,
+    fpsMode: FPSMode,
+    sensorAutoCorrection: SensorAutoCorrection[],
+    ankleMotionDetection: boolean
+) {
     const ports = com.getActivePorts();
 
     // Prepare commands
@@ -1773,23 +1794,15 @@ function handleWiredSettings(sensorMode: number, fpsMode: number, sensorAutoCorr
 }
 
 function handleWirelessSettings(
-    sensorMode: number,
-    fpsMode: number,
-    sensorAutoCorrection: string[],
+    sensorMode: SensorMode,
+    fpsMode: FPSMode,
+    sensorAutoCorrection: SensorAutoCorrection[],
     ankleMotionDetection: boolean
 ) {
     if (comEnabled) {
-        const sensorModeBit = sensorMode === 1 ? SENSOR_MODE_1 : SENSOR_MODE_2;
-        const postureDataRateBit = fpsMode === 100 ? FPS_MODE_100 : FPS_MODE_50;
-        const ankleMotionDetectionBit = ankleMotionDetection ? 1 : 0;
-        let sensorAutoCorrectionBit = 0;
-        if (sensorAutoCorrection.includes("accel")) sensorAutoCorrectionBit |= 0x01;
-        if (sensorAutoCorrection.includes("gyro")) sensorAutoCorrectionBit |= 0x02;
-        if (sensorAutoCorrection.includes("mag")) sensorAutoCorrectionBit |= 0x04;
-    
-        const hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
+        const hexValue = getSettingsHexValue(sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
         const finalValue = `o0:${hexValue}\no1:${hexValue}`;
-        
+
         for (const port in com.getActivePorts()) {
             writeToPort(port, finalValue, "HaritoraXWireless");
         }
@@ -1803,9 +1816,9 @@ function handleWirelessSettings(
 }
 
 function updateTrackerSettings(
-    sensorMode: number,
-    fpsMode: number,
-    sensorAutoCorrection: string[],
+    sensorMode: SensorMode,
+    fpsMode: FPSMode,
+    sensorAutoCorrection: SensorAutoCorrection[],
     ankleMotionDetection: boolean
 ) {
     for (let trackerName of trackerSettings.keys()) {
