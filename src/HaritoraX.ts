@@ -394,10 +394,12 @@ export default class HaritoraX extends EventEmitter {
             const trackerPort = com.getTrackerPort(trackerName);
             const trackerPortId = com.getTrackerPortId(trackerName);
 
-            const rawValue = `o${trackerPortId}:00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
-            const trackerSettingsBuffer = Buffer.from(rawValue, "utf-8");
+            const identifierValue = `o${trackerPortId}:`;
+            const dataValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
+            const finalValue = `${identifierValue}${dataValue}`;
 
-            writeToPort(trackerPort, trackerSettingsBuffer, trackerName);
+            writeToPort(trackerPort, finalValue, trackerName);
+            writeToPort(trackerPort, identifierValue, trackerName);
         }
 
         logSettings(trackerName, settings);
@@ -578,9 +580,8 @@ export default class HaritoraX extends EventEmitter {
             const trackerPortId = com.getTrackerPortId(trackerName);
 
             const rawValue = `i${trackerPortId}:`;
-            const trackerInfoBuffer = Buffer.from(rawValue, "utf-8");
 
-            writeToPort(trackerPort, trackerInfoBuffer, trackerName);
+            writeToPort(trackerPort, rawValue, trackerName);
         }
 
         if (trackerModelEnabled === "wireless" && bluetoothEnabled && trackerName.startsWith("HaritoraXW")) {
@@ -638,9 +639,8 @@ export default class HaritoraX extends EventEmitter {
             const trackerPortId = com.getTrackerPortId(trackerName);
 
             const rawValue = `v${trackerPortId}:`;
-            const trackerBatteryBuffer = Buffer.from(rawValue, "utf-8");
 
-            writeToPort(trackerPort, trackerBatteryBuffer, trackerName);
+            writeToPort(trackerPort, rawValue, trackerName);
         }
 
         // Check if battery info is already available
@@ -1628,10 +1628,12 @@ function error(message: string, exceptional = false) {
           })();
 }
 
-function writeToPort(port: string, data: Buffer | String, trackerName = "unknown") {
+function writeToPort(port: string, rawData: String, trackerName = "unknown") {
     const ports = com.getActivePorts();
+    const data = rawData instanceof Buffer ? rawData.toString() : rawData;
+    const finalData = `\n${data}\n`;
 
-    ports[port].write(data, (err: any) => {
+    ports[port].write(finalData, (err: any) => {
         if (err) {
             error(`${trackerName} - Error writing data to serial port ${port}: ${err}`);
         } else {
@@ -1777,21 +1779,20 @@ function handleWirelessSettings(
     ankleMotionDetection: boolean
 ) {
     if (comEnabled) {
-        const trackerSettingsBuffer = constructWirelessSettingsBuffer(
-            sensorMode,
-            fpsMode,
-            sensorAutoCorrection,
-            ankleMotionDetection
-        );
-        Object.values(com.getActivePorts()).forEach((port) => {
-            port.write(trackerSettingsBuffer, (err: Error) => {
-                if (err) {
-                    error(`Error writing data to serial port ${port.path}: ${err}`);
-                } else {
-                    log(`Data written to serial port ${port.path}: ${trackerSettingsBuffer.toString().replace(/\r\n/g, " ")}`);
-                }
-            });
-        });
+        const sensorModeBit = sensorMode === 1 ? SENSOR_MODE_1 : SENSOR_MODE_2;
+        const postureDataRateBit = fpsMode === 100 ? FPS_MODE_100 : FPS_MODE_50;
+        const ankleMotionDetectionBit = ankleMotionDetection ? 1 : 0;
+        let sensorAutoCorrectionBit = 0;
+        if (sensorAutoCorrection.includes("accel")) sensorAutoCorrectionBit |= 0x01;
+        if (sensorAutoCorrection.includes("gyro")) sensorAutoCorrectionBit |= 0x02;
+        if (sensorAutoCorrection.includes("mag")) sensorAutoCorrectionBit |= 0x04;
+    
+        const hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
+        const finalValue = `o0:${hexValue}\no1:${hexValue}`;
+        
+        for (const port in com.getActivePorts()) {
+            writeToPort(port, finalValue, "HaritoraXWireless");
+        }
     }
 
     if (bluetoothEnabled) {
@@ -1799,24 +1800,6 @@ function handleWirelessSettings(
             main.setTrackerSettings(trackerName, sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
         });
     }
-}
-
-function constructWirelessSettingsBuffer(
-    sensorMode: number,
-    fpsMode: number,
-    sensorAutoCorrection: string[],
-    ankleMotionDetection: boolean
-): Buffer {
-    const sensorModeBit = sensorMode === 1 ? SENSOR_MODE_1 : SENSOR_MODE_2;
-    const postureDataRateBit = fpsMode === 100 ? FPS_MODE_100 : FPS_MODE_50;
-    const ankleMotionDetectionBit = ankleMotionDetection ? 1 : 0;
-    let sensorAutoCorrectionBit = 0;
-    if (sensorAutoCorrection.includes("accel")) sensorAutoCorrectionBit |= 0x01;
-    if (sensorAutoCorrection.includes("gyro")) sensorAutoCorrectionBit |= 0x02;
-    if (sensorAutoCorrection.includes("mag")) sensorAutoCorrectionBit |= 0x04;
-
-    const hexValue = `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
-    return Buffer.from("o0:" + hexValue + "\r\n" + "o1:" + hexValue + "\r\n", "utf-8");
 }
 
 function updateTrackerSettings(
