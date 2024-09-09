@@ -4,7 +4,7 @@ import { SerialPortStream } from "@serialport/stream";
 import { autoDetect } from "@serialport/bindings-cpp";
 import { ReadlineParser } from "@serialport/parser-readline";
 import { EventEmitter } from "events";
-import { getPairedDevices, BluetoothDevice } from "../libs/btspp";
+import { getPairedDevices } from "../libs/btspp";
 
 const Binding = autoDetect();
 
@@ -381,7 +381,7 @@ function error(message: string, exceptional = false) {
  * Typescript type definitions
  */
 
-interface ActivePorts {
+export interface ActivePorts {
     [key: string]: SerialPortStream;
 }
 

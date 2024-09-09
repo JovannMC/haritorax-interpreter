@@ -2,7 +2,7 @@
 
 import { Buffer } from "buffer";
 import { EventEmitter } from "events";
-import COM from "./mode/com.js";
+import { COM, ActivePorts } from "./mode/com.js";
 import Bluetooth from "./mode/bluetooth.js";
 
 type TrackerModel = "wireless" | "wired";
@@ -391,28 +391,13 @@ export default class HaritoraX extends EventEmitter {
             const postureDataRateBit = fpsMode === 100 ? FPS_MODE_100 : FPS_MODE_50; // Default to 50 FPS
             const ankleMotionDetectionBit = ankleMotionDetection ? 1 : 0; // Default to false
 
-            const ports = com.getActivePorts();
             const trackerPort = com.getTrackerPort(trackerName);
             const trackerPortId = com.getTrackerPortId(trackerName);
 
             const rawValue = `o${trackerPortId}:00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
             const trackerSettingsBuffer = Buffer.from(rawValue, "utf-8");
 
-            try {
-                ports[trackerPort].write(trackerSettingsBuffer, (err: any) => {
-                    if (err) {
-                        error(`${trackerName} - Error writing data to serial port ${trackerPort}: ${err}`);
-                    } else {
-                        log(
-                            `${trackerName} - Data written to serial port ${trackerPort}: ${trackerSettingsBuffer
-                                .toString()
-                                .replace(/\r\n/g, " ")}`
-                        );
-                    }
-                });
-            } catch (err) {
-                error(`Error sending tracker settings: ${err}`);
-            }
+            writeToPort(trackerPort, trackerSettingsBuffer, trackerName);
         }
 
         logSettings(trackerName, settings);
@@ -587,6 +572,17 @@ export default class HaritoraX extends EventEmitter {
         // Global
         let serial, model, version, comm, comm_next;
 
+        if (comEnabled) {
+            // Get device info from COM by sending "i0" and "i1" commands
+            const trackerPort = com.getTrackerPort(trackerName);
+            const trackerPortId = com.getTrackerPortId(trackerName);
+
+            const rawValue = `i${trackerPortId}:`;
+            const trackerInfoBuffer = Buffer.from(rawValue, "utf-8");
+
+            writeToPort(trackerPort, trackerInfoBuffer, trackerName);
+        }
+
         if (trackerModelEnabled === "wireless" && bluetoothEnabled && trackerName.startsWith("HaritoraXW")) {
             const trackerObject = bluetooth.getActiveDevices().find((device) => device[0] === trackerName);
             if (!trackerObject) {
@@ -635,6 +631,17 @@ export default class HaritoraX extends EventEmitter {
     async fireTrackerBattery(trackerName: string) {
         log(`Getting battery info for ${trackerName}`);
         let batteryRemaining, batteryVoltage, chargeStatus;
+
+        // Get battery info from COM
+        if (comEnabled) {
+            const trackerPort = com.getTrackerPort(trackerName);
+            const trackerPortId = com.getTrackerPortId(trackerName);
+
+            const rawValue = `v${trackerPortId}:`;
+            const trackerBatteryBuffer = Buffer.from(rawValue, "utf-8");
+
+            writeToPort(trackerPort, trackerBatteryBuffer, trackerName);
+        }
 
         // Check if battery info is already available
         if (trackerBattery.has(trackerName)) {
@@ -1621,6 +1628,18 @@ function error(message: string, exceptional = false) {
           })();
 }
 
+function writeToPort(port: string, data: Buffer | String, trackerName = "unknown") {
+    const ports = com.getActivePorts();
+
+    ports[port].write(data, (err: any) => {
+        if (err) {
+            error(`${trackerName} - Error writing data to serial port ${port}: ${err}`);
+        } else {
+            log(`${trackerName} - Data written to serial port ${port}: ${data.toString().replace(/\r\n/g, " ")}`);
+        }
+    });
+}
+
 function calculateSensorAutoCorrectionBits(sensorAutoCorrection: SensorCorrectionKey[]): number {
     return sensorAutoCorrection.reduce((acc, curr) => acc | SENSOR_CORRECTION_BITS[curr], 0);
 }
@@ -1720,35 +1739,29 @@ async function getTrackerSettingsFromMap(trackerName: string) {
 }
 
 function handleWiredSettings(sensorMode: number, fpsMode: number, sensorAutoCorrection: string[], ankleMotionDetection: boolean) {
-    for (let port in com.getActivePorts()) {
-        try {
-            // Sensor mode
-            if (sensorMode === 1) {
-                com.getActivePorts()[port].write("sensor imu mode 1\r\n");
-            } else if (sensorMode === 2) {
-                com.getActivePorts()[port].write("sensor imu mode 2\r\n");
-            }
+    const ports = com.getActivePorts();
 
-            // FPS mode
-            if (fpsMode === 50) {
-                com.getActivePorts()[port].write("system speed mode 1\r\n");
-            } else if (fpsMode === 100) {
-                com.getActivePorts()[port].write("system speed mode 2\r\n");
-            }
-
-            // Sensor auto correction
+    // Prepare commands
+    const commands: { [key: string]: string | null } = {
+        sensorMode: sensorMode === 1 ? "sensor imu mode 1\r\n" : sensorMode === 2 ? "sensor imu mode 2\r\n" : null,
+        fpsMode: fpsMode === 50 ? "system speed mode 1\r\n" : fpsMode === 100 ? "system speed mode 2\r\n" : null,
+        sensorAutoCorrection: (() => {
             let sensorAutoCorrectionBit = 0;
             if (sensorAutoCorrection.includes("accel")) sensorAutoCorrectionBit += 1;
             if (sensorAutoCorrection.includes("gyro")) sensorAutoCorrectionBit += 2;
             if (sensorAutoCorrection.includes("mag")) sensorAutoCorrectionBit += 4;
-            com.getActivePorts()[port].write(`sensor cal flags ${sensorAutoCorrectionBit}\r\nsensor restart\r\n`);
+            return `sensor cal flags ${sensorAutoCorrectionBit}\r\nsensor restart\r\n`;
+        })(),
+        ankleMotionDetection: ankleMotionDetection
+            ? "param sensor range\r\nparam save\r\nsensor restart\r\n"
+            : "param sensor basic\r\nparam save\r\nsensor restart\r\n",
+    };
 
-            // Ankle motion detection
-            const command = ankleMotionDetection ? "param sensor range" : "param sensor basic";
-            com.getActivePorts()[port].write(`${command}\r\nparam save\r\nsensor restart\r\n`);
-        } catch (err) {
-            error(`Error sending tracker settings: ${err}`);
-            return false;
+    // Send commands to all ports
+    for (const port in ports) {
+        for (const commandKey in commands) {
+            const command = commands[commandKey];
+            if (command) writeToPort(port, command, "HaritoraXWired");
         }
     }
 
