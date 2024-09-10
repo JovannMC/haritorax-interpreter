@@ -802,6 +802,22 @@ export default class HaritoraX extends EventEmitter {
             com = null;
         }
     }
+
+    /**
+     * Changes the 2.4 GHz communication channel that specified COM port is using.
+     * 
+     * @function setChannel
+     * @param {string} port - The COM port to change the channel for.
+     * @param {number} channel - The channel to change to.
+     */
+    setChannel(port: string, channel: number) {
+        if (!com || !comEnabled) {
+            error("COM connection not enabled", true);
+            return;
+        }
+
+        com.setChannel(port, channel);
+    }
 }
 
 function listenToDeviceEvents() {
@@ -1199,11 +1215,11 @@ function processTrackerData(data: string, trackerName: string) {
      */
 
     if (data === "7f7f7f7f7f7f") {
-        if (debug) log(`Searching for tracker ${trackerName}...`);
+        //log(`Searching for tracker ${trackerName}...`);
         if (activeDevices.includes(trackerName)) activeDevices.splice(activeDevices.indexOf(trackerName), 1);
         main.emit("disconnect", trackerName);
     } else {
-        if (debug) log(`Tracker ${trackerName} other data processed: ${data}`);
+        //log(`Tracker ${trackerName} other data processed: ${data}`);
     }
 
     // TODO - Find out what "other data" represents, then add to emitted event.

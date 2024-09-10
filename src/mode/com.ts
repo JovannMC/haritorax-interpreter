@@ -178,10 +178,30 @@ export default class COM extends EventEmitter {
                 delete activePorts[port];
             } catch (err) {
                 error(`Error closing COM port: ${port}: ${err}`, true);
+                throw err;
             }
         });
 
         this.emit("disconnected");
+    }
+
+    setChannel(port: string, channel: number) {
+        // theoretically.. we *could* set it higher than 10 2.4 ghz channels, but i that should be ignored by the firmware
+        // also illegal to go higher than 11 in some countries lol
+        if (channel < 0 || channel > 10) {
+            error(`Invalid channel: ${channel}`)
+            throw new Error(`Invalid channel: ${channel}`);
+        }
+
+        if (activePorts[port]) {
+            activePorts[port].write(`o:30${channel === 10 ? "a" : channel}0\n`, (err) => {
+                if (err) {
+                    error(`Error while changing channel on port ${port}: ${err}`);
+                    throw err;
+                }
+            });
+            log(`Changed channel of port ${port} to: ${channel}`);
+        }
     }
 
     getActiveTrackerModel() {
@@ -354,9 +374,8 @@ async function processData(data: string, port: string) {
 function setupHeartbeat(serial: SerialPortStream, port: string) {
     setInterval(() => {
         if (serial.isOpen) {
-            // TODO: find another way to send heartbeat instead of requesting info from the tracker
             log(`Sending heartbeat to port ${port}`);
-            serial.write("report send info\r\nblt send info\r\n", (err) => {
+            serial.write("report send info\nblt send info\n", (err) => {
                 if (err) {
                     error(`Error while sending heartbeat to port ${port}: ${err}`);
                 }
