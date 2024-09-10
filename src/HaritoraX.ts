@@ -468,13 +468,7 @@ export default class HaritoraX extends EventEmitter {
      * @returns {object} The tracker settings (sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection).
      **/
     async getTrackerSettings(trackerName?: string, forceBluetoothRead?: boolean): Promise<object> {
-        const logSettings = (
-            name: string,
-            sensorMode: SensorMode,
-            fpsMode: FPSMode,
-            correction: string[],
-            ankle: boolean
-        ) => {
+        const logSettings = (name: string, sensorMode: SensorMode, fpsMode: FPSMode, correction: string[], ankle: boolean) => {
             log(`Tracker ${name} settings:`);
             log(`Sensor mode: ${sensorMode}`);
             log(`FPS mode: ${fpsMode}`);
@@ -487,15 +481,10 @@ export default class HaritoraX extends EventEmitter {
         } else if (isWirelessBTTracker(trackerName)) {
             if (forceBluetoothRead || !trackerSettings.has(trackerName)) {
                 try {
-                    const readCharacteristic = async (characteristic: string) => {
-                        const read = await bluetooth.read(trackerName, settingsService, characteristic);
-                        return read ? new DataView(read).getInt8(0) : null;
-                    };
-
-                    const sensorModeValue = await readCharacteristic(sensorModeCharacteristic);
-                    const fpsModeValue = await readCharacteristic(fpsModeCharacteristic);
-                    const correctionValue = await readCharacteristic(correctionCharacteristic);
-                    const ankleValue = await readCharacteristic(ankleCharacteristic);
+                    const sensorModeValue = await readFromBluetooth(trackerName, sensorModeCharacteristic);
+                    const fpsModeValue = await readFromBluetooth(trackerName, fpsModeCharacteristic);
+                    const correctionValue = await readFromBluetooth(trackerName, correctionCharacteristic);
+                    const ankleValue = await readFromBluetooth(trackerName, ankleCharacteristic);
 
                     const sensorMode = sensorModeValue === 5 ? 1 : 2;
                     const fpsMode = fpsModeValue === 1 ? 50 : 100;
@@ -730,6 +719,7 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Manually emit a "data" event from com.ts to emulate receiving data from trackers.
+     * Useful for development purposes.
      *
      * @function emitData
      * @param trackerName - The name of the tracker.
@@ -929,8 +919,7 @@ function listenToDeviceEvents() {
                 case "FpsSetting":
                 case "AutoCalibrationSetting":
                 case "TofSetting":
-                    // No need to process, we add the case here but don't do anything because it's not "unknown data".
-                    // Not sure why it randomly reports its current settings, we can just read them manually if wanted.
+                    processSettingsData(data, localName, characteristic);
                     break;
                 case "Magnetometer":
                     processMagData(data, localName);
@@ -1210,11 +1199,11 @@ function processTrackerData(data: string, trackerName: string) {
      */
 
     if (data === "7f7f7f7f7f7f") {
-        //log(`Searching for tracker ${trackerName}...`);
+        if (debug) log(`Searching for tracker ${trackerName}...`);
         if (activeDevices.includes(trackerName)) activeDevices.splice(activeDevices.indexOf(trackerName), 1);
         main.emit("disconnect", trackerName);
     } else {
-        //log(`Tracker ${trackerName} other data processed: ${data}`);
+        if (debug) log(`Tracker ${trackerName} other data processed: ${data}`);
     }
 
     // TODO - Find out what "other data" represents, then add to emitted event.
@@ -1306,7 +1295,6 @@ function getMagStatus(magData: number) {
  **/
 
 function processSettingsData(data: string, trackerName: string, characteristic?: string) {
-    // TODO: implement this for wireless BT trackers
     // example: s:{"imu_mode":1, "imu_num":6, "magf_status":"020200", "speed_mode":2, "dcal_flags":"04", "detected":"04004C6C"}
     if (!trackerName || !data) return;
 
@@ -1350,22 +1338,37 @@ function processSettingsData(data: string, trackerName: string, characteristic?:
                 sensorAutoCorrectionComponents,
                 ankleMotionDetectionText
             );
-        } else if (trackerModelEnabled === "wired") {
-            const { imu_mode: sensorMode, speed_mode: speedMode, dcal_flags: dcalFlags } = JSON.parse(data);
-            const fpsMode = speedMode === 1 ? 100 : 50;
-            const sensorAutoCorrectionList = ["accel", "gyro", "mag"].filter((_, i) => dcalFlags & (1 << i));
-
-            const settings = {
-                "Sensor mode": sensorMode,
-                "FPS mode": speedMode,
-                "Sensor auto correction": sensorAutoCorrectionList,
-                "Ankle motion detection": "N/A",
-            };
-
-            logSettings(trackerName, settings, data);
-
-            trackerSettings.set(trackerName, [sensorMode, fpsMode, sensorAutoCorrectionList, false]);
-            main.emit("settings", trackerName, sensorMode, fpsMode, sensorAutoCorrectionList);
+        } else if (isWirelessBTTracker(trackerName) && characteristic) {
+            switch (characteristic) {
+                case "SensorModeSetting":
+                    const sensorMode = parseBluetoothData(data);
+                    const sensorModeText = sensorMode === 1 ? 5 : 8;
+                    log(`11 Tracker ${trackerName} sensor mode: ${sensorModeText}`);
+                    main.emit("settings", trackerName, sensorModeText);
+                    break;
+                case "FpsSetting":
+                    const fpsMode = parseBluetoothData(data);
+                    const fpsModeText = fpsMode === 50 ? 1 : 2;
+                    log(`11 Tracker ${trackerName} FPS mode: ${fpsModeText}`);
+                    main.emit("settings", trackerName, undefined, fpsModeText);
+                    break;
+                case "AutoCalibrationSetting":
+                    const sensorAutoCorrection = parseBluetoothData(data);
+                    const sensorAutoCorrectionComponents = ["accel", "gyro", "mag"].filter(
+                        (_, i) => sensorAutoCorrection & (1 << i)
+                    );
+                    log(`11 Tracker ${trackerName} sensor auto correction: ${sensorAutoCorrectionComponents}`);
+                    main.emit("settings", trackerName, undefined, undefined, sensorAutoCorrectionComponents);
+                    break;
+                case "TofSetting":
+                    const ankleMotionDetection = parseBluetoothData(data);
+                    const ankleMotionDetectionText = ankleMotionDetection !== 0;
+                    log(`11 Tracker ${trackerName} ankle motion detection: ${ankleMotionDetectionText}`);
+                    main.emit("settings", trackerName, undefined, undefined, undefined, ankleMotionDetectionText);
+                    break;
+                default:
+                    log(`Unknown settings data from ${trackerName}: ${data}`);
+            }
         }
     } catch (err) {
         error(`Error processing tracker settings for ${trackerName}: ${err}`);
@@ -1670,6 +1673,16 @@ function getSettingsHexValue(
 function writeToBluetooth(trackerName: string, characteristic: string, value: number) {
     const buffer = Buffer.from([value]);
     bluetooth.write(trackerName, settingsService, characteristic, buffer);
+}
+
+async function readFromBluetooth(trackerName: string, characteristic: string) {
+    const data = await bluetooth.read(trackerName, settingsService, characteristic);
+    return parseBluetoothData(data);
+}
+
+function parseBluetoothData(data: ArrayBufferLike | string) {
+    if (typeof data === "string") data = Buffer.from(data, "base64");
+    return new DataView(data).getInt8(0);
 }
 
 function logSettings(trackerName: string, settings: Object, rawHexData?: string) {
