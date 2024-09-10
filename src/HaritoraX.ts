@@ -326,17 +326,17 @@ export default class HaritoraX extends EventEmitter {
      * @example
      * device.stopConnection("com");
      **/
-    async stopConnection(connectionMode: string) {
+    stopConnection(connectionMode: string) {
         let removedDevices: string[] = [];
         if (connectionMode === "com" && comEnabled) {
             canProcessComData = false;
-            removedDevices = await removeActiveDevices("com");
+            removedDevices = removeActiveDevices("com");
 
             com.stopConnection();
             comEnabled = false;
         } else if (connectionMode === "bluetooth" && bluetoothEnabled) {
             canProcessBluetoothData = false;
-            removedDevices = await removeActiveDevices("bluetooth");
+            removedDevices = removeActiveDevices("bluetooth");
 
             bluetooth.stopConnection();
             bluetoothEnabled = false;
@@ -484,7 +484,7 @@ export default class HaritoraX extends EventEmitter {
 
         if (trackerModelEnabled === "wired") {
             return await getTrackerSettingsFromMap("HaritoraXWired");
-        } else if (trackerModelEnabled === "wireless" && bluetoothEnabled && trackerName.startsWith("HaritoraXW")) {
+        } else if (isWirelessBTTracker(trackerName)) {
             if (forceBluetoothRead || !trackerSettings.has(trackerName)) {
                 try {
                     const readCharacteristic = async (characteristic: string) => {
@@ -587,7 +587,7 @@ export default class HaritoraX extends EventEmitter {
             writeToPort(trackerPort, rawValue, trackerName);
         }
 
-        if (trackerModelEnabled === "wireless" && bluetoothEnabled && trackerName.startsWith("HaritoraXW")) {
+        if (isWirelessBTTracker(trackerName)) {
             const trackerObject = bluetooth.getActiveDevices().find((device) => device[0] === trackerName);
             if (!trackerObject) {
                 log(`Tracker ${trackerName} not found`);
@@ -1305,7 +1305,7 @@ function getMagStatus(magData: number) {
  * @fires haritora#settings
  **/
 
-function processSettingsData(data: string, trackerName: string) {
+function processSettingsData(data: string, trackerName: string, characteristic?: string) {
     // TODO: implement this for wireless BT trackers
     // example: s:{"imu_mode":1, "imu_num":6, "magf_status":"020200", "speed_mode":2, "dcal_flags":"04", "detected":"04004C6C"}
     if (!trackerName || !data) return;
@@ -1550,7 +1550,7 @@ function processBatteryData(data: string, trackerName: string, characteristic?: 
             error(`Error parsing battery data JSON for ${trackerName}: ${err}`);
             log(`Raw battery data: ${data}`);
         }
-    } else if (trackerModelEnabled === "wireless" && trackerName.startsWith("HaritoraXW") && bluetoothEnabled && characteristic) {
+    } else if (isWirelessBTTracker(trackerName) && characteristic) {
         try {
             if (characteristic === "BatteryLevel") {
                 const batteryRemaining = parseInt(Buffer.from(data, "base64").toString("hex"), 16);
@@ -1630,6 +1630,10 @@ function error(message: string, exceptional = false) {
         : (() => {
               throw new Error(message);
           })();
+}
+
+function isWirelessBTTracker(trackerName: string) {
+    return trackerModelEnabled === "wireless" && bluetoothEnabled && trackerName.startsWith("HaritoraXW");
 }
 
 function writeToPort(port: string, rawData: String, trackerName = "unknown") {
