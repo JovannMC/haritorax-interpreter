@@ -40,13 +40,9 @@ const deviceInformation: Map<string, string[]> = new Map([
     ["rightElbow", ["", "", "", "", ""]],
 ]);
 
-const devices = [
+const dongles = [
     { name: "GX2", vid: "1915", pid: "520F" },
     { name: "GX6", vid: "04DA", pid: "3F18" },
-    /*{ name: "HaritoraX 1.1b", vid: "", pid: "" },
-    { name: "HaritoraX 1.1", vid: "", pid: "" },
-    { name: "HaritoraX 1.0", vid: "", pid: "" },
-    // { name: "Haritora", vid: "", pid: "" }, - these were before Shiftall (and users had to build it themselves), so they may not have the same VID/PID*/
 ];
 
 // Stores the ports that are currently active as objects for access later
@@ -67,7 +63,7 @@ export default class COM extends EventEmitter {
     async isDeviceAvailable() {
         const ports = await Binding.list();
         const btsppDevices = await getPairedDevices();
-        const allDevices = [...devices, ...btsppDevices];
+        const allDevices = [...dongles, ...btsppDevices];
 
         for (const device of allDevices) {
             if (
@@ -86,7 +82,7 @@ export default class COM extends EventEmitter {
         const availableDeviceNames: Set<string> = new Set();
         let gxDevicesFound = false;
 
-        for (const device of devices) {
+        for (const device of dongles) {
             const matchingPort = ports.find((port) => port.vendorId === device.vid && port.productId === device.pid);
             if (matchingPort) {
                 if (device.name === "GX6" || device.name === "GX2") {
@@ -112,7 +108,7 @@ export default class COM extends EventEmitter {
         const bluetoothDevices = await getPairedDevices();
         const availablePorts = ports
             .map((port) => {
-                const deviceMatch = devices.find(
+                const deviceMatch = dongles.find(
                     (deviceItem) =>
                         deviceItem.vid &&
                         deviceItem.pid &&
@@ -138,7 +134,7 @@ export default class COM extends EventEmitter {
                 foundPorts.push(btDevice.comPort);
             }
         }
-        
+
         return foundPorts;
     }
 
@@ -149,7 +145,18 @@ export default class COM extends EventEmitter {
                 const parser = serial.pipe(new ReadlineParser({ delimiter: "\n" }));
                 activePorts[port] = serial;
 
-                serial.on("open", () => this.emit("connected", port));
+                serial.on("open", async () => {
+                    this.emit("connected", port);
+
+                    // Manually request all the info from the trackers
+                    const initialCommands = ["r0:", "r1:", "r:"];
+                    const delayedCommands = ["i:", "i0:", "i1:", "o:", "o0:", "o1:", "v0:", "v1:"];
+                    
+                    initialCommands.forEach(command => write(serial, command));
+                    setTimeout(() => {
+                        delayedCommands.forEach(command => write(serial, command));
+                    }, 1000);
+                });
                 parser.on("data", (data) => processData(data, port));
                 serial.on("close", () => this.emit("disconnected", port));
                 serial.on("error", (err) => {
@@ -189,7 +196,7 @@ export default class COM extends EventEmitter {
         // theoretically.. we *could* set it higher than 10 2.4 ghz channels, but i that should be ignored by the firmware
         // also illegal to go higher than 11 in some countries lol
         if (channel < 0 || channel > 10) {
-            error(`Invalid channel: ${channel}`)
+            error(`Invalid channel: ${channel}`);
             throw new Error(`Invalid channel: ${channel}`);
         }
 
@@ -375,11 +382,7 @@ function setupHeartbeat(serial: SerialPortStream, port: string) {
     setInterval(() => {
         if (serial.isOpen) {
             log(`Sending heartbeat to port ${port}`);
-            serial.write("report send info\nblt send info\n", (err) => {
-                if (err) {
-                    error(`Error while sending heartbeat to port ${port}: ${err}`);
-                }
-            });
+            write(serial, "report send info\nblt send info\n");
         }
     }, heartbeatInterval);
 }
@@ -394,6 +397,18 @@ function log(message: string) {
 
 function error(message: string, exceptional = false) {
     main.emit("logError", { message, exceptional });
+}
+
+function write(port: SerialPortStream, rawData: String) {
+    const data = `\n${rawData}\n`;
+
+    port.write(data, (err: any) => {
+        if (err) {
+            error(`com.ts - Error writing data to serial port ${port.path}: ${err}`);
+        } else {
+            log(`com.ts - Data written to serial port ${port.path}: ${rawData.toString().replace(/\r\n/g, " ")}`);
+        }
+    });
 }
 
 /*
