@@ -151,10 +151,10 @@ export default class COM extends EventEmitter {
                     // Manually request all the info from the trackers
                     const initialCommands = ["r0:", "r1:", "r:"];
                     const delayedCommands = ["i:", "i0:", "i1:", "o:", "o0:", "o1:", "v0:", "v1:"];
-                    
-                    initialCommands.forEach(command => write(serial, command));
+
+                    initialCommands.forEach((command) => write(serial, command));
                     setTimeout(() => {
-                        delayedCommands.forEach(command => write(serial, command));
+                        delayedCommands.forEach((command) => write(serial, command));
                     }, 1000);
                 });
                 parser.on("data", (data) => processData(data, port));
@@ -200,15 +200,71 @@ export default class COM extends EventEmitter {
             throw new Error(`Invalid channel: ${channel}`);
         }
 
-        if (activePorts[port]) {
-            activePorts[port].write(`o:30${channel === 10 ? "a" : channel}0\n`, (err) => {
-                if (err) {
-                    error(`Error while changing channel on port ${port}: ${err}`);
-                    throw err;
-                }
-            });
-            log(`Changed channel of port ${port} to: ${channel}`);
+        if (!activePorts[port]) {
+            error(`Invalid port: ${port}`);
+            throw new Error(`Invalid port: ${port}`);
         }
+
+        write(activePorts[port], `o:30${channel === 10 ? "a" : channel}0\n`, (err: any) => {
+            if (!err) return;
+            error(`Error while changing channel on port ${port}: ${err}`);
+            throw err;
+        });
+
+        log(`Changed channel of port ${port} to: ${channel}`);
+    }
+
+    pair(port: string, portId: number) {
+        if (!activePorts[port]) {
+            error(`Invalid port: ${port}`);
+            throw new Error(`Invalid port: ${port}`);
+        }
+
+        let commands;
+
+        switch (portId) {
+            case 0:
+                commands = ["o:1150", "o:1050"];
+                break;
+            case 1:
+                commands = ["o:2250", "o:2050"];
+                break;
+            default:
+                error(`Invalid port ID: ${portId}`);
+                throw new Error(`Invalid port ID: ${portId}`);
+        }
+
+        commands.forEach((command) => write(activePorts[port], command));
+        log(`Started pairing on port ${port} with port ID ${portId}`);
+    }
+
+    unpair(port: string, portId: number) {
+        if (!activePorts[port]) {
+            error(`Invalid port: ${port}`);
+            throw new Error(`Invalid port: ${port}`);
+        }
+
+        let command;
+
+        switch (portId) {
+            case 0:
+                command = "o:3051";
+                break;
+            case 1:
+                command = "o:3052";
+                break;
+            default:
+                error(`Invalid port ID: ${portId}`);
+                throw new Error(`Invalid port ID: ${portId}`);
+        }
+
+        write(activePorts[port], command, (err: any) => {
+            if (!err) return;
+            error(`Error while unpairing on port ${port}: ${err}`);
+            throw err;
+        });
+
+        log(`Stopped pairing on port ${port} with port ID ${portId}`);
     }
 
     getActiveTrackerModel() {
@@ -399,11 +455,12 @@ function error(message: string, exceptional = false) {
     main.emit("logError", { message, exceptional });
 }
 
-function write(port: SerialPortStream, rawData: String) {
+function write(port: SerialPortStream, rawData: String, callbackError?: Function) {
     const data = `\n${rawData}\n`;
 
     port.write(data, (err: any) => {
         if (err) {
+            if (callbackError) callbackError(err);
             error(`com.ts - Error writing data to serial port ${port.path}: ${err}`);
         } else {
             log(`com.ts - Data written to serial port ${port.path}: ${rawData.toString().replace(/\r\n/g, " ")}`);
