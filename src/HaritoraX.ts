@@ -875,12 +875,14 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Changes the 2.4 GHz communication channel that specified COM port is using.
+     * Supported devices: wireless
+     * Supported connections: COM
      *
-     * @function setChannel
+     * @function setPortChannel
      * @param {string} port - The COM port to change the channel for.
      * @param {number} channel - The channel to change to.
      */
-    setChannel(port: string, channel: number) {
+    setPortChannel(port: string, channel: number) {
         if (!com || !comEnabled) {
             error("COM connection not enabled", true);
             return;

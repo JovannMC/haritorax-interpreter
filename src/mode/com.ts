@@ -45,6 +45,8 @@ const dongles = [
     { name: "GX6", vid: "04DA", pid: "3F18" },
 ];
 
+const portChannels: { [key: string]: number } = {};
+
 // Stores the ports that are currently active as objects for access later
 let activePorts: ActivePorts = {};
 let trackersAssigned = false;
@@ -153,8 +155,8 @@ export default class COM extends EventEmitter {
                     };
 
                     // Manually request all the info from the trackers
-                    const initialCommands = ["r0:", "r1:", "r:"];
-                    const delayedCommands = ["i:", "i0:", "i1:", "o:", "o0:", "o1:", "v0:", "v1:"];
+                    const initialCommands = ["r0:", "r1:", "r:", "o:"];
+                    const delayedCommands = ["i:", "i0:", "i1:", "o0:", "o1:", "v0:", "v1:"];
 
                     initialCommands.forEach((command) => write(serial, command, errorListener));
                     setTimeout(() => {
@@ -219,19 +221,26 @@ export default class COM extends EventEmitter {
     }
 
     pair(port: string, portId: string) {
+        const channel = portChannels[port];
+
         if (!activePorts[port]) {
             error(`Invalid port: ${port}`);
             throw new Error(`Invalid port: ${port}`);
+        }
+
+        if (!channel) {
+            error(`Channel not found for port: ${port}`);
+            throw new Error(`Channel not found for port: ${port}`);
         }
 
         let commands;
 
         switch (portId) {
             case "0":
-                commands = ["o:1150", "o:1050"];
+                commands = [`o:11${channel}0`, `o:10${channel}0`];
                 break;
             case "1":
-                commands = ["o:2250", "o:2050"];
+                commands = [`o:22${channel}0`, `o:20${channel}0`];
                 break;
             default:
                 error(`Invalid port ID: ${portId}`);
@@ -248,32 +257,47 @@ export default class COM extends EventEmitter {
     }
 
     unpair(port: string, portId: string) {
+        const channel = portChannels[port];
+
         if (!activePorts[port]) {
             error(`Invalid port: ${port}`);
             throw new Error(`Invalid port: ${port}`);
         }
 
-        let command;
+        if (!channel) {
+            error(`Channel not found for port: ${port}`);
+            throw new Error(`Channel not found for port: ${port}`);
+        }
+
+        let commands;
 
         switch (portId) {
             case "0":
-                command = "o:3051";
+                commands = [`o:30${channel}1`, `o:30${channel}0`];
                 break;
             case "1":
-                command = "o:3052";
+                commands = [`o:30${channel}2`, `o:30${channel}0`];
                 break;
             default:
                 error(`Invalid port ID: ${portId}`);
                 throw new Error(`Invalid port ID: ${portId}`);
         }
 
-        write(activePorts[port], command, (err: any) => {
-            if (!err) return;
-            error(`Error while unpairing on port ${port}: ${err}`);
-            throw err;
-        });
+        commands.forEach((command) =>
+            write(activePorts[port], command, () => {
+                error(`Error while unpairing on port ${port}: ${command}`);
+            })
+        );
 
         log(`Stopped pairing on port ${port} with port ID ${portId}`);
+    }
+
+    getPortChannel(port: string) {
+        return portChannels[port];
+    }
+
+    getPortChannels() {
+        return portChannels;
     }
 
     getActiveTrackerModel() {
@@ -289,27 +313,15 @@ export default class COM extends EventEmitter {
     }
 
     getTrackerId(tracker: string) {
-        const trackerId = trackerAssignment.get(tracker)[0];
-        if (trackerId) {
-            return trackerId;
-        }
-        return null;
+        return trackerAssignment.get(tracker)?.[0] || null;
     }
 
     getTrackerPort(tracker: string) {
-        const port: string = trackerAssignment.get(tracker)[1];
-        if (port) {
-            return port;
-        }
-        return null;
+        return trackerAssignment.get(tracker)[1];
     }
 
     getTrackerPortId(tracker: string) {
-        const portId = trackerAssignment.get(tracker)[2];
-        if (portId) {
-            return portId;
-        }
-        return null;
+        return trackerAssignment.get(tracker)[2];
     }
 
     getPartFromId(trackerId: string) {
@@ -392,6 +404,7 @@ async function processData(data: string, port: string) {
                     }
 
                     // Check if all trackers are assigned and queue if not
+                    // TODO: could be removed in future, we can manually request the info from the trackers to remove need for this
                     if (!trackersAssigned && !isOverThreshold) {
                         if (dataQueue && dataQueue.length >= 50) {
                             isOverThreshold = true;
@@ -435,7 +448,16 @@ async function processData(data: string, port: string) {
             }
         }
 
-        if (portId === "DONGLE") trackerName = "DONGLE";
+        if (portId === "DONGLE") {
+            trackerName = "DONGLE";
+
+            if (identifier === "o") {
+                const channel = parseInt(portData.charAt(2));
+                if (!isNaN(channel)) portChannels[port] = channel;
+                log(`Channel of port ${port} is: ${channel}`);
+            }
+        }
+
         main.emit("data", trackerName, port, portId, identifier, portData);
     } catch (err) {
         error(`An unexpected error occurred: ${err}`);
