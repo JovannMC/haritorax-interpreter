@@ -148,13 +148,17 @@ export default class COM extends EventEmitter {
                 serial.on("open", async () => {
                     this.emit("connected", port);
 
+                    const errorListener = (err: any) => {
+                        error(`Error while reading data from port ${port}: ${err}`);
+                    };
+
                     // Manually request all the info from the trackers
                     const initialCommands = ["r0:", "r1:", "r:"];
                     const delayedCommands = ["i:", "i0:", "i1:", "o:", "o0:", "o1:", "v0:", "v1:"];
 
-                    initialCommands.forEach((command) => write(serial, command));
+                    initialCommands.forEach((command) => write(serial, command, errorListener));
                     setTimeout(() => {
-                        delayedCommands.forEach((command) => write(serial, command));
+                        delayedCommands.forEach((command) => write(serial, command, errorListener));
                     }, 1000);
                 });
                 parser.on("data", (data) => processData(data, port));
@@ -214,7 +218,7 @@ export default class COM extends EventEmitter {
         log(`Changed channel of port ${port} to: ${channel}`);
     }
 
-    pair(port: string, portId: number) {
+    pair(port: string, portId: string) {
         if (!activePorts[port]) {
             error(`Invalid port: ${port}`);
             throw new Error(`Invalid port: ${port}`);
@@ -223,10 +227,10 @@ export default class COM extends EventEmitter {
         let commands;
 
         switch (portId) {
-            case 0:
+            case "0":
                 commands = ["o:1150", "o:1050"];
                 break;
-            case 1:
+            case "1":
                 commands = ["o:2250", "o:2050"];
                 break;
             default:
@@ -234,11 +238,16 @@ export default class COM extends EventEmitter {
                 throw new Error(`Invalid port ID: ${portId}`);
         }
 
-        commands.forEach((command) => write(activePorts[port], command));
+        commands.forEach((command) =>
+            write(activePorts[port], command, () => {
+                error(`Error while pairing on port ${port}: ${command}`);
+            })
+        );
+
         log(`Started pairing on port ${port} with port ID ${portId}`);
     }
 
-    unpair(port: string, portId: number) {
+    unpair(port: string, portId: string) {
         if (!activePorts[port]) {
             error(`Invalid port: ${port}`);
             throw new Error(`Invalid port: ${port}`);
@@ -247,10 +256,10 @@ export default class COM extends EventEmitter {
         let command;
 
         switch (portId) {
-            case 0:
+            case "0":
                 command = "o:3051";
                 break;
-            case 1:
+            case "1":
                 command = "o:3052";
                 break;
             default:
@@ -339,7 +348,7 @@ async function processData(data: string, port: string) {
     main.emit("dataRaw", data, port);
 
     try {
-        let trackerName = null;
+        let trackerName: string = null;
         let identifier: string = null;
         let portId: string = null;
         let portData: string = null;
@@ -427,7 +436,6 @@ async function processData(data: string, port: string) {
         }
 
         if (portId === "DONGLE") trackerName = "DONGLE";
-
         main.emit("data", trackerName, port, portId, identifier, portData);
     } catch (err) {
         error(`An unexpected error occurred: ${err}`);
@@ -438,7 +446,7 @@ function setupHeartbeat(serial: SerialPortStream, port: string) {
     setInterval(() => {
         if (serial.isOpen) {
             log(`Sending heartbeat to port ${port}`);
-            write(serial, "report send info\nblt send info\n");
+            write(serial, "report send info\nblt send info");
         }
     }, heartbeatInterval);
 }
@@ -448,10 +456,12 @@ function setupHeartbeat(serial: SerialPortStream, port: string) {
  */
 
 function log(message: string) {
+    console.log(message);
     main.emit("log", message);
 }
 
 function error(message: string, exceptional = false) {
+    console.error(message);
     main.emit("logError", { message, exceptional });
 }
 
@@ -461,9 +471,9 @@ function write(port: SerialPortStream, rawData: String, callbackError?: Function
     port.write(data, (err: any) => {
         if (err) {
             if (callbackError) callbackError(err);
-            error(`com.ts - Error writing data to serial port ${port.path}: ${err}`);
+            error(`Error writing data to serial port ${port.path}: ${err}`);
         } else {
-            log(`com.ts - Data written to serial port ${port.path}: ${rawData.toString().replace(/\r\n/g, " ")}`);
+            log(`Data written to serial port ${port.path}: ${rawData.toString().replace(/\r\n/g, " ")}`);
         }
     });
 }
