@@ -15,7 +15,7 @@ const BAUD_RATE = 500000; // from the haritora_setting.json in the HaritoraConfi
 // For HaritoraX Wireless
 const trackerAssignment: Map<string, string[]> = new Map([
     // tracker part, [tracker id, port, port id]
-    ["DONGLE", ["0", "", ""]],
+    ["DONGLE", ["0", null, null]],
     ["chest", ["1", "", ""]],
     ["leftKnee", ["2", "", ""]],
     ["leftAnkle", ["3", "", ""]],
@@ -324,17 +324,18 @@ export default class COM extends EventEmitter {
         return trackerAssignment.get(tracker)[2];
     }
 
-    getPartFromId(trackerId: string) {
+    getTrackerFromId(trackerId: string) {
         for (let [key, value] of trackerAssignment.entries()) {
-            if (value[0] == trackerId) {
+            if (value[0] === trackerId) {
                 return key;
             }
         }
     }
 
-    getPartFromInfo(port: string, portId: string) {
+    getTrackerFromInfo(port: string, portId: string) {
+        log(`Tracker assignment: ${Array.from(trackerAssignment.entries()).join(", ")}`);
         for (let [key, value] of trackerAssignment.entries()) {
-            if (value[1] == port && value[2] == portId) {
+            if (value[1] === port && value[2] === portId) {
                 return key;
             }
         }
@@ -392,13 +393,11 @@ async function processData(data: string, port: string) {
                     }
 
                     for (let [key, value] of trackerAssignment.entries()) {
-                        if (value[1] === "") {
-                            if (identifier.startsWith("r")) {
-                                const trackerId = parseInt(portData.charAt(4));
-                                if (!isNaN(trackerId) && parseInt(value[0]) == trackerId) {
-                                    trackerAssignment.set(key, [trackerId.toString(), port, portId]);
-                                    log(`Setting ${key} to port ${port} with port ID ${portId}`);
-                                }
+                        if (value[1] === "" && /^r.+/.test(identifier)) {
+                            const trackerId = parseInt(portData.charAt(4));
+                            if (parseInt(value[0]) === trackerId && trackerId !== 0) {
+                                trackerAssignment.set(key, [trackerId.toString(), port, portId]);
+                                log(`Setting ${key} to port ${port} with port ID ${portId}`);
                             }
                         }
                     }

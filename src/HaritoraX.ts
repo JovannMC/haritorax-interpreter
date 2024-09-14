@@ -719,21 +719,6 @@ export default class HaritoraX extends EventEmitter {
     }
 
     /**
-     * Manually emit a "data" event from com.ts to emulate receiving data from trackers.
-     * Useful for development purposes.
-     *
-     * @function emitData
-     * @param trackerName - The name of the tracker.
-     * @param port - COM port that data was sent by.
-     * @param portId - ID of tracker in the port for data (0/1).
-     * @param identifier - Identifier of the data.
-     * @param data - The data to be processed.
-     */
-    emitData(trackerName: string, port: string, portId: string, identifier: string, data: string) {
-        com.emit("data", trackerName, port, portId, identifier, data);
-    }
-
-    /**
      * Gets the available devices
      *
      * @function getAvailableDevices
@@ -809,40 +794,6 @@ export default class HaritoraX extends EventEmitter {
     }
 
     /**
-     * Starts pairing a tracker to the specified port and port id.
-     * Supported devices: wireless
-     * Supported connections: COM
-     * @function pairTracker
-     * @param {string} port - The COM port to pair the tracker to.
-     * @param {string} portId - The port ID to pair the tracker to.
-     */
-    pairTracker(port: string, portId: string) {
-        if (!com || !comEnabled) {
-            error("COM connection not enabled", true);
-            return;
-        }
-
-        com.pair(port, portId);
-    }
-
-    /**
-     * Unpairs the tracker from the specified port and port id.
-     * Supported devices: wireless
-     * Supported connections: COM
-     * @function unpairTracker
-     * @param {string} port - The COM port to unpair the tracker from.
-     * @param {string} portId - The port ID to unpair the tracker
-     */
-    unpairTracker(port: string, portId: string) {
-        if (!com || !comEnabled) {
-            error("COM connection not enabled", true);
-            return;
-        }
-
-        com.unpair(port, portId);
-    }
-
-    /**
      * Turns off the specified tracker.
      * Supported trackers: wireless
      * Supported connections: COM, Bluetooth (WIP)
@@ -874,21 +825,21 @@ export default class HaritoraX extends EventEmitter {
     }
 
     /**
-     * Changes the 2.4 GHz communication channel that specified COM port is using.
-     * Supported devices: wireless
-     * Supported connections: COM
-     *
-     * @function setPortChannel
-     * @param {string} port - The COM port to change the channel for.
-     * @param {number} channel - The channel to change to.
+     * Returns the COM instance so you can use its methods with the instance this class is using.
+     * @function getComInstance
+     * @returns {COM} The COM instance.
      */
-    setPortChannel(port: string, channel: number) {
-        if (!com || !comEnabled) {
-            error("COM connection not enabled", true);
-            return;
-        }
+    getComInstance() {
+        return com;
+    }
 
-        com.setChannel(port, channel);
+    /**
+     * Returns the Bluetooth instance so you can use its methods with the instance this class is using.
+     * @function getBluetoothInstance
+     * @returns {Bluetooth} The Bluetooth instance.
+     */
+    getBluetoothInstance() {
+        return bluetooth;
     }
 }
 
