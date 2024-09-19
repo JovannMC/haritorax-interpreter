@@ -235,6 +235,7 @@ let trackerModelEnabled: TrackerModel;
  * @property {string} trackerName - The name of the tracker.
  * @property {string} connectionMode - The connection mode the tracker is using - useful if multiple connection modes are used.
  * @property {string} port - The COM port used the tracker is using (COM only)
+ * @property {string} portId - The COM port ID the tracker is using (COM only)
  **/
 
 /**
@@ -919,6 +920,16 @@ function listenToDeviceEvents() {
             }
         });
 
+        com.on("paired", (trackerName: string) => {
+            log(`Tracker ${trackerName} paired, emitting connect event`, true);
+            main.emit("connect", trackerName, "com");
+        });
+
+        com.on("unpaired", (trackerName: string) => {
+            log(`Tracker ${trackerName} unpaired, emitting disconnect event`, true);
+            main.emit("disconnect", trackerName);
+        });
+
         com.on("log", (message: string) => {
             log(message);
         });
@@ -1076,6 +1087,8 @@ function processWiredData(identifier: string, data: string) {
  * @param {string} trackerName - The name of the tracker.
  * @param {number} [ankleValue] - The ankle value (processed before running, for wired).
  * @fires haritora#imu
+ * @fires haritora#connect
+ * @fires haritora#mag
  **/
 
 function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) {
@@ -1087,11 +1100,10 @@ function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) 
 
         const mode = trackerName.startsWith("HaritoraXW") ? "bluetooth" : "com";
         const port = trackerName.startsWith("HaritoraXW") ? undefined : com.getTrackerPort(trackerName);
-
-        log(`Tracker ${trackerName} mode: ${mode}, port: ${port}`);
+        const portId = trackerName.startsWith("HaritoraXW") ? undefined : com.getTrackerPortId(trackerName);
 
         activeDevices.push(trackerName);
-        main.emit("connect", trackerName, mode, port);
+        main.emit("connect", trackerName, mode, port, portId);
     }
 
     // Decode and log the data

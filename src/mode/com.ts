@@ -184,8 +184,8 @@ export default class COM extends EventEmitter {
     stopConnection() {
         Object.entries(activePorts).forEach(([port, serialPort]) => {
             if (!serialPort.isOpen) return;
+            log(`Closing COM port: ${port}`);
             try {
-                log(`Closing COM port: ${port}`);
                 serialPort.removeAllListeners();
                 serialPort.close();
                 delete activePorts[port];
@@ -199,7 +199,7 @@ export default class COM extends EventEmitter {
     }
 
     setChannel(port: string, channel: number) {
-        // theoretically.. we *could* set it higher than 10 2.4 ghz channels, but i that should be ignored by the firmware
+        // theoretically.. we *could* set it higher than 10 2.4 ghz channels, but that should be ignored by the firmware
         // also illegal to go higher than 11 in some countries lol
         if (channel < 0 || channel > 10) {
             error(`Invalid channel: ${channel}`);
@@ -234,6 +234,7 @@ export default class COM extends EventEmitter {
         }
 
         let commands;
+        isPairing = true;
 
         switch (portId) {
             case "0":
@@ -247,17 +248,36 @@ export default class COM extends EventEmitter {
                 throw new Error(`Invalid port ID: ${portId}`);
         }
 
-        commands.forEach((command) =>
-            write(activePorts[port], command, () => {
-                error(`Error while pairing on port ${port}: ${command}`);
-            })
+        commands.forEach((command, index) =>
+            setTimeout(() => {
+                write(activePorts[port], command, () => {
+                    error(`Error while pairing on port ${port}: ${command}`);
+                });
+            }, index * 1000)
         );
 
         log(`Started pairing on port ${port} with port ID ${portId}`);
+
+        waitForPairing(() => {
+            log(`Paired on port ${port} with port ID ${portId}`);
+
+            write(activePorts[port], `o:30${channel}0`, () => {
+                error(`Error while requesting info from port ${port}`);
+            });
+
+            isPairing = false;
+            hasPaired = false;
+            
+            // TODO: write r: to get info on what tracker this is or something
+
+            //const trackerName = this.getTrackerFromInfo(port, portId);
+            this.emit("paired", port, portId);
+        });
     }
 
     unpair(port: string, portId: string) {
         const channel = portChannels[port];
+        const trackerName = this.getTrackerFromInfo(port, portId);
 
         if (!activePorts[port]) {
             error(`Invalid port: ${port}`);
@@ -283,13 +303,17 @@ export default class COM extends EventEmitter {
                 throw new Error(`Invalid port ID: ${portId}`);
         }
 
-        commands.forEach((command) =>
-            write(activePorts[port], command, () => {
-                error(`Error while unpairing on port ${port}: ${command}`);
-            })
+        commands.forEach((command, index) =>
+            setTimeout(() => {
+                write(activePorts[port], command, () => {
+                    error(`Error while unpairing on port ${port}: ${command}`);
+                });
+            }, index * 1000)
         );
 
-        log(`Stopped pairing on port ${port} with port ID ${portId}`);
+        log(`Unpaired ${trackerName} on port ${port} with port ID ${portId}`);
+        trackerAssignment.set(trackerName, ["", "", ""]);
+        this.emit("unpaired", trackerName, port, portId);
     }
 
     getPortChannel(port: string) {
@@ -354,6 +378,8 @@ export default class COM extends EventEmitter {
  * startConnection() helper functions
  */
 
+let isPairing = false;
+let hasPaired = false;
 let isOverThreshold = false;
 let dataQueue: { data: string; port: string }[] = [];
 
@@ -373,6 +399,8 @@ async function processData(data: string, port: string) {
                 const match = identifier.match(/\d/);
                 portId = match ? match[0] : "DONGLE";
                 portData = splitData[1];
+
+                let trackerAssignmentMissing = Array.from(trackerAssignment.values()).some((value) => value[1] === "");
 
                 if (!trackersAssigned) {
                     function processQueue(): Promise<void> {
@@ -428,7 +456,19 @@ async function processData(data: string, port: string) {
                     ) {
                         log(`Required assignments completed: ${Array.from(trackerAssignment.entries())}`);
                         trackersAssigned = true;
+                        trackerAssignmentMissing = false;
                         processQueue();
+                    }
+                } else if (trackerAssignmentMissing) {
+                    // silently listen to data and see if we can assign the trackers
+                    for (let [key, value] of trackerAssignment.entries()) {
+                        if (value[1] === "" && /^r.+/.test(identifier)) {
+                            const trackerId = parseInt(portData.charAt(4));
+                            if (parseInt(value[0]) === trackerId && trackerId !== 0) {
+                                trackerAssignment.set(key, [trackerId.toString(), port, portId]);
+                                log(`Setting ${key} to port ${port} with port ID ${portId} (missing from pairing)`);
+                            }
+                        }
                     }
                 }
 
@@ -454,6 +494,11 @@ async function processData(data: string, port: string) {
                 const channel = parseInt(portData.charAt(2));
                 if (!isNaN(channel)) portChannels[port] = channel;
                 log(`Channel of port ${port} is: ${channel}`);
+            } else if (identifier === "r" && isPairing) {
+                if (portData.charAt(0) === "3" || portData.charAt(1) === "3") {
+                    isPairing = false;
+                    hasPaired = true;
+                }
             }
         }
 
@@ -461,6 +506,15 @@ async function processData(data: string, port: string) {
     } catch (err) {
         error(`An unexpected error occurred: ${err}`);
     }
+}
+
+function waitForPairing(callback: () => void) {
+    const interval = setInterval(() => {
+        if (hasPaired) {
+            clearInterval(interval);
+            callback();
+        }
+    }, 1000);
 }
 
 function setupHeartbeat(serial: SerialPortStream, port: string) {
@@ -491,8 +545,11 @@ function write(port: SerialPortStream, rawData: String, callbackError?: Function
 
     port.write(data, (err: any) => {
         if (err) {
-            if (callbackError) callbackError(err);
-            error(`Error writing data to serial port ${port.path}: ${err}`);
+            if (callbackError) {
+                callbackError(err);
+            } else {
+                error(`Error writing data to serial port ${port.path}: ${err}`);
+            }
         } else {
             log(`Data written to serial port ${port.path}: ${rawData.toString().replace(/\r\n/g, " ")}`);
         }
