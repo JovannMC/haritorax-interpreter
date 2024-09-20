@@ -920,14 +920,14 @@ function listenToDeviceEvents() {
             }
         });
 
-        com.on("paired", (trackerName: string) => {
-            log(`Tracker ${trackerName} paired, emitting connect event`, true);
-            main.emit("connect", trackerName, "com");
+        com.on("paired", (trackerName: string, port: string, portId: string) => {
+            log(`Tracker ${trackerName} paired, emitting paired event`, true);
+            main.emit("paired", trackerName, port, portId);
         });
 
         com.on("unpaired", (trackerName: string) => {
-            log(`Tracker ${trackerName} unpaired, emitting disconnect event`, true);
-            main.emit("disconnect", trackerName);
+            log(`Tracker ${trackerName} unpaired, emitting unpaired event`, true);
+            main.emit("unpaired", trackerName);
         });
 
         com.on("log", (message: string) => {

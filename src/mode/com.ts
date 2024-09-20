@@ -151,7 +151,7 @@ export default class COM extends EventEmitter {
                     this.emit("connected", port);
 
                     const errorListener = (err: any) => {
-                        error(`Error while reading data from port ${port}: ${err}`);
+                        error(`Error while trying to read data from port ${port}: ${err}`);
                     };
 
                     // Manually request all the info from the trackers
@@ -161,7 +161,7 @@ export default class COM extends EventEmitter {
                     initialCommands.forEach((command) => write(serial, command, errorListener));
                     setTimeout(() => {
                         delayedCommands.forEach((command) => write(serial, command, errorListener));
-                    }, 1000);
+                    }, 1500);
                 });
                 parser.on("data", (data) => processData(data, port));
                 serial.on("close", () => this.emit("disconnected", port));
@@ -250,8 +250,8 @@ export default class COM extends EventEmitter {
 
         commands.forEach((command, index) =>
             setTimeout(() => {
-                write(activePorts[port], command, () => {
-                    error(`Error while pairing on port ${port}: ${command}`);
+                write(activePorts[port], command, (err: any) => {
+                    error(`Error while pairing on port ${port}: ${err}`);
                 });
             }, index * 1000)
         );
@@ -261,17 +261,21 @@ export default class COM extends EventEmitter {
         waitForPairing(() => {
             log(`Paired on port ${port} with port ID ${portId}`);
 
-            write(activePorts[port], `o:30${channel}0`, () => {
-                error(`Error while requesting info from port ${port}`);
+            write(activePorts[port], `o:30${channel}0`, (err: any) => {
+                error(`Error while finishing pairing on ${port}: ${err}`);
+            });
+
+            write(activePorts[port], `r${portId}:`, (err: any) => {
+                error(`Error while requesting button info from tracker on ${port}: ${err}`);
             });
 
             isPairing = false;
             hasPaired = false;
-            
-            // TODO: write r: to get info on what tracker this is or something
 
-            //const trackerName = this.getTrackerFromInfo(port, portId);
-            this.emit("paired", port, portId);
+            setTimeout(() => {
+                const trackerName = this.getTrackerFromInfo(port, portId);
+                this.emit("paired", trackerName, port, portId);
+            }, 1000);
         });
     }
 
@@ -305,14 +309,14 @@ export default class COM extends EventEmitter {
 
         commands.forEach((command, index) =>
             setTimeout(() => {
-                write(activePorts[port], command, () => {
-                    error(`Error while unpairing on port ${port}: ${command}`);
+                write(activePorts[port], command, (err: any) => {
+                    error(`Error while unpairing on port ${port}: ${err}`);
                 });
             }, index * 1000)
         );
 
         log(`Unpaired ${trackerName} on port ${port} with port ID ${portId}`);
-        trackerAssignment.set(trackerName, ["", "", ""]);
+        resetTrackerAssignment(trackerName);
         this.emit("unpaired", trackerName, port, portId);
     }
 
@@ -400,7 +404,16 @@ async function processData(data: string, port: string) {
                 portId = match ? match[0] : "DONGLE";
                 portData = splitData[1];
 
-                let trackerAssignmentMissing = Array.from(trackerAssignment.values()).some((value) => value[1] === "");
+                // silently listen to data and see if we can assign the trackers
+                for (let [key, value] of trackerAssignment.entries()) {
+                    if (value[1] === "" && /^r.+/.test(identifier)) {
+                        const trackerId = parseInt(portData.charAt(4));
+                        if (parseInt(value[0]) === trackerId && trackerId !== 0) {
+                            trackerAssignment.set(key, [trackerId.toString(), port, portId]);
+                            log(`Setting ${key} to port ${port} with port ID ${portId}`);
+                        }
+                    }
+                }
 
                 if (!trackersAssigned) {
                     function processQueue(): Promise<void> {
@@ -418,16 +431,6 @@ async function processData(data: string, port: string) {
                                 reject(err);
                             }
                         });
-                    }
-
-                    for (let [key, value] of trackerAssignment.entries()) {
-                        if (value[1] === "" && /^r.+/.test(identifier)) {
-                            const trackerId = parseInt(portData.charAt(4));
-                            if (parseInt(value[0]) === trackerId && trackerId !== 0) {
-                                trackerAssignment.set(key, [trackerId.toString(), port, portId]);
-                                log(`Setting ${key} to port ${port} with port ID ${portId}`);
-                            }
-                        }
                     }
 
                     // Check if all trackers are assigned and queue if not
@@ -456,19 +459,7 @@ async function processData(data: string, port: string) {
                     ) {
                         log(`Required assignments completed: ${Array.from(trackerAssignment.entries())}`);
                         trackersAssigned = true;
-                        trackerAssignmentMissing = false;
                         processQueue();
-                    }
-                } else if (trackerAssignmentMissing) {
-                    // silently listen to data and see if we can assign the trackers
-                    for (let [key, value] of trackerAssignment.entries()) {
-                        if (value[1] === "" && /^r.+/.test(identifier)) {
-                            const trackerId = parseInt(portData.charAt(4));
-                            if (parseInt(value[0]) === trackerId && trackerId !== 0) {
-                                trackerAssignment.set(key, [trackerId.toString(), port, portId]);
-                                log(`Setting ${key} to port ${port} with port ID ${portId} (missing from pairing)`);
-                            }
-                        }
                     }
                 }
 
@@ -505,6 +496,13 @@ async function processData(data: string, port: string) {
         main.emit("data", trackerName, port, portId, identifier, portData);
     } catch (err) {
         error(`An unexpected error occurred: ${err}`);
+    }
+}
+
+function resetTrackerAssignment(trackerName: string) {
+    const currentValue = trackerAssignment.get(trackerName);
+    if (currentValue) {
+        trackerAssignment.set(trackerName, [currentValue[0], "", ""]);
     }
 }
 
