@@ -238,10 +238,10 @@ export default class COM extends EventEmitter {
 
         switch (portId) {
             case "0":
-                commands = [`o:11${channel}0`, `o:10${channel}0`];
+                commands = [`o:11${channel}0`, `o:10${channel}0`, `o:30${channel}0`];
                 break;
             case "1":
-                commands = [`o:22${channel}0`, `o:20${channel}0`];
+                commands = [`o:22${channel}0`, `o:20${channel}0`, `o:30${channel}0`];
                 break;
             default:
                 error(`Invalid port ID: ${portId}`);
