@@ -634,6 +634,8 @@ export default class HaritoraX extends EventEmitter {
             const trackerPort = com.getTrackerPort(trackerName);
             const trackerPortId = com.getTrackerPortId(trackerName);
 
+            if (!trackerPort || !trackerPortId) return;
+
             const rawValue = `v${trackerPortId}:`;
 
             writeToPort(trackerPort, rawValue, trackerName);
@@ -1136,6 +1138,17 @@ function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) 
  * @see {@link https://github.com/OCSYT/SlimeTora/}
  **/
 
+let previousGravity: Vector3 = { x: 0, y: 0, z: 0 };
+const alpha = 0.1; // Smoothing factor (0 < alpha < 1)
+
+function lowPassFilter(current: Vector3, previous: Vector3, alpha: number) {
+    return {
+        x: alpha * current.x + (1 - alpha) * previous.x,
+        y: alpha * current.y + (1 - alpha) * previous.y,
+        z: alpha * current.z + (1 - alpha) * previous.z,
+    };
+}
+
 function decodeIMUPacket(data: Buffer, trackerName: string) {
     if (!trackerName) return;
 
@@ -1195,15 +1208,9 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
             w: (rotationW / 180.0) * 0.01 * -1.0,
         };
 
-        const gravityRaw = {
-            x: gravityRawX / 256.0,
-            y: gravityRawY / 256.0,
-            z: gravityRawZ / 256.0,
-        };
-
         const rc = [rotation.w, rotation.x, rotation.y, rotation.z];
         const r = [rc[0], -rc[1], -rc[2], -rc[3]];
-        const p = [0.0, 0.0, 0.0, 9.8];
+        const p = [0.0, 0.0, 0.0, 9.81];
 
         const hrp = [
             r[0] * p[0] - r[1] * p[1] - r[2] * p[2] - r[3] * p[3],
@@ -1219,18 +1226,27 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
             hrp[0] * rc[3] + hrp[1] * rc[2] - hrp[2] * rc[1] + hrp[3] * rc[0],
         ];
 
+        const gravityRaw = {
+            x: gravityRawX / 256.0,
+            y: gravityRawY / 256.0,
+            z: gravityRawZ / 256.0,
+        };
+
         const gravity = {
             x: gravityRaw.x - hFinal[1] * -1.2,
             y: gravityRaw.y - hFinal[2] * -1.2,
             z: gravityRaw.z - hFinal[3] * 1.2,
         };
 
-        return { rotation, gravity, ankle, magStatus };
+        // Apply low-pass filter to gravity data
+        const filteredGravity = lowPassFilter(gravity, previousGravity, alpha);
+        previousGravity = filteredGravity;
+
+        return { rotation, gravity: filteredGravity, ankle, magStatus };
     } catch (err) {
         error(`Error decoding IMU packet: ${err}`, false);
     }
 }
-
 /**
  * Processes other tracker data received from the tracker by the dongle.
  * Read function comments for more information.
@@ -1900,6 +1916,12 @@ function updateTrackerSettings(
     for (let trackerName of trackerSettings.keys()) {
         trackerSettings.set(trackerName, [sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection]);
     }
+}
+
+interface Vector3 {
+    x: number;
+    y: number;
+    z: number;
 }
 
 export { HaritoraX };
