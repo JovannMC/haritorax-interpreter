@@ -799,7 +799,7 @@ export default class HaritoraX extends EventEmitter {
     /**
      * Turns off the specified tracker.
      * Supported trackers: wireless
-     * Supported connections: COM, Bluetooth (WIP)
+     * Supported connections: COM
      *
      * @function powerOffTracker
      * @param {string} trackerName - The name of the tracker to power off.
@@ -813,10 +813,10 @@ export default class HaritoraX extends EventEmitter {
         const trackerPort = com.getTrackerPort(trackerName);
         const trackerPortId = com.getTrackerPortId(trackerName);
 
-        const settingsHex = getSettingsHexValue(
-            ...(trackerSettings.get(trackerName) as [SensorMode, FPSMode, SensorAutoCorrection[], boolean])
-        );
-
+        const defaultSettings: [SensorMode, FPSMode, SensorAutoCorrection[], boolean] = [2, 50, [], false];
+        const settings = trackerSettings.get(trackerName) as [SensorMode, FPSMode, SensorAutoCorrection[], boolean] || defaultSettings;
+        const settingsHex = getSettingsHexValue(...settings);
+        
         // Change the second-to-last bit to '2' (power off signal)
         // note to self: MAKE SURE the settings is set to original after sending power off signal, otherwise you'll soft brick the trackers lol
         // this is because the power off signal uses a bit in the "settings" portion of the trackers, and if it's not set back to normal, the trackers will load the settings and keep turning back off
