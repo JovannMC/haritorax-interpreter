@@ -161,6 +161,8 @@ export default class COM extends EventEmitter {
                     initialCommands.forEach((command) => write(serial, command, errorListener));
                     setTimeout(() => {
                         delayedCommands.forEach((command) => write(serial, command, errorListener));
+                        // Repeated initial commands just to make sure, lol
+                        initialCommands.forEach((command) => write(serial, command, errorListener));
                     }, 1500);
                 });
                 parser.on("data", (data) => processData(data, port));
@@ -549,7 +551,7 @@ function write(port: SerialPortStream, rawData: String, callbackError?: Function
                 error(`Error writing data to serial port ${port.path}: ${err}`);
             }
         } else {
-            log(`Data written to serial port ${port.path}: ${rawData.toString().replace(/\r\n/g, " ")}`);
+            log(`(DONGLE) - Data written to serial port ${port.path}: ${rawData.toString().replace(/\r\n/g, " ")}`);
         }
     });
 }

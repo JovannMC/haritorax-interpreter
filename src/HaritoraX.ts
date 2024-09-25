@@ -814,9 +814,10 @@ export default class HaritoraX extends EventEmitter {
         const trackerPortId = com.getTrackerPortId(trackerName);
 
         const defaultSettings: [SensorMode, FPSMode, SensorAutoCorrection[], boolean] = [2, 50, [], false];
-        const settings = trackerSettings.get(trackerName) as [SensorMode, FPSMode, SensorAutoCorrection[], boolean] || defaultSettings;
+        const settings =
+            (trackerSettings.get(trackerName) as [SensorMode, FPSMode, SensorAutoCorrection[], boolean]) || defaultSettings;
         const settingsHex = getSettingsHexValue(...settings);
-        
+
         // Change the second-to-last bit to '2' (power off signal)
         // note to self: MAKE SURE the settings is set to original after sending power off signal, otherwise you'll soft brick the trackers lol
         // this is because the power off signal uses a bit in the "settings" portion of the trackers, and if it's not set back to normal, the trackers will load the settings and keep turning back off
@@ -824,7 +825,7 @@ export default class HaritoraX extends EventEmitter {
         const commands = [`o${trackerPortId}:${modifiedSettingsHex}`, `o${trackerPortId}:${settingsHex}`];
         commands.forEach((command) => writeToPort(trackerPort, command));
 
-        console.log(`Manually powered off tracker ${trackerName} (Port ${trackerPort}, port id ${trackerPortId})`, true);
+        log(`Manually powered off tracker ${trackerName} (Port ${trackerPort}, port id ${trackerPortId})`, true);
     }
 
     /**

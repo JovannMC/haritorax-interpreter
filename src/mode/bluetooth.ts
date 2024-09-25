@@ -18,7 +18,7 @@ const services = new Map([
 const characteristics = new Map([
     // Battery Service
     ["2a19", "BatteryLevel"],
-    
+
     // BT device info
     ["2a25", "SerialNumber"],
     ["2a29", "Manufacturer"],
