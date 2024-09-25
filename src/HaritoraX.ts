@@ -823,7 +823,13 @@ export default class HaritoraX extends EventEmitter {
         // this is because the power off signal uses a bit in the "settings" portion of the trackers, and if it's not set back to normal, the trackers will load the settings and keep turning back off
         const modifiedSettingsHex = settingsHex.slice(0, -2) + "2" + settingsHex.slice(-1);
         const commands = [`o${trackerPortId}:${modifiedSettingsHex}`, `o${trackerPortId}:${settingsHex}`];
-        commands.forEach((command) => writeToPort(trackerPort, command));
+        (async () => {
+            for (const command of commands) {
+                writeToPort(trackerPort, command);
+                // Allow for small delay between commands so tracker can process the first command
+                await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+        })();
 
         log(`Manually powered off tracker ${trackerName} (Port ${trackerPort}, port id ${trackerPortId})`, true);
     }
