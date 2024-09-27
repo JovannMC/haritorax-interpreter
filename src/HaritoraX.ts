@@ -4,6 +4,7 @@ import { Buffer } from "buffer";
 import { EventEmitter } from "events";
 import { COM } from "./mode/com.js";
 import Bluetooth from "./mode/bluetooth.js";
+import BluetoothLinux from "./mode/bluetooth-linux.js";
 import { TrackerModel, SensorMode, FPSMode, SensorAutoCorrection, MagStatus } from "./types.js";
 
 let debug = false;
@@ -11,7 +12,7 @@ let printIMU = false;
 let printRaw = false;
 
 let com: COM;
-let bluetooth: Bluetooth;
+let bluetooth: Bluetooth | BluetoothLinux;
 let comEnabled = false;
 let bluetoothEnabled = false;
 let main: HaritoraX;
@@ -299,9 +300,11 @@ export default class HaritoraX extends EventEmitter {
             com.startConnection(portNames);
             canProcessComData = true;
         } else if (connectionMode === "bluetooth") {
-            bluetooth = new Bluetooth();
+            const isLinux = process.platform === "linux";
+            bluetooth = isLinux ? new BluetoothLinux() : new Bluetooth();
+
+            bluetooth.startConnection()
             bluetoothEnabled = true;
-            bluetooth.startConnection();
 
             if (setupBluetoothServices()) {
                 canProcessBluetoothData = true;
@@ -991,16 +994,14 @@ function listenToDeviceEvents() {
             }
         });
 
-        bluetooth.on("connect", (peripheral) => {
-            const trackerName = peripheral.advertisement.localName;
+        bluetooth.on("connect", (trackerName) => {
             if (trackerName && !activeDevices.includes(trackerName)) {
                 activeDevices.push(trackerName);
                 main.emit("connect", trackerName, "bluetooth");
             }
         });
 
-        bluetooth.on("disconnect", (peripheral) => {
-            const trackerName = peripheral.advertisement.localName;
+        bluetooth.on("disconnect", (trackerName) => {
             main.emit("disconnect", trackerName);
         });
 
