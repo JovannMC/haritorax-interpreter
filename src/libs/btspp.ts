@@ -8,7 +8,7 @@ interface BluetoothDevice {
 
 const getPairedDevicesWindows = (): Promise<BluetoothDevice[]> => {
     return new Promise((resolve, reject) => {
-        exec("wmic path Win32_PnPEntity where \"Name like '%Bluetooth%'\" get Name,DeviceID", (error, stdout, _stderr) => {
+        exec('powershell -Command "Get-PnpDevice -Class Bluetooth | Select-Object Name, DeviceID"', (error, stdout, _stderr) => {
             if (error) {
                 reject(error);
                 return;
@@ -18,9 +18,13 @@ const getPairedDevicesWindows = (): Promise<BluetoothDevice[]> => {
             const lines = stdout.split("\n").filter((line) => line.trim() !== "" && !line.includes("Name"));
 
             lines.forEach((line) => {
-                const [name, deviceId] = line.trim().split(/\s{2,}/);
-                if (name && deviceId) {
-                    devices.push({ name, address: deviceId });
+                const match = line.trim().match(/^(.+?)\s{2,}(.+)$/);
+                if (match) {
+                    const name = match[1].trim();
+                    const deviceId = match[2].trim();
+                    if (name.startsWith("HaritoraX")) {
+                        devices.push({ name, address: deviceId });
+                    }
                 }
             });
 
