@@ -4,6 +4,7 @@ import { Buffer } from "buffer";
 import { EventEmitter } from "events";
 import { COM } from "./mode/com.js";
 import Bluetooth from "./mode/bluetooth.js";
+import BluetoothLinux from "./mode/bluetooth-linux.js";
 import { TrackerModel, SensorMode, FPSMode, SensorAutoCorrection, MagStatus } from "./types.js";
 
 let debug = false;
@@ -11,7 +12,7 @@ let printIMU = false;
 let printRaw = false;
 
 let com: COM;
-let bluetooth: Bluetooth;
+let bluetooth: Bluetooth | BluetoothLinux;
 let comEnabled = false;
 let bluetoothEnabled = false;
 let main: HaritoraX;
@@ -299,9 +300,11 @@ export default class HaritoraX extends EventEmitter {
             com.startConnection(portNames);
             canProcessComData = true;
         } else if (connectionMode === "bluetooth") {
-            bluetooth = new Bluetooth();
-            bluetoothEnabled = true;
+            const isLinux = process.platform === "linux";
+            bluetooth = isLinux ? new BluetoothLinux() : new Bluetooth();
+
             bluetooth.startConnection();
+            bluetoothEnabled = true;
 
             if (setupBluetoothServices()) {
                 canProcessBluetoothData = true;
@@ -713,7 +716,13 @@ export default class HaritoraX extends EventEmitter {
             }
 
             try {
-                await bluetooth.read(trackerName, trackerService, magnetometerCharacteristic);
+                const magStatusBuffer = await bluetooth.read(trackerName, trackerService, magnetometerCharacteristic);
+                if (!magStatusBuffer) error(`Tracker ${trackerName} magnetometer status not found`);
+                const magData = Buffer.from(magStatusBuffer).readUInt8(0);
+                const magStatus = getMagStatus(magData);
+                trackerMag.set(trackerName, magStatus);
+                log(`Tracker ${trackerName} magnetometer status: ${magStatus}`, true);
+                main.emit("mag", trackerName, magStatus);
             } catch (err) {
                 error(`Error reading mag status: ${err}`);
                 return;
@@ -991,16 +1000,14 @@ function listenToDeviceEvents() {
             }
         });
 
-        bluetooth.on("connect", (peripheral) => {
-            const trackerName = peripheral.advertisement.localName;
+        bluetooth.on("connect", (trackerName) => {
             if (trackerName && !activeDevices.includes(trackerName)) {
                 activeDevices.push(trackerName);
                 main.emit("connect", trackerName, "bluetooth");
             }
         });
 
-        bluetooth.on("disconnect", (peripheral) => {
-            const trackerName = peripheral.advertisement.localName;
+        bluetooth.on("disconnect", (trackerName) => {
             main.emit("disconnect", trackerName);
         });
 
@@ -1749,8 +1756,12 @@ function getSettingsHexValue(
 }
 
 function writeToBluetooth(trackerName: string, characteristic: string, value: number) {
-    const buffer = Buffer.from([value]);
-    bluetooth.write(trackerName, settingsService, characteristic, buffer);
+    try {
+        const buffer = Buffer.from([value]);
+        bluetooth.write(trackerName, settingsService, characteristic, buffer);
+    } catch (err) {
+        error(`Error writing to Bluetooth tracker ${trackerName}: ${err}`);
+    }
 }
 
 async function readFromBluetooth(trackerName: string, characteristic: string) {
@@ -1810,7 +1821,7 @@ function setupBluetoothServices(): boolean {
  */
 
 function removeActiveDevices(deviceTypeToRemove: string) {
-    let devices = deviceTypeToRemove === "bluetooth" ? bluetooth.getActiveDevices() : com.getTrackers();
+    let devices = deviceTypeToRemove === "bluetooth" ? bluetooth.getActiveTrackers() : com.getTrackers();
     let removedDevices: string[] = [];
 
     for (let device of devices) {
