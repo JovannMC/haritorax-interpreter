@@ -11,7 +11,7 @@ let ble: Adapter = null;
 
 let allowReconnect = true;
 
-type ActiveDevice = [string, Device, GattService[], GattCharacteristic[]];
+type ActiveDevice = [string, Device];
 let activeDevices: ActiveDevice[] = [];
 
 export default class BluetoothLinux extends EventEmitter {
@@ -48,7 +48,15 @@ export default class BluetoothLinux extends EventEmitter {
     }
 
     async startConnection() {
-        if (!ble) ble = await bluetooth.defaultAdapter();
+        if (!ble) {
+            try {
+                ble = await bluetooth.defaultAdapter();
+            } catch (err) {
+                error(`Error initializing Bluetooth adapter: ${err}`, true);
+                return;
+            }
+        }
+
         if (!ble.isPowered) {
             error("Bluetooth adapter is not powered on.", true);
             return;
@@ -73,7 +81,7 @@ export default class BluetoothLinux extends EventEmitter {
             if (deviceName.startsWith("HaritoraXW-")) {
                 log(`Found device: ${deviceName}`);
 
-                if (!device.isConnected) {
+                if (!(await device.isConnected())) {
                     device.connect();
                 } else {
                     log(`Already connected to ${deviceName}`);
@@ -86,6 +94,8 @@ export default class BluetoothLinux extends EventEmitter {
                 device.on("connect", async () => {
                     log(`(bluetooth/linux) Connected to ${deviceName}`);
                     this.emit("connect", deviceName);
+
+                    activeDevices.push([deviceName, device]);
 
                     const gatt = await device.gatt();
                     const services = await gatt.services();
@@ -137,8 +147,11 @@ export default class BluetoothLinux extends EventEmitter {
         try {
             allowReconnect = false;
 
-            await ble.stopDiscovery();
-            destroy();
+            if (ble) {
+                await ble.stopDiscovery();
+                destroy();
+                ble = null;
+            }
 
             this.emit("disconnected");
             log("Stopped Bluetooth (Linux) connection.");
@@ -148,11 +161,21 @@ export default class BluetoothLinux extends EventEmitter {
     }
 
     async read(localName: string, service: string, characteristic: string): Promise<ArrayBufferLike> {
-        const device = await getDevice(localName);
-        const serviceInstance = await getService(device, service);
-        const characteristicInstance = await getCharacteristic(serviceInstance, characteristic);
+        try {
+            const device = await getDevice(localName);
+            const serviceInstance = await getService(device, service);
+            const characteristicInstance = await getCharacteristic(serviceInstance, characteristic);
 
-        return await characteristicInstance.readValue();
+            const buffer = await characteristicInstance.readValue();
+
+            // Convert the Buffer to an ArrayBuffer
+            const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+
+            return arrayBuffer;
+        } catch (err) {
+            error(`Error reading characteristic ${characteristic} from service ${service} on device ${localName}: ${err}`);
+            throw err;
+        }
     }
 
     async write(localName: string, service: string, characteristic: string, data: any): Promise<void> {
@@ -211,21 +234,55 @@ async function getDevice(localName: string): Promise<ActiveDevice> {
 }
 
 async function getService(device: ActiveDevice, service: string): Promise<GattService> {
+    const fullServiceUUID = toFullUUID(service);
     const gatt = await device[1].gatt();
-    const serviceInstance = (await gatt.getPrimaryService(service)) as GattService;
-    if (!serviceInstance) error(`Service ${service} not found for ${device[0]}`, true);
-    return serviceInstance;
+
+    try {
+        const serviceInstance = (await gatt.getPrimaryService(fullServiceUUID)) as GattService;
+        return serviceInstance;
+    } catch (err) {
+        error(`Service ${service} not found for ${device[0]}`, true);
+        log(`Available services: ${await gatt.services()}`);
+        return null;
+    }
 }
 
 async function getCharacteristic(service: GattService, characteristic: string): Promise<GattCharacteristic> {
-    const characteristicInstance = (await service.getCharacteristic(characteristic)) as GattCharacteristic;
-    if (!characteristicInstance) error(`Characteristic ${characteristic} not found for ${service.toString()}.`, true);
-    return characteristicInstance;
+    const fullCharacteristicUUID = toFullUUID(characteristic);
+
+    try {
+        const characteristicInstance = (await service.getCharacteristic(fullCharacteristicUUID)) as GattCharacteristic;
+        return characteristicInstance;
+    } catch (err) {
+        error(`Characteristic ${toFullUUID(characteristic)} not found for ${await service.toString()}`, true);
+        log(`Available characteristics: ${await service.characteristics()}`);
+        return null;
+    }
 }
 
 /*
  * General helper functions
  */
+
+function toFullUUID(originalUUID: string): string {
+    if (originalUUID.length === 4) {
+        return `0000${originalUUID}-0000-1000-8000-00805f9b34fb`;
+    }
+    return formatUUID(originalUUID);
+}
+
+function formatUUID(uuid: string): string {
+    const cleanedUUID = uuid.replace(/-/g, "");
+
+    if (cleanedUUID.length !== 32) {
+        throw new Error(`Invalid UUID length: ${cleanedUUID.length}`);
+    }
+
+    return `${cleanedUUID.slice(0, 8)}-${cleanedUUID.slice(8, 12)}-${cleanedUUID.slice(12, 16)}-${cleanedUUID.slice(
+        16,
+        20
+    )}-${cleanedUUID.slice(20)}`;
+}
 
 function emitData(localName: string, service: string, characteristic: string, data: any) {
     main.emit("data", localName, services.get(service) || service, characteristics.get(characteristic) || characteristic, data);

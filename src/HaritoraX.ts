@@ -303,7 +303,7 @@ export default class HaritoraX extends EventEmitter {
             const isLinux = process.platform === "linux";
             bluetooth = isLinux ? new BluetoothLinux() : new Bluetooth();
 
-            bluetooth.startConnection()
+            bluetooth.startConnection();
             bluetoothEnabled = true;
 
             if (setupBluetoothServices()) {
@@ -716,7 +716,13 @@ export default class HaritoraX extends EventEmitter {
             }
 
             try {
-                await bluetooth.read(trackerName, trackerService, magnetometerCharacteristic);
+                const magStatusBuffer = await bluetooth.read(trackerName, trackerService, magnetometerCharacteristic);
+                if (!magStatusBuffer) error(`Tracker ${trackerName} magnetometer status not found`);
+                const magData = Buffer.from(magStatusBuffer).readUInt8(0);
+                const magStatus = getMagStatus(magData);
+                trackerMag.set(trackerName, magStatus);
+                log(`Tracker ${trackerName} magnetometer status: ${magStatus}`, true);
+                main.emit("mag", trackerName, magStatus);
             } catch (err) {
                 error(`Error reading mag status: ${err}`);
                 return;
@@ -1750,8 +1756,12 @@ function getSettingsHexValue(
 }
 
 function writeToBluetooth(trackerName: string, characteristic: string, value: number) {
-    const buffer = Buffer.from([value]);
-    bluetooth.write(trackerName, settingsService, characteristic, buffer);
+    try {
+        const buffer = Buffer.from([value]);
+        bluetooth.write(trackerName, settingsService, characteristic, buffer);
+    } catch (err) {
+        error(`Error writing to Bluetooth tracker ${trackerName}: ${err}`);
+    }
 }
 
 async function readFromBluetooth(trackerName: string, characteristic: string) {
@@ -1811,7 +1821,7 @@ function setupBluetoothServices(): boolean {
  */
 
 function removeActiveDevices(deviceTypeToRemove: string) {
-    let devices = deviceTypeToRemove === "bluetooth" ? bluetooth.getActiveDevices() : com.getTrackers();
+    let devices = deviceTypeToRemove === "bluetooth" ? bluetooth.getActiveTrackers() : com.getTrackers();
     let removedDevices: string[] = [];
 
     for (let device of devices) {

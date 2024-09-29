@@ -183,7 +183,7 @@ export default class Bluetooth extends EventEmitter {
         const serviceInstance = getService(device, service);
         const characteristicInstance = getCharacteristic(serviceInstance, characteristic);
 
-        await writeCharacteristic(characteristicInstance, data);
+        return await writeCharacteristic(characteristicInstance, data);
     }
 
     getActiveDevices() {
