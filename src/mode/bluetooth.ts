@@ -89,7 +89,7 @@ export default class Bluetooth extends EventEmitter {
                 noble.startScanning([], true);
                 this.emit("connected");
             } catch (err) {
-                error(`Error starting bluetooth scanning: ${err}`, true);
+                error(`Error starting Bluetooth scanning: ${err}`, true);
             }
         };
 
@@ -136,7 +136,7 @@ export default class Bluetooth extends EventEmitter {
             log(`(bluetooth) Connected to ${localName}`);
             this.emit("connect", localName);
         } catch (err) {
-            error(`Error during discovery/connection process: ${err}`, true);
+            error(`Error during Bluetooth discovery/connection process: ${err}`, true);
         }
 
         peripheral.on("disconnect", () => {
@@ -159,14 +159,19 @@ export default class Bluetooth extends EventEmitter {
             noble.stopScanning();
             activeDevices.forEach(([id, device]) => {
                 log(`Disconnecting from BT device ${id}`);
-                device.disconnect();
+
+                try {
+                    device.disconnect();
+                } catch (err) {
+                    error(`Error disconnecting from Bluetooth device ${id}: ${err}`, true);
+                }
             });
             activeDevices = [];
             allowReconnect = false;
             this.emit("disconnected");
             log("Disconnected from bluetooth");
         } catch (err) {
-            error(`Error while closing bluetooth connection: ${err}`, true);
+            error(`Error while closing Bluetooth connection: ${err}`, true);
         }
     }
 

@@ -4,10 +4,10 @@ import { services, characteristics } from "../libs/common";
 
 import { EventEmitter } from "events";
 import { createBluetooth, Adapter, Device, GattCharacteristic, GattService } from "node-ble";
-const { bluetooth, destroy } = createBluetooth();
 
 let main: BluetoothLinux = undefined;
 let ble: Adapter = null;
+let bleDestroy: Function = null;
 
 let allowReconnect = true;
 
@@ -49,10 +49,13 @@ export default class BluetoothLinux extends EventEmitter {
 
     async startConnection() {
         if (!ble) {
+            const { bluetooth, destroy } = createBluetooth();
+
             try {
                 ble = await bluetooth.defaultAdapter();
+                bleDestroy = destroy;
             } catch (err) {
-                error(`Error initializing Bluetooth adapter: ${err}`, true);
+                error(`Bluetooth initialization failed: ${err}`, true);
                 return;
             }
         }
@@ -62,10 +65,13 @@ export default class BluetoothLinux extends EventEmitter {
             return;
         }
 
-        await ble.startDiscovery();
+        try {
+            await ble.startDiscovery();
+        } catch (err) {
+            error(`Error starting Bluetooth scanning: ${err}`);
+        }
 
         const devices = await ble.devices();
-        log(`aaa ${devices.join(", ")}`);
 
         for (let deviceUUID of devices) {
             const device = await ble.getDevice(deviceUUID);
@@ -97,32 +103,36 @@ export default class BluetoothLinux extends EventEmitter {
 
                     activeDevices.push([deviceName, device]);
 
-                    const gatt = await device.gatt();
-                    const services = await gatt.services();
+                    try {
+                        const gatt = await device.gatt();
+                        const services = await gatt.services();
 
-                    // Discover all services
-                    for (let serviceUUID of services) {
-                        const service = await gatt.getPrimaryService(serviceUUID);
-                        const characteristics = await service.characteristics();
+                        // Discover all services
+                        for (let serviceUUID of services) {
+                            const service = await gatt.getPrimaryService(serviceUUID);
+                            const characteristics = await service.characteristics();
 
-                        // Discover and subscribe to all characteristics
-                        for (let characteristicUUID of characteristics) {
-                            try {
-                                const characteristic = await service.getCharacteristic(characteristicUUID);
-                                const flags = await characteristic.getFlags();
-                                if (!flags.includes("notify")) continue;
+                            // Discover and subscribe to all characteristics
+                            for (let characteristicUUID of characteristics) {
+                                try {
+                                    const characteristic = await service.getCharacteristic(characteristicUUID);
+                                    const flags = await characteristic.getFlags();
+                                    if (!flags.includes("notify")) continue;
 
-                                await characteristic.startNotifications();
-                                characteristic.on("valuechanged", (data) => {
-                                    const serviceCleaned = serviceUUID.replace(/-/g, "");
-                                    const characteristicCleaned = characteristicUUID.replace(/-/g, "");
-                                    emitData(deviceName, serviceCleaned, characteristicCleaned, data);
-                                });
-                            } catch (err) {
-                                error(`Error subscribing to ${characteristicUUID}: ${err}`);
-                                continue;
+                                    await characteristic.startNotifications();
+                                    characteristic.on("valuechanged", (data) => {
+                                        const serviceCleaned = serviceUUID.replace(/-/g, "");
+                                        const characteristicCleaned = characteristicUUID.replace(/-/g, "");
+                                        emitData(deviceName, serviceCleaned, characteristicCleaned, data);
+                                    });
+                                } catch (err) {
+                                    error(`Error subscribing to ${characteristicUUID}: ${err}`);
+                                    continue;
+                                }
                             }
                         }
+                    } catch (err) {
+                        error(`Error during Bluetooth discovery/connection process: ${err}`);
                     }
                 });
 
@@ -148,19 +158,39 @@ export default class BluetoothLinux extends EventEmitter {
             allowReconnect = false;
 
             if (ble) {
-                await ble.stopDiscovery();
-                destroy();
+                try {
+                    await ble.stopDiscovery();
+                } catch (err) {
+                    error(`Error stopping Bluetooth discovery: ${err}`);
+                }
+
+                for (let device of activeDevices) {
+                    try {
+                        await device[1].disconnect();
+                        activeDevices = activeDevices.filter((activeDevice) => activeDevice[0] !== device[0]);
+                    } catch (err) {
+                        error(`Error disconnecting from Bluetooth device ${device[0]}: ${err}`);
+                    }
+                }
+
+                bleDestroy();
+
                 ble = null;
             }
 
             this.emit("disconnected");
             log("Stopped Bluetooth (Linux) connection.");
         } catch (err) {
-            log(`Error stopping Bluetooth (Linux) connection: ${err}`);
+            error(`Error stopping Bluetooth (Linux) connection: ${err}`, true);
         }
     }
 
     async read(localName: string, service: string, characteristic: string): Promise<ArrayBufferLike> {
+        if (!ble) {
+            error("Bluetooth adapter is not initialized.", true);
+            return null;
+        }
+
         try {
             const device = await getDevice(localName);
             const serviceInstance = await getService(device, service);
@@ -173,12 +203,17 @@ export default class BluetoothLinux extends EventEmitter {
 
             return arrayBuffer;
         } catch (err) {
-            error(`Error reading characteristic ${characteristic} from service ${service} on device ${localName}: ${err}`);
+            error(`Error reading characteristic ${characteristic}: ${err}`);
             throw err;
         }
     }
 
     async write(localName: string, service: string, characteristic: string, data: any): Promise<void> {
+        if (!ble) {
+            error("Bluetooth adapter is not initialized.", true);
+            return null;
+        }
+
         const device = await getDevice(localName);
         const serviceInstance = await getService(device, service);
         const characteristicInstance = await getCharacteristic(serviceInstance, characteristic);
