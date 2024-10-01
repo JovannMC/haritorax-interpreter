@@ -110,10 +110,10 @@ const trackerMag: Map<string, string> = new Map([
     ["rightElbow", ""],
 ]);
 
-// For HaritoraX Wired
 const deviceInformation: Map<string, string[]> = new Map([
-    // example: {"model":"MC2B", "version":"1.7.10", "serial no":"0000000", "comm":"BLT", "comm_next":"BTSPP"}
+    // example for wired: {"model":"MC2B", "version":"1.7.10", "serial no":"0000000", "comm":"BLT", "comm_next":"BTSPP"}
     // deviceName, [version, model, serial, comm, comm_next]
+    ["HaritoraXWired", ["", "", "", "", ""]],
     ["rightKnee", ["", "", "", "", ""]],
     ["rightAnkle", ["", "", "", "", ""]],
     ["hip", ["", "", "", "", ""]],
@@ -455,7 +455,7 @@ export default class HaritoraX extends EventEmitter {
      * @returns {array} The active trackers.
      **/
 
-    getActiveTrackers(): String[] {
+    getActiveTrackers(): string[] {
         if (!comEnabled && !bluetoothEnabled) return null;
         const comTrackers = comEnabled ? activeDevices : [];
         const bluetoothTrackers = bluetoothEnabled ? bluetooth.getActiveTrackers() : [];
@@ -604,7 +604,7 @@ export default class HaritoraX extends EventEmitter {
                 readCharacteristic(SERIAL_UUID),
             ]);
         } else if (comEnabled) {
-            const deviceInfo = com.getDeviceInformation(trackerName);
+            const deviceInfo = deviceInformation.get(trackerName);
             [version, model, serial] = [deviceInfo[VERSION_INDEX], deviceInfo[MODEL_INDEX], deviceInfo[SERIAL_INDEX]];
 
             if (trackerModelEnabled === "wired") {
@@ -1277,16 +1277,17 @@ function processTrackerData(data: string, trackerName: string) {
     /*
      * Currently unsure what other data a0/a1 could represent other than trying to find the trackers, I see other values for it too reporting every second.
      * This could also be used to report calibration data when running the calibration through the software, or a "heartbeat" packet.
+     * 
+     * This is most likely related to signal info about the dongle, such as signal strength/RSSI.
      */
 
     if (!data || !trackerName) return;
 
     if (data === "7f7f7f7f7f7f") {
-        //log(`Searching for tracker ${trackerName}...`);
-        if (activeDevices.includes(trackerName)) activeDevices.splice(activeDevices.indexOf(trackerName), 1);
+        if (!activeDevices.includes(trackerName)) return;
+        activeDevices.splice(activeDevices.indexOf(trackerName), 1);
         main.emit("disconnect", trackerName);
-    } else {
-        //log(`Tracker ${trackerName} other data processed: ${data}`);
+        log(`Searching for tracker ${trackerName}...`);
     }
 
     // TODO - Find out what "other data" represents, then add to emitted event.
@@ -1469,13 +1470,10 @@ function processInfoData(data: string, trackerName: string) {
     // example: {"model":"MC2B", "version":"1.7.10", "serial no":"0000000", "comm":"BLT", "comm_next":"BTSPP"}
     try {
         const { version, model, "serial no": serial, comm, comm_next } = JSON.parse(data);
-        log(`Tracker ${trackerName} info: ${version}, ${model}, ${serial}, ${comm}, ${comm_next}`);
         main.emit("info", trackerName, version, model, serial, comm, comm_next);
         deviceInformation.set(trackerName, [version, model, serial, comm, comm_next]);
-        return { version, model, serial, comm, comm_next };
     } catch (err) {
         log(`Error processing info data for tracker ${trackerName}: ${err}`);
-        return null;
     }
 }
 
@@ -1517,10 +1515,8 @@ function processButtonData(data: string, trackerName: string, characteristic?: s
         logButtonPress(trackerName, buttonPressed, currentButtons);
         trackerButtons.set(trackerName, currentButtons);
         main.emit("button", trackerName, buttonPressed, isOn, ...currentButtons);
-        return true;
     } catch (err) {
         error(`Error processing button data for ${trackerName}: ${err}`);
-        return false;
     }
 }
 
@@ -1720,7 +1716,7 @@ function isWirelessBTTracker(trackerName: string) {
     return trackerModelEnabled === "wireless" && bluetoothEnabled && trackerName.startsWith("HaritoraXW");
 }
 
-function writeToPort(port: string, rawData: String, trackerName = "unknown") {
+function writeToPort(port: string, rawData: string, trackerName = "unknown") {
     const ports = com.getActivePorts();
     const data = `\n${rawData}\n`;
 

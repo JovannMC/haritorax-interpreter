@@ -26,20 +26,6 @@ const trackerAssignment: Map<string, string[]> = new Map([
     ["rightElbow", ["8", "", ""]],
 ]);
 
-// For HaritoraX Wireless
-const deviceInformation: Map<string, string[]> = new Map([
-    // deviceName, [version, model, serial]
-    ["DONGLE", ["", "", "", "", ""]],
-    ["chest", ["", "", "", "", ""]],
-    ["leftKnee", ["", "", "", "", ""]],
-    ["leftAnkle", ["", "", "", "", ""]],
-    ["rightKnee", ["", "", "", "", ""]],
-    ["rightAnkle", ["", "", "", "", ""]],
-    ["hip", ["", "", "", "", ""]],
-    ["leftElbow", ["", "", "", "", ""]],
-    ["rightElbow", ["", "", "", "", ""]],
-]);
-
 const dongles = [
     { name: "GX2", vid: "1915", pid: "520F" },
     { name: "GX6", vid: "04DA", pid: "3F18" },
@@ -50,8 +36,8 @@ const portChannels: { [key: string]: number } = {};
 // Stores the ports that are currently active as objects for access later
 let activePorts: ActivePorts = {};
 let trackersAssigned = false;
-let trackerModelEnabled: String;
-let heartbeatInterval: number; // in milliseconds
+let trackerModelEnabled: string;
+let heartbeatInterval = 5000; // in milliseconds
 
 export default class COM extends EventEmitter {
     constructor(trackerModel: string, heartbeat?: number) {
@@ -158,11 +144,11 @@ export default class COM extends EventEmitter {
                     const initialCommands = ["r0:", "r1:", "r:", "o:"];
                     const delayedCommands = ["i:", "i0:", "i1:", "o0:", "o1:", "v0:", "v1:"];
 
-                    initialCommands.forEach((command) => write(serial, command, errorListener));
+                    initialCommands.forEach((command) => this.write(serial, command, errorListener));
                     setTimeout(() => {
-                        delayedCommands.forEach((command) => write(serial, command, errorListener));
+                        delayedCommands.forEach((command) => this.write(serial, command, errorListener));
                         // Repeated initial commands just to make sure, lol
-                        initialCommands.forEach((command) => write(serial, command, errorListener));
+                        initialCommands.forEach((command) => this.write(serial, command, errorListener));
                     }, 1500);
                 });
                 parser.on("data", (data) => processData(data, port));
@@ -171,7 +157,7 @@ export default class COM extends EventEmitter {
                     error(`Error on port ${port}: ${err}`, true);
                 });
 
-                if (trackerModelEnabled === "wired") setupHeartbeat(serial, port);
+                setupHeartbeat(serial, port, trackerModelEnabled);
             } catch (err) {
                 throw err;
             }
@@ -213,7 +199,7 @@ export default class COM extends EventEmitter {
             throw new Error(`Invalid port: ${port}`);
         }
 
-        write(activePorts[port], `o:30${channel === 10 ? "a" : channel}0\n`, (err: any) => {
+        this.write(activePorts[port], `o:30${channel === 10 ? "a" : channel}0\n`, (err: any) => {
             if (!err) return;
             error(`Error while changing channel on port ${port}: ${err}`);
             throw err;
@@ -252,7 +238,7 @@ export default class COM extends EventEmitter {
 
         commands.forEach((command, index) =>
             setTimeout(() => {
-                write(activePorts[port], command, (err: any) => {
+                this.write(activePorts[port], command, (err: any) => {
                     error(`Error while pairing on port ${port}: ${err}`);
                 });
             }, index * 1000)
@@ -263,11 +249,11 @@ export default class COM extends EventEmitter {
         waitForPairing(() => {
             log(`Paired on port ${port} with port ID ${portId}`);
 
-            write(activePorts[port], `o:30${channel}0`, (err: any) => {
+            this.write(activePorts[port], `o:30${channel}0`, (err: any) => {
                 error(`Error while finishing pairing on ${port}: ${err}`);
             });
 
-            write(activePorts[port], `r${portId}:`, (err: any) => {
+            this.write(activePorts[port], `r${portId}:`, (err: any) => {
                 error(`Error while requesting button info from tracker on ${port}: ${err}`);
             });
 
@@ -311,7 +297,7 @@ export default class COM extends EventEmitter {
 
         commands.forEach((command, index) =>
             setTimeout(() => {
-                write(activePorts[port], command, (err: any) => {
+                this.write(activePorts[port], command, (err: any) => {
                     error(`Error while unpairing on port ${port}: ${err}`);
                 });
             }, index * 1000)
@@ -371,12 +357,24 @@ export default class COM extends EventEmitter {
         }
     }
 
-    getDeviceInformation(deviceName: string) {
-        return deviceInformation.get(deviceName);
-    }
-
     getActivePorts() {
         return activePorts;
+    }
+
+    write(port: SerialPortStream, rawData: string, callbackError?: Function) {
+        const data = `\n${rawData}\n`;
+    
+        port.write(data, (err: any) => {
+            if (err) {
+                if (callbackError) {
+                    callbackError(err);
+                } else {
+                    error(`Error writing data to serial port ${port.path}: ${err}`);
+                }
+            } else {
+                log(`(DONGLE) - Data written to serial port ${port.path}: ${rawData.toString().replace(/\r\n/g, " ")}`);
+            }
+        });
     }
 }
 
@@ -517,11 +515,12 @@ function waitForPairing(callback: () => void) {
     }, 1000);
 }
 
-function setupHeartbeat(serial: SerialPortStream, port: string) {
+function setupHeartbeat(serial: SerialPortStream, port: string, trackerModel: string) {
     setInterval(() => {
         if (serial.isOpen) {
+            const command = trackerModel === "wired" ? "report send info\nblt send info" : "i:";
             log(`Sending heartbeat to port ${port}`);
-            write(serial, "report send info\nblt send info");
+            main.write(serial, command);
         }
     }, heartbeatInterval);
 }
@@ -538,22 +537,6 @@ function log(message: string) {
 function error(message: string, exceptional = false) {
     console.error(message);
     main.emit("logError", { message, exceptional });
-}
-
-function write(port: SerialPortStream, rawData: String, callbackError?: Function) {
-    const data = `\n${rawData}\n`;
-
-    port.write(data, (err: any) => {
-        if (err) {
-            if (callbackError) {
-                callbackError(err);
-            } else {
-                error(`Error writing data to serial port ${port.path}: ${err}`);
-            }
-        } else {
-            log(`(DONGLE) - Data written to serial port ${port.path}: ${rawData.toString().replace(/\r\n/g, " ")}`);
-        }
-    });
 }
 
 /*
