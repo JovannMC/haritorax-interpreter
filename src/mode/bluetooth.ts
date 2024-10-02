@@ -133,14 +133,14 @@ export default class Bluetooth extends EventEmitter {
             const { services, characteristics } = await discoverServicesAndCharacteristics(peripheral);
             updateActiveDevices(localName, peripheral, services, characteristics);
 
-            log(`(bluetooth) Connected to ${localName}`);
+            log(`Connected to ${localName}`);
             this.emit("connect", localName);
         } catch (err) {
             error(`Error during Bluetooth discovery/connection process: ${err}`, true);
         }
 
         peripheral.on("disconnect", () => {
-            log(`(bluetooth) Disconnected from ${localName}`);
+            log(`Disconnected from ${localName}`);
             this.emit("disconnect", localName);
             const index = activeDevices.findIndex((device) => device[1] === peripheral);
             if (index !== -1) {
@@ -236,21 +236,45 @@ export default class Bluetooth extends EventEmitter {
  */
 
 async function connectPeripheral(peripheral: Peripheral): Promise<void> {
-    return new Promise((resolve, reject) => {
+    const timeout = new Promise<void>((_, reject) => 
+        setTimeout(() => reject(new Error(`Connection to ${peripheral.advertisement.localName} timed out`)), 10000)
+    );
+
+    const connection = new Promise<void>((resolve, reject) => {
         peripheral.connect((err) => {
-            if (err) reject(`Error connecting to ${peripheral.advertisement.localName}: ${err}`);
+            if (err) reject(new Error(`Error connecting to ${peripheral.advertisement.localName}: ${err}`));
             else resolve();
         });
     });
+
+    try {
+        await Promise.race([connection, timeout]);
+    } catch (err) {
+        error(err as any);
+        throw err;
+    }
 }
 
 async function discoverServicesAndCharacteristics(peripheral: Peripheral): Promise<any> {
-    const services = await discoverServices(peripheral);
-    const characteristics = await Promise.all(
-        services.map((service) => discoverCharacteristics(peripheral.advertisement.localName, service))
+    const timeout = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error("Operation timed out")), 10000)
     );
 
-    return { services, characteristics: characteristics.flat() };
+    const discovery = (async () => {
+        const services = await discoverServices(peripheral);
+        const characteristics = await Promise.all(
+            services.map((service) => discoverCharacteristics(peripheral.advertisement.localName, service))
+        );
+
+        return { services, characteristics: characteristics.flat() };
+    })();
+
+    try {
+        return await Promise.race([discovery, timeout]);
+    } catch (err) {
+        error(`Discovering services/characteristics for ${peripheral.advertisement.localName} failed: ${err}`);
+        return null;
+    }
 }
 
 async function discoverServices(peripheral: Peripheral): Promise<Service[]> {
@@ -359,11 +383,15 @@ function emitData(localName: string, service: string, characteristic: string, da
 }
 
 function log(message: string) {
-    main.emit("log", message);
+    const finalMessage = `(Bluetooth) ${message}`;
+    console.log(finalMessage);
+    main.emit("log", finalMessage);
 }
 
 function error(message: string, exceptional = false) {
-    main.emit("logError", { message, exceptional });
+    const finalError = `(Bluetooth) ${message}`;
+    console.error(finalError);
+    main.emit("logError", { message: finalError, exceptional });
 }
 
 export { Bluetooth };

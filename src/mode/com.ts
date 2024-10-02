@@ -530,8 +530,9 @@ function setupHeartbeat(serial: SerialPortStream, port: string, trackerModel: st
  */
 
 function log(message: string) {
-    console.log(message);
-    main.emit("log", message);
+    const finalMessage = `(COM) ${message}`;
+    console.log(finalMessage);
+    main.emit("log", finalMessage);
 }
 
 function error(message: string, exceptional = false) {

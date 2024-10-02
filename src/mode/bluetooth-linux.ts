@@ -98,46 +98,58 @@ export default class BluetoothLinux extends EventEmitter {
                 }
 
                 device.on("connect", async () => {
-                    log(`(bluetooth/linux) Connected to ${deviceName}`);
+                    log(`Connected to ${deviceName}`);
                     this.emit("connect", deviceName);
 
                     activeDevices.push([deviceName, device]);
 
-                    try {
-                        const gatt = await device.gatt();
-                        const services = await gatt.services();
-
-                        // Discover all services
-                        for (let serviceUUID of services) {
-                            const service = await gatt.getPrimaryService(serviceUUID);
-                            const characteristics = await service.characteristics();
-
-                            // Discover and subscribe to all characteristics
-                            for (let characteristicUUID of characteristics) {
-                                try {
-                                    const characteristic = await service.getCharacteristic(characteristicUUID);
-                                    const flags = await characteristic.getFlags();
-                                    if (!flags.includes("notify")) continue;
-
-                                    await characteristic.startNotifications();
-                                    characteristic.on("valuechanged", (data) => {
-                                        const serviceCleaned = serviceUUID.replace(/-/g, "");
-                                        const characteristicCleaned = characteristicUUID.replace(/-/g, "");
-                                        emitData(deviceName, serviceCleaned, characteristicCleaned, data);
-                                    });
-                                } catch (err) {
-                                    error(`Error subscribing to ${characteristicUUID}: ${err}`);
-                                    continue;
+                    const timeout = new Promise<void>((_, reject) => 
+                        setTimeout(() => reject(new Error("Operation timed out")), 10000)
+                    );
+                    
+                    const discoveryAndSubscription = (async () => {
+                        try {
+                            const gatt = await device.gatt();
+                            const services = await gatt.services();
+                    
+                            // Discover all services
+                            for (let serviceUUID of services) {
+                                const service = await gatt.getPrimaryService(serviceUUID);
+                                const characteristics = await service.characteristics();
+                    
+                                // Discover and subscribe to all characteristics
+                                for (let characteristicUUID of characteristics) {
+                                    try {
+                                        const characteristic = await service.getCharacteristic(characteristicUUID);
+                                        const flags = await characteristic.getFlags();
+                                        if (!flags.includes("notify")) continue;
+                    
+                                        await characteristic.startNotifications();
+                                        characteristic.on("valuechanged", (data) => {
+                                            const serviceCleaned = serviceUUID.replace(/-/g, "");
+                                            const characteristicCleaned = characteristicUUID.replace(/-/g, "");
+                                            emitData(deviceName, serviceCleaned, characteristicCleaned, data);
+                                        });
+                                    } catch (err) {
+                                        error(`Error subscribing to ${characteristicUUID}: ${err}`);
+                                        continue;
+                                    }
                                 }
                             }
+                        } catch (err) {
+                            error(`Error during Bluetooth discovery/connection process: ${err}`);
                         }
+                    })();
+                    
+                    try {
+                        await Promise.race([discoveryAndSubscription, timeout]);
                     } catch (err) {
                         error(`Error during Bluetooth discovery/connection process: ${err}`);
                     }
                 });
 
                 device.on("disconnect", () => {
-                    log(`(bluetooth/linux) Disconnected from ${deviceName}`);
+                    log(`Disconnected from ${deviceName}`);
                     this.emit("disconnect", deviceName);
                     const index = activeDevices.findIndex((device) => device[0] === deviceName);
                     if (index !== -1) {
@@ -331,10 +343,13 @@ function emitData(localName: string, service: string, characteristic: string, da
 }
 
 function log(message: string) {
-    main.emit("log", message);
+    const finalMessage = `(Bluetooth/Linux) ${message}`;
+    console.log(finalMessage);
+    main.emit("log", finalMessage);
 }
 
 function error(message: string, exceptional = false) {
-    console.error(message);
-    main.emit("logError", { message, exceptional });
+    const finalError = `(Bluetooth/Linux) ${message}`;
+    console.error(finalError);
+    main.emit("logError", { message: finalError, exceptional });
 }
