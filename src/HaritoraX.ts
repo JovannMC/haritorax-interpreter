@@ -10,6 +10,7 @@ import { TrackerModel, SensorMode, FPSMode, SensorAutoCorrection, MagStatus } fr
 let debug = false;
 let printIMU = false;
 let printRaw = false;
+let printWrites = false;
 
 let com: COM;
 let bluetooth: Bluetooth | BluetoothLinux;
@@ -255,16 +256,19 @@ let trackerModelEnabled: TrackerModel;
  *
  * @param {boolean} debugMode - Enable logging of debug messages. (true or false)
  * @param {boolean} printTrackerIMUProcessing - Print the tracker IMU processing data (processIMUData()). (true or false)
+ * @param {boolean} printRawData - Print the raw data received from the trackers. (true or false)
+ * @param {boolean} printDataWrites - Print the data writes to the trackers. (true or false)
  *
  * @example
- * let device = new HaritoraXWireless(2);
+ * let device = new HaritoraX("wireless", true, false, false, true);
  **/
 export default class HaritoraX extends EventEmitter {
     constructor(
         trackerModel: TrackerModel,
         debugMode: boolean = false,
         printIMUData: boolean = false,
-        printRawData: boolean = false
+        printRawData: boolean = false,
+        printDataWrites: boolean = false
     ) {
         super();
 
@@ -272,6 +276,7 @@ export default class HaritoraX extends EventEmitter {
         debug = debugMode;
         printIMU = printIMUData;
         printRaw = printRawData;
+        printWrites = printDataWrites;
         main = this;
 
         log(`Set debug mode: ${debug}`, true);
@@ -294,7 +299,7 @@ export default class HaritoraX extends EventEmitter {
             error(`${connectionMode} connection not supported for ${trackerModelEnabled}`, true);
 
         if (connectionMode === "com") {
-            com = new COM(trackerModelEnabled, heartbeatInterval);
+            com = new COM(trackerModelEnabled, heartbeatInterval, printWrites);
             comEnabled = true;
 
             com.startConnection(portNames);
@@ -863,6 +868,21 @@ export default class HaritoraX extends EventEmitter {
 }
 
 function listenToDeviceEvents() {
+    const dataTimeouts: Map<string, NodeJS.Timeout> = new Map();
+
+    const resetDataTimeout = (trackerName: string, connection: COM | Bluetooth | BluetoothLinux) => {
+        if (!trackerName || trackerName === "DONGLE") return;
+        if (dataTimeouts.has(trackerName)) {
+            clearTimeout(dataTimeouts.get(trackerName));
+        }
+        const timeout = setTimeout(() => {
+            log(`No data received within 10 seconds for ${trackerName}, emitting disconnect event.`);
+            connection.emit("disconnect", trackerName);
+            dataTimeouts.delete(trackerName);
+        }, 10000);
+        dataTimeouts.set(trackerName, timeout);
+    };
+
     /*
      * COM events
      */
@@ -870,6 +890,8 @@ function listenToDeviceEvents() {
     if (com) {
         com.on("data", (trackerName: string, port: string, _portId: string, identifier: string, portData: string) => {
             if (!canProcessComData) return;
+
+            resetDataTimeout(trackerName, com);
 
             if (trackerModelEnabled === "wireless") {
                 switch (identifier[0]) {
@@ -970,6 +992,8 @@ function listenToDeviceEvents() {
         bluetooth.on("data", (localName: string, service: string, characteristic: string, data: string) => {
             if (!canProcessBluetoothData || service === "Device Information") return;
 
+            resetDataTimeout(localName, bluetooth);
+
             switch (characteristic) {
                 case "Sensor":
                     processIMUData(Buffer.from(data, "base64"), localName);
@@ -1021,7 +1045,12 @@ function listenToDeviceEvents() {
 
         bluetooth.on("dataRaw", (localName, service, characteristic, data) => {
             if (!printRaw) return;
-            log(`${localName} - Raw data: - ${data} - ${data.toString("base64")} - ${characteristic} - ${service}`, true);
+            log(
+                `${localName} - Raw data: - ${data} - ${data.toString("hex")} -  ${data.toString(
+                    "base64"
+                )} - ${characteristic} - ${service}`,
+                true
+            );
         });
     }
 }
@@ -1277,7 +1306,7 @@ function processTrackerData(data: string, trackerName: string) {
     /*
      * Currently unsure what other data a0/a1 could represent other than trying to find the trackers, I see other values for it too reporting every second.
      * This could also be used to report calibration data when running the calibration through the software, or a "heartbeat" packet.
-     * 
+     *
      * This is most likely related to signal info about the dongle, such as signal strength/RSSI.
      */
 
@@ -1728,7 +1757,7 @@ function writeToPort(port: string, rawData: string, trackerName = "unknown") {
     ports[port].write(data, (err: any) => {
         if (err) {
             error(`${trackerName} - Error writing data to serial port ${port}: ${err}`);
-        } else {
+        } else if (printWrites) {
             log(`${trackerName} - Data written to serial port ${port}: ${rawData.toString().replace(/\r\n/g, " ")}`);
         }
     });
@@ -1755,6 +1784,7 @@ function writeToBluetooth(trackerName: string, characteristic: string, value: nu
     try {
         const buffer = Buffer.from([value]);
         bluetooth.write(trackerName, settingsService, characteristic, buffer);
+        if (printWrites) log(`Data written to characteristic ${characteristic} ${trackerName}: ${value}`);
     } catch (err) {
         error(`Error writing to Bluetooth tracker ${trackerName}: ${err}`);
     }

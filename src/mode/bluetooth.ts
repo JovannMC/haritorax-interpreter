@@ -236,7 +236,7 @@ export default class Bluetooth extends EventEmitter {
  */
 
 async function connectPeripheral(peripheral: Peripheral): Promise<void> {
-    const timeout = new Promise<void>((_, reject) => 
+    const timeout = new Promise<void>((_, reject) =>
         setTimeout(() => reject(new Error(`Connection to ${peripheral.advertisement.localName} timed out`)), 10000)
     );
 
@@ -256,9 +256,7 @@ async function connectPeripheral(peripheral: Peripheral): Promise<void> {
 }
 
 async function discoverServicesAndCharacteristics(peripheral: Peripheral): Promise<any> {
-    const timeout = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error("Operation timed out")), 10000)
-    );
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("Operation timed out")), 10000));
 
     const discovery = (async () => {
         const services = await discoverServices(peripheral);

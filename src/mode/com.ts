@@ -38,13 +38,15 @@ let activePorts: ActivePorts = {};
 let trackersAssigned = false;
 let trackerModelEnabled: string;
 let heartbeatInterval = 5000; // in milliseconds
+let printWrites = true;
 
 export default class COM extends EventEmitter {
-    constructor(trackerModel: string, heartbeat?: number) {
+    constructor(trackerModel: string, heartbeat?: number, printSerialWrites?: boolean) {
         super();
         main = this;
         trackerModelEnabled = trackerModel;
         heartbeatInterval = heartbeat;
+        printWrites = printSerialWrites;
         log(`Initialized COM module with settings: ${trackerModelEnabled} ${heartbeatInterval}`);
     }
 
@@ -363,7 +365,7 @@ export default class COM extends EventEmitter {
 
     write(port: SerialPortStream, rawData: string, callbackError?: Function) {
         const data = `\n${rawData}\n`;
-    
+
         port.write(data, (err: any) => {
             if (err) {
                 if (callbackError) {
@@ -371,7 +373,7 @@ export default class COM extends EventEmitter {
                 } else {
                     error(`Error writing data to serial port ${port.path}: ${err}`);
                 }
-            } else {
+            } else if (printWrites) {
                 log(`(DONGLE) - Data written to serial port ${port.path}: ${rawData.toString().replace(/\r\n/g, " ")}`);
             }
         });
@@ -519,7 +521,7 @@ function setupHeartbeat(serial: SerialPortStream, port: string, trackerModel: st
     setInterval(() => {
         if (serial.isOpen) {
             const command = trackerModel === "wired" ? "report send info\nblt send info" : "i:";
-            log(`Sending heartbeat to port ${port}`);
+            if (printWrites) log(`Sending heartbeat to port ${port}`);
             main.write(serial, command);
         }
     }, heartbeatInterval);

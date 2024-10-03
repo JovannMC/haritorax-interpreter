@@ -103,27 +103,27 @@ export default class BluetoothLinux extends EventEmitter {
 
                     activeDevices.push([deviceName, device]);
 
-                    const timeout = new Promise<void>((_, reject) => 
+                    const timeout = new Promise<void>((_, reject) =>
                         setTimeout(() => reject(new Error("Operation timed out")), 10000)
                     );
-                    
+
                     const discoveryAndSubscription = (async () => {
                         try {
                             const gatt = await device.gatt();
                             const services = await gatt.services();
-                    
+
                             // Discover all services
                             for (let serviceUUID of services) {
                                 const service = await gatt.getPrimaryService(serviceUUID);
                                 const characteristics = await service.characteristics();
-                    
+
                                 // Discover and subscribe to all characteristics
                                 for (let characteristicUUID of characteristics) {
                                     try {
                                         const characteristic = await service.getCharacteristic(characteristicUUID);
                                         const flags = await characteristic.getFlags();
                                         if (!flags.includes("notify")) continue;
-                    
+
                                         await characteristic.startNotifications();
                                         characteristic.on("valuechanged", (data) => {
                                             const serviceCleaned = serviceUUID.replace(/-/g, "");
@@ -140,7 +140,7 @@ export default class BluetoothLinux extends EventEmitter {
                             error(`Error during Bluetooth discovery/connection process: ${err}`);
                         }
                     })();
-                    
+
                     try {
                         await Promise.race([discoveryAndSubscription, timeout]);
                     } catch (err) {
