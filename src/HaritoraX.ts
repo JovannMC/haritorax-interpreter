@@ -321,7 +321,7 @@ export default class HaritoraX extends EventEmitter {
         if (com || bluetooth) {
             setTimeout(() => {
                 canSendButtonData = true;
-            }, 500);
+            }, 2000);
         }
 
         listenToDeviceEvents();
@@ -350,6 +350,8 @@ export default class HaritoraX extends EventEmitter {
             bluetooth.stopConnection();
             bluetoothEnabled = false;
         }
+
+        removedDevices.forEach((device) => removeDataTimeout(device));
 
         log(`Stopped ${connectionMode} connection, removed devices: ${removedDevices.join(", ")}`, true);
         canSendButtonData = false;
@@ -579,7 +581,7 @@ export default class HaritoraX extends EventEmitter {
         // Global
         let serial, model, version, comm, comm_next;
 
-        if (comEnabled) {
+        if (comEnabled && !isWirelessBTTracker(trackerName)) {
             // Get device info from COM by sending "i0" and "i1" commands
             const trackerPort = com.getTrackerPort(trackerName);
             const trackerPortId = com.getTrackerPortId(trackerName);
@@ -638,7 +640,7 @@ export default class HaritoraX extends EventEmitter {
         let batteryRemaining, batteryVoltage, chargeStatus;
 
         // Get battery info from COM
-        if (comEnabled) {
+        if (comEnabled && !isWirelessBTTracker(trackerName)) {
             const trackerPort = com.getTrackerPort(trackerName);
             const trackerPortId = com.getTrackerPortId(trackerName);
 
@@ -647,12 +649,15 @@ export default class HaritoraX extends EventEmitter {
             const rawValue = `v${trackerPortId}:`;
 
             writeToPort(trackerPort, rawValue, trackerName);
+
+            // Wait for the battery info to be sent back
+            await new Promise((resolve) => setTimeout(resolve, 500));
         }
 
         // Check if battery info is already available
-        if (trackerBattery.has(trackerName)) {
+        if (trackerBattery.has(trackerName) && !isWirelessBTTracker(trackerName)) {
             [batteryRemaining, batteryVoltage, chargeStatus] = trackerBattery.get(trackerName);
-        } else if (trackerName.startsWith("HaritoraXW")) {
+        } else if (isWirelessBTTracker(trackerName)) {
             // Attempt to read battery info for wireless BT trackers
             log(`Reading battery info for ${trackerName}...`);
             try {
@@ -867,9 +872,15 @@ export default class HaritoraX extends EventEmitter {
     }
 }
 
-function listenToDeviceEvents() {
-    const dataTimeouts: Map<string, NodeJS.Timeout> = new Map();
+const removeDataTimeout = (trackerName: string) => {
+    if (dataTimeouts.has(trackerName)) {
+        clearTimeout(dataTimeouts.get(trackerName));
+        dataTimeouts.delete(trackerName);
+    }
+};
 
+const dataTimeouts: Map<string, NodeJS.Timeout> = new Map();
+function listenToDeviceEvents() {
     const resetDataTimeout = (trackerName: string, connection: COM | Bluetooth | BluetoothLinux) => {
         if (!trackerName || trackerName === "DONGLE") return;
         if (dataTimeouts.has(trackerName)) {
@@ -879,6 +890,11 @@ function listenToDeviceEvents() {
             log(`No data received within 10 seconds for ${trackerName}, emitting disconnect event.`);
             connection.emit("disconnect", trackerName);
             dataTimeouts.delete(trackerName);
+            activeDevices.find((device) => device[0] === trackerName) &&
+                activeDevices.splice(
+                    activeDevices.findIndex((device) => device[0] === trackerName),
+                    1
+                );
         }, 10000);
         dataTimeouts.set(trackerName, timeout);
     };
@@ -1033,6 +1049,7 @@ function listenToDeviceEvents() {
 
         bluetooth.on("disconnect", (trackerName) => {
             main.emit("disconnect", trackerName);
+            removeDataTimeout(trackerName);
         });
 
         bluetooth.on("log", (message: string) => {
@@ -1315,6 +1332,7 @@ function processTrackerData(data: string, trackerName: string) {
     if (data === "7f7f7f7f7f7f") {
         if (!activeDevices.includes(trackerName)) return;
         activeDevices.splice(activeDevices.indexOf(trackerName), 1);
+        removeDataTimeout(trackerName);
         main.emit("disconnect", trackerName);
         log(`Searching for tracker ${trackerName}...`);
     }
@@ -1541,7 +1559,8 @@ function processButtonData(data: string, trackerName: string, characteristic?: s
             buttonPressed = processWiredTrackerData(data, trackerName, currentButtons);
         }
 
-        logButtonPress(trackerName, buttonPressed, currentButtons);
+        if (buttonPressed) log(`Button ${buttonPressed} pressed on tracker ${trackerName}. Current state: ${currentButtons}`);
+
         trackerButtons.set(trackerName, currentButtons);
         main.emit("button", trackerName, buttonPressed, isOn, ...currentButtons);
     } catch (err) {
@@ -1618,14 +1637,6 @@ function processWiredTrackerData(data: string, trackerName: string, currentButto
     return undefined;
 }
 
-function logButtonPress(trackerName: string, buttonPressed: string | undefined, currentButtons: number[]) {
-    if (buttonPressed) {
-        log(`Button ${buttonPressed} pressed on tracker ${trackerName}. Current state: ${currentButtons}`);
-    } else {
-        log(`No button press detected for tracker ${trackerName}. Current state: ${currentButtons}`);
-    }
-}
-
 /**
  * Processes the battery data received from the tracker by the dongle.
  * It contains the information about the battery percentage, voltage, and charge status of the tracker.
@@ -1648,7 +1659,7 @@ function processBatteryData(data: string, trackerName: string, characteristic?: 
         if (status !== undefined) log(`Tracker ${trackerName} Status: ${status}`);
     };
 
-    if (comEnabled && !trackerName.startsWith("HaritoraXW")) {
+    if (comEnabled && !isWirelessBTTracker(trackerName)) {
         try {
             const batteryInfo = JSON.parse(data);
             batteryData[0] = batteryInfo["battery remaining"];
@@ -1796,7 +1807,12 @@ async function readFromBluetooth(trackerName: string, characteristic: string) {
 }
 
 function parseBluetoothData(data: ArrayBufferLike | string) {
-    if (typeof data === "string") data = Buffer.from(data, "base64");
+    if (typeof data === "string") {
+        data = Buffer.from(data, "base64");
+    }
+    if (data instanceof Buffer) {
+        data = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+    }
     return new DataView(data).getInt8(0);
 }
 
