@@ -1198,17 +1198,6 @@ function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) 
  * @see {@link https://github.com/OCSYT/SlimeTora/}
  **/
 
-let previousGravity: Vector3 = { x: 0, y: 0, z: 0 };
-const alpha = 0.1; // Smoothing factor (0 < alpha < 1)
-
-function lowPassFilter(current: Vector3, previous: Vector3, alpha: number) {
-    return {
-        x: alpha * current.x + (1 - alpha) * previous.x,
-        y: alpha * current.y + (1 - alpha) * previous.y,
-        z: alpha * current.z + (1 - alpha) * previous.z,
-    };
-}
-
 function decodeIMUPacket(data: Buffer, trackerName: string) {
     if (!trackerName) return;
 
@@ -1298,11 +1287,7 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
             z: gravityRaw.z - hFinal[3] * 1.2,
         };
 
-        // Apply low-pass filter to gravity data
-        const filteredGravity = lowPassFilter(gravity, previousGravity, alpha);
-        previousGravity = filteredGravity;
-
-        return { rotation, gravity: filteredGravity, ankle, magStatus };
+        return { rotation, gravity, ankle, magStatus };
     } catch (err) {
         error(`Error decoding IMU packet: ${err}`, false);
     }
