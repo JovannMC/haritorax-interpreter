@@ -21,17 +21,14 @@ jobs:
               with:
                   node-version: "20"
                   registry-url: https://registry.npmjs.org/
-            - name: Install pnpm
-              run: npm install -g pnpm
 
             - name: Install dependencies
-              run: pnpm install
+              run: npm install
 
             - name: Build package
-              run: pnpm run build
+              run: npm run build
 
             - name: Publish package
-              if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-              run: pnpm publish
+              run: npm publish
               env:
                   NODE_AUTH_TOKEN: ${{secrets.npm_token}}
