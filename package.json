@@ -10,7 +10,6 @@
   "description": "Communicate with the HaritoraX trackers",
   "main": "./dist/index.js",
   "scripts": {
-    "preinstall": "npx only-allow pnpm",
     "start": "npm run build && node ./test/test.js",
     "build": "tsc && tsc -d"
   },
@@ -33,10 +32,9 @@
     "node-ble": "^1.11.0"
   },
   "devDependencies": {
-    "eslint": "^9.10.0",
-    "node-gyp-build": "4.8.0",
+    "eslint": "^9.12.0",
+    "node-gyp-build": "^4.8.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.6.2"
-  },
-  "packageManager": "pnpm@9.7.1+sha512.faf344af2d6ca65c4c5c8c2224ea77a81a5e8859cbc4e06b1511ddce2f0151512431dd19e6aff31f2c6a8f5f2aced9bd2273e1fed7dd4de1868984059d2c4247"
+  }
 }
