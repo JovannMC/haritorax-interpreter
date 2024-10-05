@@ -407,7 +407,7 @@ export default class HaritoraX extends EventEmitter {
 
         logSettings(trackerName, settings);
         log(
-            `Tracker ${trackerName} settings applied: ${JSON.stringify([
+            `Tracker "${trackerName}" settings applied: ${JSON.stringify([
                 sensorMode,
                 fpsMode,
                 sensorAutoCorrection,
@@ -515,7 +515,7 @@ export default class HaritoraX extends EventEmitter {
         } else if (trackerModelEnabled === "wireless" && comEnabled && !trackerName.startsWith("HaritoraXW")) {
             ({ sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection } = await getTrackerSettingsFromMap(trackerName));
         } else {
-            error(`Cannot get settings for ${trackerName} settings.`);
+            error(`Cannot get tracker settings for "${trackerName}".`);
             return null;
         }
 
@@ -536,10 +536,10 @@ export default class HaritoraX extends EventEmitter {
         const buttons = trackerButtons.get(trackerName);
         if (buttons) {
             const [mainButton, subButton, sub2Button] = buttons;
-            log(`Tracker ${trackerName} main button: ${mainButton}, sub button: ${subButton}, sub2 button: ${sub2Button}`, true);
+            log(`Tracker "${trackerName}" main button: ${mainButton}, sub button: ${subButton}, sub2 button: ${sub2Button}`, true);
             return { mainButton, subButton, sub2Button };
         }
-        log(`Tracker ${trackerName} buttons not found`);
+        log(`Tracker "${trackerName}" buttons not found`);
         return null;
     }
 
@@ -594,7 +594,7 @@ export default class HaritoraX extends EventEmitter {
         if (isWirelessBTTracker(trackerName)) {
             const trackerObject = bluetooth.getActiveDevices().find((device) => device[0] === trackerName);
             if (!trackerObject) {
-                error(`Tracker ${trackerName} not found`);
+                error(`Tracker "${trackerName}" not found`);
                 return null;
             }
 
@@ -618,11 +618,11 @@ export default class HaritoraX extends EventEmitter {
                 [comm, comm_next] = [deviceInfo[COMM_INDEX], deviceInfo[COMM_NEXT_INDEX]];
             }
         } else {
-            error(`Tracker ${trackerName} not found or unsupported model enabled`);
+            error(`Tracker "${trackerName}" not found or unsupported model enabled`);
             return null;
         }
 
-        log(`Tracker ${trackerName} info: ${version}, ${model}, ${serial}, ${comm}, ${comm_next}`, true);
+        log(`Tracker "${trackerName}" info: ${version}, ${model}, ${serial}, ${comm}, ${comm_next}`, true);
         main.emit("info", trackerName, version, model, serial, comm, comm_next);
         return true;
     }
@@ -662,16 +662,16 @@ export default class HaritoraX extends EventEmitter {
             log(`Reading battery info for ${trackerName}...`);
             try {
                 const batteryLevelBuffer = await bluetooth.read(trackerName, batteryService, batteryLevelCharacteristic);
-                if (!batteryLevelBuffer) error(`Tracker ${trackerName} battery level not found`);
+                if (!batteryLevelBuffer) error(`Tracker "${trackerName}" battery level not found`);
                 batteryRemaining = new DataView(batteryLevelBuffer).getUint8(0);
 
                 const batteryVoltageBuffer = await bluetooth.read(trackerName, settingsService, batteryVoltageCharacteristic);
-                if (!batteryVoltageBuffer) error(`Tracker ${trackerName} battery voltage not found`);
+                if (!batteryVoltageBuffer) error(`Tracker "${trackerName}" battery voltage not found`);
                 batteryVoltage = new DataView(batteryVoltageBuffer).getInt16(0, true);
 
                 const chargeStatusBuffer = await bluetooth.read(trackerName, settingsService, chargeStatusCharacteristic);
                 const chargeStatusHex = Buffer.from(chargeStatusBuffer).toString("hex");
-                if (!chargeStatusBuffer) error(`Tracker ${trackerName} charge status not found`);
+                if (!chargeStatusBuffer) error(`Tracker "${trackerName}" charge status not found`);
                 switch (chargeStatusHex) {
                     case "00":
                         chargeStatus = "discharging";
@@ -693,13 +693,13 @@ export default class HaritoraX extends EventEmitter {
                 return null;
             }
         } else {
-            error(`Tracker ${trackerName} battery info not found`);
+            error(`Tracker "${trackerName}" battery info not found`);
             return null;
         }
 
-        log(`Tracker ${trackerName} battery remaining: ${batteryRemaining}%`, true);
-        log(`Tracker ${trackerName} battery voltage: ${batteryVoltage}`, true);
-        log(`Tracker ${trackerName} charge status: ${chargeStatus}`, true);
+        log(`Tracker "${trackerName}" battery remaining: ${batteryRemaining}%`, true);
+        log(`Tracker "${trackerName}" battery voltage: ${batteryVoltage}`, true);
+        log(`Tracker "${trackerName}" charge status: ${chargeStatus}`, true);
         main.emit("battery", trackerName, batteryRemaining, batteryVoltage, chargeStatus);
         return true;
     }
@@ -716,22 +716,22 @@ export default class HaritoraX extends EventEmitter {
     async fireTrackerMag(trackerName: string) {
         if (trackerMag.has(trackerName)) {
             let magStatus = trackerMag.get(trackerName);
-            log(`Tracker ${trackerName} magnetometer status: ${magStatus}`, true);
+            log(`Tracker "${trackerName}" magnetometer status: ${magStatus}`, true);
             main.emit("mag", trackerName, magStatus);
         } else {
             // Read from BLE device
             if (!trackerName.startsWith("HaritoraXW")) {
-                error(`Tracker ${trackerName} magnetometer status not found`);
+                error(`Tracker "${trackerName}" magnetometer status not found`);
                 return;
             }
 
             try {
                 const magStatusBuffer = await bluetooth.read(trackerName, trackerService, magnetometerCharacteristic);
-                if (!magStatusBuffer) error(`Tracker ${trackerName} magnetometer status not found`);
+                if (!magStatusBuffer) error(`Tracker "${trackerName}" magnetometer status not found`);
                 const magData = Buffer.from(magStatusBuffer).readUInt8(0);
                 const magStatus = getMagStatus(magData);
                 trackerMag.set(trackerName, magStatus);
-                log(`Tracker ${trackerName} magnetometer status: ${magStatus}`, true);
+                log(`Tracker "${trackerName}" magnetometer status: ${magStatus}`, true);
                 main.emit("mag", trackerName, magStatus);
             } catch (err) {
                 error(`Error reading mag status: ${err}`);
@@ -850,7 +850,7 @@ export default class HaritoraX extends EventEmitter {
             }
         })();
 
-        log(`Manually powered off tracker ${trackerName} (Port ${trackerPort}, port id ${trackerPortId})`, true);
+        log(`Manually powered off tracker "${trackerName}" (Port ${trackerPort}, port id ${trackerPortId})`, true);
     }
 
     /**
@@ -930,7 +930,7 @@ function listenToDeviceEvents() {
                         processInfoData(portData, trackerName);
                         break;
                     default:
-                        log(`${port} - Unknown data from ${trackerName} (identifier: ${identifier}): ${portData}`);
+                        log(`${port} - Unknown data from "${trackerName}" (identifier: ${identifier}): ${portData}`);
                 }
             } else if (trackerModelEnabled === "wired") {
                 switch (identifier[0]) {
@@ -971,18 +971,18 @@ function listenToDeviceEvents() {
                         processInfoData(portData, "HaritoraXWired");
                         break;
                     default:
-                        log(`${port} - Unknown data from ${trackerName} (identifier: ${identifier}): ${portData}`);
+                        log(`${port} - Unknown data from "${trackerName}" (identifier: ${identifier}): ${portData}`);
                 }
             }
         });
 
         com.on("paired", (trackerName: string, port: string, portId: string) => {
-            log(`Tracker ${trackerName} paired, emitting paired event`, true);
+            log(`Tracker "${trackerName}" paired, emitting paired event`, true);
             main.emit("paired", trackerName, port, portId);
         });
 
         com.on("unpaired", (trackerName: string) => {
-            log(`Tracker ${trackerName} unpaired, emitting unpaired event`, true);
+            log(`Tracker "${trackerName}" unpaired, emitting unpaired event`, true);
             main.emit("unpaired", trackerName);
         });
 
@@ -1158,7 +1158,7 @@ function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) 
 
     // If tracker isn't in activeDevices, add it and emit "connect" event
     if (!activeDevices.includes(trackerName) && (comEnabled || bluetoothEnabled)) {
-        log(`Tracker ${trackerName} isn't in active devices, adding and emitting connect event`);
+        log(`Tracker "${trackerName}" isn't in active devices, adding and emitting connect event`);
 
         const mode = trackerName.startsWith("HaritoraXW") ? "bluetooth" : "com";
         const port = trackerName.startsWith("HaritoraXW") ? undefined : com.getTrackerPort(trackerName);
@@ -1174,20 +1174,20 @@ function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) 
 
         if (printIMU) {
             log(
-                `Tracker ${trackerName} rotation: (${rotation.x.toFixed(5)}, ${rotation.y.toFixed(5)}, ${rotation.z.toFixed(
+                `Tracker "${trackerName}" rotation: (${rotation.x.toFixed(5)}, ${rotation.y.toFixed(5)}, ${rotation.z.toFixed(
                     5
                 )}, ${rotation.w.toFixed(5)})`
             );
-            log(`Tracker ${trackerName} gravity: (${gravity.x.toFixed(5)}, ${gravity.y.toFixed(5)}, ${gravity.z.toFixed(5)})`);
-            if (ankle) log(`Tracker ${trackerName} ankle: ${ankle}`);
-            if (ankleValue) log(`Tracker ${trackerName} (wired/manual) ankle: ${ankleValue}`);
-            if (magStatus) log(`Tracker ${trackerName} magnetometer status: ${magStatus}`);
+            log(`Tracker "${trackerName}" gravity: (${gravity.x.toFixed(5)}, ${gravity.y.toFixed(5)}, ${gravity.z.toFixed(5)})`);
+            if (ankle) log(`Tracker "${trackerName}" ankle: ${ankle}`);
+            if (ankleValue) log(`Tracker "${trackerName}" (wired/manual) ankle: ${ankleValue}`);
+            if (magStatus) log(`Tracker "${trackerName}" magnetometer status: ${magStatus}`);
         }
 
         main.emit("imu", trackerName, rotation, gravity, ankle ? ankle : ankleValue);
         if (!trackerName.startsWith("HaritoraXW")) main.emit("mag", trackerName, magStatus);
     } catch (err) {
-        error(`Error decoding tracker ${trackerName} IMU packet data: ${err}`, false);
+        error(`Error decoding tracker "${trackerName}" IMU packet data: ${err}`, false);
     }
 }
 
@@ -1352,7 +1352,7 @@ function processMagData(data: string, trackerName: string) {
             if (magData === null) return null;
 
             magStatus = getMagStatus(magData);
-            log(`Tracker ${trackerName} mag status: ${magStatus}`);
+            log(`Tracker "${trackerName}" mag status: ${magStatus}`);
             trackerMag.set(trackerName, magStatus);
             main.emit("mag", trackerName, magStatus);
             return magStatus;
@@ -1574,11 +1574,11 @@ function processWirelessTrackerData(data: string, trackerName: string, currentBu
     }
 
     if (data[0] === "0" || data[7] === "f" || data[8] === "f" || data[10] === "f" || data[11] === "f") {
-        log(`Tracker ${trackerName} is off/turning off...`);
+        log(`Tracker "${trackerName}" is off/turning off...`);
         log(`Raw data: ${data}`);
         isOn = false;
     } else {
-        log(`Tracker ${trackerName} is on/turning on...`);
+        log(`Tracker "${trackerName}" is on/turning on...`);
         log(`Raw data: ${data}`);
         isOn = true;
     }
@@ -1639,9 +1639,9 @@ function processBatteryData(data: string, trackerName: string, characteristic?: 
 
     const batteryData: [number | undefined, number | undefined, string | undefined] = [undefined, undefined, undefined];
     const logBatteryInfo = (remaining: number | undefined, voltage: number | undefined, status: string | undefined) => {
-        if (remaining !== undefined) log(`Tracker ${trackerName} remaining: ${remaining}%`);
-        if (voltage !== undefined) log(`Tracker ${trackerName} voltage: ${voltage}`);
-        if (status !== undefined) log(`Tracker ${trackerName} Status: ${status}`);
+        if (remaining !== undefined) log(`Tracker "${trackerName}" remaining: ${remaining}%`);
+        if (voltage !== undefined) log(`Tracker "${trackerName}" voltage: ${voltage}`);
+        if (status !== undefined) log(`Tracker "${trackerName}" Status: ${status}`);
     };
 
     if (comEnabled && !isWirelessBTTracker(trackerName)) {
@@ -1803,7 +1803,7 @@ function parseBluetoothData(data: ArrayBufferLike | string) {
 
 function logSettings(trackerName: string, settings: Object, rawHexData?: string) {
     if (trackerName === "DONGLE") return;
-    log(`Tracker ${trackerName} settings:`);
+    log(`Tracker "${trackerName}" settings:`);
     Object.entries(settings).forEach(([key, value]) => log(`${key}: ${value}`));
     if (rawHexData) log(`Raw hex data: ${rawHexData}`);
 }
@@ -1885,8 +1885,8 @@ async function getTrackerSettingsFromMap(trackerName: string) {
             ankleMotionDetection: settings[3],
         });
     } else {
-        error(`Tracker ${trackerName} settings not found in trackerSettings map.`);
-        return Promise.reject(`Tracker ${trackerName} settings not found in trackerSettings map.`);
+        error(`Tracker "${trackerName}" settings not found in trackerSettings map.`);
+        return Promise.reject(`Tracker "${trackerName}" settings not found in trackerSettings map.`);
     }
 }
 

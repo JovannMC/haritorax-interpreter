@@ -305,7 +305,7 @@ export default class COM extends EventEmitter {
             }, index * 1000)
         );
 
-        log(`Unpaired ${trackerName} on port ${port} with port ID ${portId}`);
+        log(`Unpaired "${trackerName}" on port ${port} with port ID ${portId}`);
         resetTrackerAssignment(trackerName);
         this.emit("unpaired", trackerName, port, portId);
     }
