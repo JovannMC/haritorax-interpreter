@@ -15,6 +15,39 @@ Check out the Haritora-GX(6/2) proof-of-concept repository here: https://github.
 
 Will write actual documentation at some point, for now refer to the source code, examples, and JSDoc comments. You may also see how it's used in [SlimeTora](https://github.com/OCSYT/SlimeTora)!
 
+## Linux-specific instructions
+
+For Linux users, you (or your users) need to do some setup depending on the connection mode so the package can communicate with the trackers:
+
+### COM/Serial port
+
+- Run `sudo usermod -a -G dialout $USER` in your terminal
+- Restart your computer
+
+### Bluetooth (LE)
+
+> See https://github.com/chrvadala/node-ble/tree/main?tab=readme-ov-file#provide-permissions for more info
+
+- Create a new dbus rule (e.g. `/etc/dbus-1/system.d/node-ble.conf`)
+- Insert the following as the contents, changing `%userid%` with your user
+
+```
+<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
+  "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <policy user="%userid%">
+   <allow own="org.bluez"/>
+    <allow send_destination="org.bluez"/>
+    <allow send_interface="org.bluez.GattCharacteristic1"/>
+    <allow send_interface="org.bluez.GattDescriptor1"/>
+    <allow send_interface="org.freedesktop.DBus.ObjectManager"/>
+    <allow send_interface="org.freedesktop.DBus.Properties"/>
+  </policy>
+</busconfig>
+```
+
+- Restart your computer
+
 ## Supported devices
 
 | Device             | Supported | Elbow/Hip support |
