@@ -19,9 +19,12 @@ Will write actual documentation at some point, for now refer to the source code,
 
 For Linux users, you (or your users) need to do some setup depending on the connection mode so the package can communicate with the trackers:
 
-### COM/Serial port
+### Bluetooth Classic (SPP)/COM/Serial port
 
-- Run `sudo usermod -a -G dialout $USER` in your terminal
+- Run the following commands in your terminal:
+  - `sudo usermod -a -G dialout $USER`
+  - `sudo usermod -a -G tty $USER`
+  - `sudo usermod -a -G uucp $USER` (for Arch-based distros)
 - Restart your computer
 
 ### Bluetooth (LE)
@@ -105,5 +108,6 @@ This package is licensed under the [MIT](https://opensource.org/license/mit/) Li
 ## Acknowledgements
 
 - [SlimeTora](https://github.com/OCSYT/SlimeTora/) - BracketProto - original inspiration for project, code for turning gravity into acceleration values
+- [SlimeVR](https://github.com/SlimeVR) - SlimeVR contributors - the inspiration for SlimeTora, which then inspired this project
 - [haritorax-slimevr-bridge](https://github.com/sim1222/haritorax-slimevr-bridge) - sim1222 - math for decoding the IMU packet data
-- [ShiftAll Discord](https://discord.gg/vqXmAFy5RC) - community - helping with testing the package (via [SlimeTora](https://github.com/OCSYT/SlimeTora/))
+- [Shiftall Discord](https://discord.gg/vqXmAFy5RC) - community - helping with testing the package (via [SlimeTora](https://github.com/OCSYT/SlimeTora/))
