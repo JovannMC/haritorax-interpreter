@@ -2,10 +2,10 @@
 
 import { Buffer } from "buffer";
 import { EventEmitter } from "events";
-import { COM } from "./mode/com.js";
-import Bluetooth from "./mode/bluetooth.js";
 import BluetoothLinux from "./mode/bluetooth-linux.js";
-import { TrackerModel, SensorMode, FPSMode, SensorAutoCorrection, MagStatus } from "./types.js";
+import Bluetooth from "./mode/bluetooth.js";
+import { COM } from "./mode/com.js";
+import { FPSMode, MagStatus, SensorAutoCorrection, SensorMode, TrackerModel } from "./types.js";
 
 let debug = false;
 let printIMU = false;
@@ -491,7 +491,7 @@ export default class HaritoraX extends EventEmitter {
         let sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection;
 
         if (trackerModelEnabled === "wired" && trackerName === "HaritoraXWired") {
-            ({ sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection } = await getTrackerSettingsFromMap(trackerName));
+            ({ sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection } = getTrackerSettingsFromMap(trackerName));
         } else if (isWirelessBTTracker(trackerName)) {
             if (forceBluetoothRead || !trackerSettings.has(trackerName)) {
                 try {
@@ -508,12 +508,13 @@ export default class HaritoraX extends EventEmitter {
                     error(`Error reading characteristic: ${err}`);
                 }
             } else {
-                ({ sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection } = await getTrackerSettingsFromMap(
-                    trackerName
-                ));
+                // TODO: request settings from dongle
+                // requires being able to send and then wait for response (which is pretty difficult cause the dongle is constantly sending data..)
+                // probably have an array that stores what label was written to, use data event to check if data is for the label, remove the label from the array, and respond with response
+                ({ sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection } = getTrackerSettingsFromMap(trackerName));
             }
         } else if (trackerModelEnabled === "wireless" && comEnabled && !trackerName.startsWith("HaritoraXW")) {
-            ({ sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection } = await getTrackerSettingsFromMap(trackerName));
+            ({ sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection } = getTrackerSettingsFromMap(trackerName));
         } else {
             error(`Cannot get tracker settings for "${trackerName}".`);
             return null;
@@ -536,7 +537,10 @@ export default class HaritoraX extends EventEmitter {
         const buttons = trackerButtons.get(trackerName);
         if (buttons) {
             const [mainButton, subButton, sub2Button] = buttons;
-            log(`Tracker "${trackerName}" main button: ${mainButton}, sub button: ${subButton}, sub2 button: ${sub2Button}`, true);
+            log(
+                `Tracker "${trackerName}" main button: ${mainButton}, sub button: ${subButton}, sub2 button: ${sub2Button}`,
+                true
+            );
             return { mainButton, subButton, sub2Button };
         }
         log(`Tracker "${trackerName}" buttons not found`);
@@ -934,7 +938,8 @@ function listenToDeviceEvents() {
                 }
             } else if (trackerModelEnabled === "wired") {
                 switch (identifier[0]) {
-                    // alright, so for some ungodly reason shiftall decided to use different letters for different number of trackers, AND if they have ankle motion enabled or not
+                    // alright, so for some ungodly reason shiftall decided to use different letters for different number of trackers,
+                    // AND if they have ankle motion enabled or not
                     // WHAT THE HELL.
                     // x = 5 trackers
                     // p = 6 trackers
@@ -943,7 +948,7 @@ function listenToDeviceEvents() {
                     // h = 7 trackers (w/ ankle motion)
                     // g = 8 trackers
                     // h = 8 trackers (w/ ankle motion)
-                    // (yes. duplicates.)
+                    // (yes. there's even duplicates.)
                     case "x":
                     case "r":
                     case "p":
@@ -1867,7 +1872,7 @@ function removeActiveDevices(deviceTypeToRemove: string) {
  * getTrackerSettings() function helpers
  */
 
-async function getTrackerSettingsFromMap(trackerName: string) {
+function getTrackerSettingsFromMap(trackerName: string) {
     const settings = trackerSettings.get(trackerName);
     if (settings) {
         const settingsToLog = {
@@ -1878,15 +1883,15 @@ async function getTrackerSettingsFromMap(trackerName: string) {
         };
         logSettings(trackerName, settingsToLog);
 
-        return Promise.resolve({
+        return {
             sensorMode: settings[0],
             fpsMode: settings[1],
             sensorAutoCorrection: settings[2],
             ankleMotionDetection: settings[3],
-        });
+        };
     } else {
         error(`Tracker "${trackerName}" settings not found in trackerSettings map.`);
-        return Promise.reject(`Tracker "${trackerName}" settings not found in trackerSettings map.`);
+        return;
     }
 }
 
