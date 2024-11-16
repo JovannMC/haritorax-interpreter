@@ -105,4 +105,4 @@ const getPairedDevices = (): Promise<BluetoothDevice[]> => {
     }
 };
 
-export { getPairedDevices, BluetoothDevice };
+export { BluetoothDevice, getPairedDevices };

@@ -2,7 +2,7 @@ function addUUIDs(map: Map<string, string>, uuid: string, name: string) {
     const fullUUID = toFullUUID(uuid);
     map.set(uuid, name);
     map.set(fullUUID, name);
-    map.set(fullUUID.replace(/-/g, ''), name);
+    map.set(fullUUID.replace(/-/g, ""), name);
 }
 
 function toFullUUID(shortUUID: string): string {
@@ -13,11 +13,14 @@ function toFullUUID(shortUUID: string): string {
 }
 
 function formatUUID(uuid: string): string {
-    const cleanedUUID = uuid.replace(/-/g, '');
+    const cleanedUUID = uuid.replace(/-/g, "");
     if (cleanedUUID.length !== 32) {
         throw new Error(`Invalid UUID length: ${cleanedUUID.length}`);
     }
-    return `${cleanedUUID.slice(0, 8)}-${cleanedUUID.slice(8, 12)}-${cleanedUUID.slice(12, 16)}-${cleanedUUID.slice(16, 20)}-${cleanedUUID.slice(20)}`;
+    return `${cleanedUUID.slice(0, 8)}-${cleanedUUID.slice(8, 12)}-${cleanedUUID.slice(12, 16)}-${cleanedUUID.slice(
+        16,
+        20
+    )}-${cleanedUUID.slice(20)}`;
 }
 
 const services = new Map<string, string>();
@@ -56,4 +59,4 @@ addUUIDs(characteristics, "0c900914a85e11edafa10242ac120002", "CommandMode");
 addUUIDs(characteristics, "0c900c84a85e11edafa10242ac120002", "Command");
 addUUIDs(characteristics, "0c900df6a85e11edafa10242ac120002", "Response");
 
-export { services, characteristics };
+export { characteristics, services };

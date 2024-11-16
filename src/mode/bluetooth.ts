@@ -1,8 +1,8 @@
 "use strict";
 
-import { services, characteristics } from "../libs/common";
+import { characteristics, services } from "../libs/common";
 
-import noble, { Peripheral, Service, Characteristic, _state } from "@abandonware/noble";
+import noble, { Characteristic, Peripheral, Service } from "@abandonware/noble";
 import { EventEmitter } from "events";
 
 let main: Bluetooth = undefined;

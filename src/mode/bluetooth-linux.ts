@@ -1,9 +1,9 @@
 "use strict";
 
-import { services, characteristics } from "../libs/common";
+import { characteristics, services } from "../libs/common";
 
 import { EventEmitter } from "events";
-import { createBluetooth, Adapter, Device, GattCharacteristic, GattService } from "node-ble";
+import { Adapter, createBluetooth, Device, GattCharacteristic, GattService } from "node-ble";
 
 let main: BluetoothLinux = undefined;
 let ble: Adapter = null;

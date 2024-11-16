@@ -1,6 +1,6 @@
 "use strict";
 
 import { HaritoraX } from "./HaritoraX.js";
-import { TrackerModel, Tracker, MagStatus, SensorMode, FPSMode, SensorAutoCorrection } from "./types.js";
+import { FPSMode, MagStatus, SensorAutoCorrection, SensorMode, Tracker, TrackerModel } from "./types.js";
 
-export { HaritoraX, TrackerModel, Tracker, MagStatus, SensorMode, FPSMode, SensorAutoCorrection };
+export { FPSMode, HaritoraX, MagStatus, SensorAutoCorrection, SensorMode, Tracker, TrackerModel };

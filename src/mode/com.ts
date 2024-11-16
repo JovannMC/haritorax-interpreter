@@ -1,8 +1,8 @@
 "use strict";
 
-import { SerialPortStream } from "@serialport/stream";
 import { autoDetect } from "@serialport/bindings-cpp";
 import { ReadlineParser } from "@serialport/parser-readline";
+import { SerialPortStream } from "@serialport/stream";
 import { EventEmitter } from "events";
 import { getPairedDevices } from "../libs/btspp";
 
