@@ -1,6 +1,6 @@
 const { HaritoraX } = require("../dist/index.js");
 
-let device = new HaritoraX("wired", 2, true);
+let device = new HaritoraX("wired", true, false, false, true);
 
 const fs = require("fs");
 

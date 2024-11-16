@@ -1,7 +1,7 @@
 const fs = require("fs");
 const { HaritoraX } = require("../dist/index.js");
 
-let device = new HaritoraX("wired", 2, true);
+let device = new HaritoraX("wired", true, false, false, true);
 
 device.startConnection("com", [""]);
 
