@@ -1,43 +1,43 @@
 {
-  "name": "haritorax-interpreter",
-  "version": "3.1.0",
-  "homepage": "https://github.com/JovannMC/haritorax-interpreter",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/JovannMC/haritorax-interpreter.git"
-  },
-  "bugs": {
-    "url": "https://github.com/JovannMC/haritorax-interpreter/issues",
-    "email": "contact@femboyfurry.net"
-  },
-  "description": "Communicate with the HaritoraX trackers",
-  "main": "./dist/index.js",
-  "scripts": {
-    "start": "npm run build && node ./test/test.js",
-    "build": "tsc && tsc -d"
-  },
-  "author": "JovannMC <jovannmc@femboyfurry.net> (https://femboyfurry.net)",
-  "license": "MIT",
-  "keywords": [
-    "haritora",
-    "haritorax",
-    "shiftall",
-    "gx6",
-    "gx2",
-    "bluetooth",
-    "interpreter"
-  ],
-  "dependencies": {
-    "@abandonware/noble": "^1.9.2-25",
-    "@serialport/bindings-cpp": "^12.0.1",
-    "@serialport/parser-readline": "^12.0.0",
-    "@serialport/stream": "^12.0.0",
-    "node-ble": "^1.11.0"
-  },
-  "devDependencies": {
-    "eslint": "^9.12.0",
-    "node-gyp-build": "^4.8.2",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.6.2"
-  }
+    "name": "haritorax-interpreter",
+    "version": "3.2.0",
+    "homepage": "https://github.com/JovannMC/haritorax-interpreter",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/JovannMC/haritorax-interpreter.git"
+    },
+    "bugs": {
+        "url": "https://github.com/JovannMC/haritorax-interpreter/issues",
+        "email": "contact@femboyfurry.net"
+    },
+    "description": "Communicate with the HaritoraX trackers",
+    "main": "./dist/index.js",
+    "scripts": {
+        "start": "npm run build && node ./test/test.js",
+        "build": "tsc && tsc -d"
+    },
+    "author": "JovannMC <jovannmc@femboyfurry.net> (https://femboyfurry.net)",
+    "license": "MIT",
+    "keywords": [
+        "haritora",
+        "haritorax",
+        "shiftall",
+        "gx6",
+        "gx2",
+        "bluetooth",
+        "interpreter"
+    ],
+    "dependencies": {
+        "@abandonware/noble": "^1.9.2-25",
+        "@serialport/bindings-cpp": "^12.0.1",
+        "@serialport/parser-readline": "^12.0.0",
+        "@serialport/stream": "^12.0.0",
+        "node-ble": "^1.12.0"
+    },
+    "devDependencies": {
+        "eslint": "^9.15.0",
+        "node-gyp-build": "^4.8.3",
+        "ts-node": "^10.9.2",
+        "typescript": "^5.6.3"
+    }
 }
