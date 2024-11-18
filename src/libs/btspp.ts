@@ -22,8 +22,9 @@ const getPairedDevicesWindows = (): Promise<BluetoothDevice[]> => {
                 if (match) {
                     const name = match[1].trim();
                     const deviceId = match[2].trim();
-                    if (name.startsWith("HaritoraX")) {
-                        devices.push({ name, address: deviceId });
+                    const deviceIdShort = deviceId.match(/DEV_(\w+)/)?.[1];
+                    if (name.startsWith("Haritora") && deviceIdShort) {
+                        devices.push({ name, address: deviceIdShort });
                     }
                 }
             });
@@ -38,7 +39,8 @@ const getPairedDevicesWindows = (): Promise<BluetoothDevice[]> => {
 
                 comPorts.forEach((line) => {
                     const [comPort, pnpDeviceId] = line.trim().split(/\s{2,}/);
-                    const device = devices.find((d) => pnpDeviceId && d.address.includes(pnpDeviceId));
+                    const deviceIdShort = pnpDeviceId.match(/&(\w+)_C/)?.[1];
+                    const device = devices.find((d) => deviceIdShort && d.address.includes(deviceIdShort));
                     if (device) {
                         device.comPort = comPort;
                     }

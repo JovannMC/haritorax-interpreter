@@ -1327,7 +1327,7 @@ function processTrackerData(data: string, trackerName: string) {
         log(`Searching for tracker ${trackerName}...`);
     }
 
-    // TODO - Find out what "other data" represents, then add to emitted event.
+    // TODO: find out what "other data" represents, then add to emitted event.
     main.emit("tracker", trackerName, data);
 }
 
