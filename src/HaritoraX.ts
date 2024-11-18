@@ -826,10 +826,10 @@ export default class HaritoraX extends EventEmitter {
      * @function powerOffTracker
      * @param {string} trackerName - The name of the tracker to power off.
      */
-    powerOffTracker(trackerName: string) {
+    async powerOffTracker(trackerName: string): Promise<boolean> {
         if (!com || !comEnabled) {
             error("COM connection not enabled", true);
-            return;
+            return false;
         }
 
         const trackerPort = com.getTrackerPort(trackerName);
@@ -845,15 +845,15 @@ export default class HaritoraX extends EventEmitter {
         // this is because the power off signal uses a bit in the "settings" portion of the trackers, and if it's not set back to normal, the trackers will load the settings and keep turning back off
         const modifiedSettingsHex = settingsHex.slice(0, -2) + "2" + settingsHex.slice(-1);
         const commands = [`o${trackerPortId}:${modifiedSettingsHex}`, `o${trackerPortId}:${settingsHex}`];
-        (async () => {
-            for (const command of commands) {
-                writeToPort(trackerPort, command);
-                // Allow for small delay between commands so tracker can process the first command
-                await new Promise((resolve) => setTimeout(resolve, 60));
-            }
-        })();
+
+        for (const command of commands) {
+            writeToPort(trackerPort, command);
+            // Allow for small delay between commands so tracker can process the first command
+            await new Promise((resolve) => setTimeout(resolve, 50));
+        }
 
         log(`Manually powered off tracker "${trackerName}" (Port ${trackerPort}, port id ${trackerPortId})`, true);
+        return true;
     }
 
     /**
