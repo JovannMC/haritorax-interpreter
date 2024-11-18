@@ -24,6 +24,11 @@ const trackerAssignment: Map<string, string[]> = new Map([
     ["hip", ["6", "", ""]],
     ["leftElbow", ["7", "", ""]],
     ["rightElbow", ["8", "", ""]],
+    ["leftWrist", ["9", "", ""]],
+    ["rightWrist", ["10", "", ""]],
+    ["head", ["11", "", ""]],
+    ["leftFoot", ["12", "", ""]],
+    ["rightFoot", ["13", "", ""]],
 ]);
 
 const dongles = [
