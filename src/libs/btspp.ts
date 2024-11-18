@@ -52,6 +52,7 @@ const getPairedDevicesWindows = (): Promise<BluetoothDevice[]> => {
     });
 };
 
+// TODO: unknown if this works properly lol (i don't have any BTSPP devices afaik)
 const getPairedDevicesLinux = (): Promise<BluetoothDevice[]> => {
     return new Promise((resolve, reject) => {
         exec("bluetoothctl devices Paired", (error, stdout, _stderr) => {

@@ -508,9 +508,8 @@ export default class HaritoraX extends EventEmitter {
                     error(`Error reading characteristic: ${err}`);
                 }
             } else {
-                // TODO: request settings from dongle
-                // requires being able to send and then wait for response (which is pretty difficult cause the dongle is constantly sending data..)
-                // probably have an array that stores what label was written to, use data event to check if data is for the label, remove the label from the array, and respond with response
+                writeToPort(com.getTrackerPort(trackerName), `s${com.getTrackerPortId(trackerName)}:`, trackerName);
+                await new Promise((resolve) => setTimeout(resolve, 200));
                 ({ sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection } = getTrackerSettingsFromMap(trackerName));
             }
         } else if (trackerModelEnabled === "wireless" && comEnabled && !trackerName.startsWith("HaritoraXW")) {

@@ -391,8 +391,6 @@ export default class COM extends EventEmitter {
 
 let isPairing = false;
 let hasPaired = false;
-let isOverThreshold = false;
-let dataQueue: { data: string; port: string }[] = [];
 
 async function processData(data: string, port: string) {
     main.emit("dataRaw", data, port);
@@ -411,7 +409,8 @@ async function processData(data: string, port: string) {
                 portId = match ? match[0] : "DONGLE";
                 portData = splitData[1];
 
-                // silently listen to data and see if we can assign the trackers
+                // silently listen to data and silently assign any missing trackers
+                // these should have been already assigned from when the COM port is opened though
                 for (let [key, value] of trackerAssignment.entries()) {
                     if (value[1] === "" && /^r.+/.test(identifier)) {
                         const trackerId = parseInt(portData.charAt(4));
@@ -419,54 +418,6 @@ async function processData(data: string, port: string) {
                             trackerAssignment.set(key, [trackerId.toString(), port, portId]);
                             log(`Setting ${key} to port ${port} with port ID ${portId}`);
                         }
-                    }
-                }
-
-                if (!trackersAssigned) {
-                    function processQueue(): Promise<void> {
-                        return new Promise(async (resolve, reject) => {
-                            try {
-                                while (dataQueue.length > 0) {
-                                    const queuedData = dataQueue.shift();
-                                    if (queuedData) {
-                                        log(`Processing queued data: ${queuedData.data}`);
-                                        await processData(queuedData.data, queuedData.port);
-                                    }
-                                }
-                                resolve();
-                            } catch (err) {
-                                reject(err);
-                            }
-                        });
-                    }
-
-                    // Check if all trackers are assigned and queue if not
-                    // TODO: could be removed in future, we can manually request the info from the trackers to remove need for this
-                    if (!trackersAssigned && !isOverThreshold) {
-                        if (dataQueue && dataQueue.length >= 50) {
-                            isOverThreshold = true;
-                            log(`Data queue is over threshold, assuming not all trackers have been connected.`);
-                            await processQueue();
-                            dataQueue = null;
-                            return;
-                        }
-
-                        // Skip IMU data for trackers, not needed to be processed after trackers are assigned
-                        if (identifier.startsWith("x")) return;
-
-                        dataQueue.push({ data, port });
-                        log(`Trackers not assigned yet - ${data} - Queue length: ${dataQueue.length}`);
-                    }
-                    const numberOfPorts = Object.keys(activePorts).length;
-                    const requiredAssignments = numberOfPorts * 2;
-
-                    if (
-                        Array.from(trackerAssignment.values()).filter((value) => value[1] !== "" && value[2] !== "DONGLE")
-                            .length >= requiredAssignments
-                    ) {
-                        log(`Required assignments completed: ${Array.from(trackerAssignment.entries())}`);
-                        trackersAssigned = true;
-                        processQueue();
                     }
                 }
 
