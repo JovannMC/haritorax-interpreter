@@ -849,7 +849,7 @@ export default class HaritoraX extends EventEmitter {
             for (const command of commands) {
                 writeToPort(trackerPort, command);
                 // Allow for small delay between commands so tracker can process the first command
-                await new Promise((resolve) => setTimeout(resolve, 100));
+                await new Promise((resolve) => setTimeout(resolve, 60));
             }
         })();
 
