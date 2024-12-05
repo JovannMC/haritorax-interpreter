@@ -990,6 +990,11 @@ function listenToDeviceEvents() {
             main.emit("unpaired", trackerName);
         });
 
+        com.on("disconnected", (port: string) => {
+            if (port) log(`A COM port connected (${port}) was disconnected, removing all devices...`, true);
+            activeDevices = [];
+        });
+
         com.on("log", (message: string) => {
             log(message);
         });

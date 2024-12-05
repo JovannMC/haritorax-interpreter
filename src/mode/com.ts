@@ -184,7 +184,6 @@ export default class COM extends EventEmitter {
                 parser.on("data", (data) => processData(data, port));
                 serial.on("close", () => {
                     // Retry the connection because we only want the port to be closed if we manually close it (assume disconnected/unplugged)
-                    this.emit("disconnected", port);
                     retryConnection(port);
                 });
                 serial.on("error", (err) => {
@@ -200,6 +199,7 @@ export default class COM extends EventEmitter {
         };
 
         const retryConnection = (port: string) => {
+            this.emit("disconnected", port);
             setTimeout(() => {
                 log(`Retrying connection to COM port: ${port}`);
                 initializeSerialPort(port, true);
