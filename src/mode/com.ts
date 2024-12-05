@@ -144,7 +144,17 @@ export default class COM extends EventEmitter {
             try {
                 // make sure no existing port is open
                 if (activePorts[port]) {
-                    activePorts[port].close();
+                    if (activePorts[port].isOpen) {
+                        log(`Port ${port} is already open, closing it before reinitializing...`);
+                        activePorts[port].close((err) => {
+                            if (err) {
+                                error(`Error closing port ${port}: ${err.message}`, true);
+                            }
+                            delete activePorts[port];
+                            initializeSerialPort(port, isRetry);
+                        });
+                        return;
+                    }
                     delete activePorts[port];
                 }
 
