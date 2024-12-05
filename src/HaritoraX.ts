@@ -1802,7 +1802,7 @@ function parseBluetoothData(data: ArrayBufferLike | string) {
     if (data instanceof Buffer) {
         data = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
     }
-    return new DataView(data).getInt8(0);
+    return new DataView(data as ArrayBufferLike).getInt8(0);
 }
 
 function logSettings(trackerName: string, settings: Object, rawHexData?: string) {
