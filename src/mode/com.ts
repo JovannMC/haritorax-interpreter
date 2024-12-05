@@ -43,15 +43,17 @@ const portChannels: { [key: string]: number } = {};
 let activePorts: ActivePorts = {};
 let trackerModelEnabled: string;
 let heartbeatInterval = 5000; // in milliseconds
+let retryConnectionInterval = 5000; // in milliseconds
 let printWrites = true;
 
 export default class COM extends EventEmitter {
-    constructor(trackerModel: string, heartbeat?: number, printSerialWrites?: boolean) {
+    constructor(trackerModel: string, heartbeat = 5000, printSerialWrites = false, retryInterval = 5000) {
         super();
         main = this;
         trackerModelEnabled = trackerModel;
         heartbeatInterval = heartbeat;
         printWrites = printSerialWrites;
+        retryConnectionInterval = retryInterval;
         btspp = new BTSPP();
         log(`Initialized COM module with settings: ${trackerModelEnabled} ${heartbeatInterval}`);
 
@@ -138,8 +140,14 @@ export default class COM extends EventEmitter {
     }
 
     startConnection(portNames: string[]) {
-        const initializeSerialPort = (port: string) => {
+        const initializeSerialPort = (port: string, isRetry = false) => {
             try {
+                // make sure no existing port is open
+                if (activePorts[port]) {
+                    activePorts[port].close();
+                    delete activePorts[port];
+                }
+
                 const serial = new SerialPortStream({ path: port, baudRate: BAUD_RATE, binding: Binding });
                 const parser = serial.pipe(new ReadlineParser({ delimiter: "\n" }));
                 activePorts[port] = serial;
@@ -162,16 +170,30 @@ export default class COM extends EventEmitter {
                         initialCommands.forEach((command) => this.write(serial, command, errorListener));
                     }, 1500);
                 });
+
                 parser.on("data", (data) => processData(data, port));
-                serial.on("close", () => this.emit("disconnected", port));
+                serial.on("close", () => {
+                    // Retry the connection because we only want the port to be closed if we manually close it (assume disconnected/unplugged)
+                    this.emit("disconnected", port);
+                    retryConnection(port);
+                });
                 serial.on("error", (err) => {
-                    error(`Error on port ${port}: ${err}`, true);
+                    error(`Error${isRetry ? " while retrying connection" : ""} on port ${port}: ${err}`, true);
+                    retryConnection(port);
                 });
 
                 setupHeartbeat(serial, port, trackerModelEnabled);
             } catch (err) {
-                throw err;
+                error(`Failed to initialize serial port ${port}: ${err}`);
+                retryConnection(port);
             }
+        };
+
+        const retryConnection = (port: string) => {
+            setTimeout(() => {
+                log(`Retrying connection to COM port: ${port}`);
+                initializeSerialPort(port, true);
+            }, retryConnectionInterval);
         };
 
         for (const port of portNames) {
