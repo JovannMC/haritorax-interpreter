@@ -4,11 +4,12 @@ import { autoDetect } from "@serialport/bindings-cpp";
 import { ReadlineParser } from "@serialport/parser-readline";
 import { SerialPortStream } from "@serialport/stream";
 import { EventEmitter } from "events";
-import { getPairedDevices } from "../libs/btspp";
+import { BTSPP } from "../libs/btspp";
 
 const Binding = autoDetect();
 
 let main: COM = undefined;
+let btspp: BTSPP = undefined;
 
 const BAUD_RATE = 500000; // from the haritora_setting.json in the HaritoraConfigurator
 
@@ -40,7 +41,6 @@ const portChannels: { [key: string]: number } = {};
 
 // Stores the ports that are currently active as objects for access later
 let activePorts: ActivePorts = {};
-let trackersAssigned = false;
 let trackerModelEnabled: string;
 let heartbeatInterval = 5000; // in milliseconds
 let printWrites = true;
@@ -52,12 +52,16 @@ export default class COM extends EventEmitter {
         trackerModelEnabled = trackerModel;
         heartbeatInterval = heartbeat;
         printWrites = printSerialWrites;
+        btspp = new BTSPP();
         log(`Initialized COM module with settings: ${trackerModelEnabled} ${heartbeatInterval}`);
+
+        btspp.on("log", (msg) => log(msg));
+        btspp.on("logError", (err) => error(err.message, err.exceptional));
     }
 
     async isDeviceAvailable() {
         const ports = await Binding.list();
-        const btsppDevices = await getPairedDevices();
+        const btsppDevices = await btspp.getPairedDevices();
         const allDevices = [...dongles, ...btsppDevices];
 
         for (const device of allDevices) {
@@ -73,7 +77,7 @@ export default class COM extends EventEmitter {
 
     async getAvailableDevices() {
         const ports = await Binding.list();
-        const btsppDevices = await getPairedDevices();
+        const btsppDevices = await btspp.getPairedDevices();
         const availableDeviceNames: Set<string> = new Set();
         let gxDevicesFound = false;
 
@@ -100,7 +104,7 @@ export default class COM extends EventEmitter {
 
     async getDevicePorts(device: string) {
         const ports = await Binding.list();
-        const bluetoothDevices = await getPairedDevices();
+        const bluetoothDevices = await btspp.getPairedDevices();
         const availablePorts = ports
             .map((port) => {
                 const deviceMatch = dongles.find(
@@ -494,8 +498,9 @@ function log(message: string) {
 }
 
 function error(message: string, exceptional = false) {
-    console.error(message);
-    main.emit("logError", { message, exceptional });
+    const finalMessage = `(COM) ${message}`;
+    console.error(finalMessage);
+    main.emit("logError", { message: finalMessage, exceptional });
 }
 
 /*
