@@ -15,6 +15,7 @@ export default class BTSPP extends EventEmitter {
         main = this;
     }
 
+    // holy shit i don't know what i'm doing help
     getPairedDevicesWindows = (): Promise<BluetoothDevice[]> => {
         return new Promise((resolve, reject) => {
             log("Executing PowerShell command to get paired Bluetooth devices...");
@@ -29,24 +30,31 @@ export default class BTSPP extends EventEmitter {
 
                     log(`PowerShell command output: \r\n${stdout}`);
 
+                    // Step 1: Parse the Bluetooth devices
                     const devices: BluetoothDevice[] = [];
-                    const lines = stdout.split("\n").filter((line) => line.trim() !== "" && !line.includes("Name"));
+                    const lines = stdout
+                        .split("\n")
+                        .map((line) => line.replace(/[^\x20-\x7E]/g, "").trim()) // Sanitize and trim
+                        .filter((line) => line !== "" && !line.includes("Name")); // Exclude empty and header lines
 
-                    lines.forEach((line) => {
-                        log(`Processing line: ${line}`);
-                        const match = line.trim().match(/^(.+?)\s{2,}(.+)$/);
+                    lines.forEach((line, index) => {
+                        log(`Processing line ${index}: "${line}"`);
+                        const match = line.match(/^(.+?)\s+(.+)$/);
                         if (match) {
                             const name = match[1].trim();
                             const deviceId = match[2].trim();
-                            const deviceIdShort = deviceId.match(/DEV_(\w+)/)?.[1];
+                            const deviceIdShort = deviceId.match(/(?:DEV_|BLUETOOTHDEVICE_)(\w+)/)?.[1];
                             log(`Found device - Name: ${name}, DeviceID: ${deviceId}, ShortID: ${deviceIdShort}`);
                             if (name.startsWith("Haritora") && deviceIdShort) {
                                 devices.push({ name, address: deviceIdShort });
                                 log(`Added device - Name: ${name}, Address: ${deviceIdShort}`);
                             }
+                        } else {
+                            log(`No match for line ${index}: "${line}"`);
                         }
                     });
 
+                    // Step 2: Match devices with COM ports
                     log("Executing WMIC command to get serial ports...");
                     exec("wmic path Win32_SerialPort get DeviceID,PNPDeviceID", (err, stdout, _stderr) => {
                         if (err) {
@@ -57,17 +65,29 @@ export default class BTSPP extends EventEmitter {
 
                         log(`WMIC command output: \r\n${stdout}`);
 
-                        const comPorts = stdout.split("\n").filter((line) => line.trim() !== "" && !line.includes("DeviceID"));
+                        const comPorts = stdout
+                            .split("\n")
+                            .map((line) => line.replace(/[^\x20-\x7E]/g, "").trim()) // Sanitize and trim
+                            .filter((line) => line !== "" && !line.includes("DeviceID")); // Exclude empty and header lines
 
-                        comPorts.forEach((line) => {
-                            log(`Processing COM port line: ${line}`);
-                            const [comPort, pnpDeviceId] = line.trim().split(/\s{2,}/);
-                            const deviceIdShort = pnpDeviceId.match(/&(\w+)_C/)?.[1];
-                            log(`Extracted COM port: ${comPort}, PNPDeviceID: ${pnpDeviceId}, ShortID: ${deviceIdShort}`);
-                            const device = devices.find((d) => deviceIdShort && d.address.includes(deviceIdShort));
-                            if (device) {
-                                device.comPort = comPort;
-                                log(`Matched device - Name: ${device.name}, Address: ${device.address}, COM Port: ${comPort}`);
+                        comPorts.forEach((line, index) => {
+                            log(`Processing COM port line ${index}: "${line}"`);
+                            const match = line.match(/^(\w+)\s+(.+)$/);
+                            if (match) {
+                                const comPort = match[1];
+                                const pnpDeviceId = match[2];
+                                const deviceIdShort = pnpDeviceId.match(/&(\w+)_C/)?.[1];
+                                log(`Extracted COM port: ${comPort}, PNPDeviceID: ${pnpDeviceId}, ShortID: ${deviceIdShort}`);
+
+                                const device = devices.find((d) => deviceIdShort && d.address === deviceIdShort);
+                                if (device) {
+                                    device.comPort = comPort;
+                                    log(
+                                        `Matched device - Name: ${device.name}, Address: ${device.address}, COM Port: ${comPort}`
+                                    );
+                                }
+                            } else {
+                                log(`No match for COM port line ${index}: "${line}"`);
                             }
                         });
 
@@ -163,3 +183,4 @@ function error(message: string, exceptional = false) {
 }
 
 export { BluetoothDevice, BTSPP };
+
