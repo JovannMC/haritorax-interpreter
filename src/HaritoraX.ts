@@ -832,6 +832,8 @@ export default class HaritoraX extends EventEmitter {
             return false;
         }
 
+        const delay = 25;
+
         const trackerPort = com.getTrackerPort(trackerName);
         const trackerPortId = com.getTrackerPortId(trackerName);
 
@@ -847,12 +849,12 @@ export default class HaritoraX extends EventEmitter {
         const commands = [`o${trackerPortId}:${modifiedSettingsHex}`, `o${trackerPortId}:${settingsHex}`];
 
         for (const command of commands) {
-            writeToPort(trackerPort, command);
+            await writeToPort(trackerPort, command);
             // Allow for small delay between commands so tracker can process the first command
-            await new Promise((resolve) => setTimeout(resolve, 50));
+            await new Promise((resolve) => setTimeout(resolve, delay));
         }
 
-        log(`Manually powered off tracker "${trackerName}" (Port ${trackerPort}, port id ${trackerPortId})`, true);
+        log(`Manually powered off tracker "${trackerName}" (Port ${trackerPort}, port id ${trackerPortId}). Delay between commands: ${delay}ms.`, true);
         return true;
     }
 
@@ -1750,21 +1752,28 @@ function isWirelessBTTracker(trackerName: string) {
     return trackerModelEnabled === "wireless" && bluetoothEnabled && trackerName.startsWith("HaritoraXW");
 }
 
-function writeToPort(port: string, rawData: string, trackerName = "unknown") {
-    const ports = com.getActivePorts();
-    const data = `\n${rawData}\n`;
+function writeToPort(port: string, rawData: string, trackerName = "unknown"): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const ports = com.getActivePorts();
+        const data = `\n${rawData}\n`;
 
-    if (!ports[port]) {
-        error(`Port ${port} not found in active ports.`, true);
-        return;
-    }
-
-    ports[port].write(data, (err: any) => {
-        if (err) {
-            error(`${trackerName} - Error writing data to serial port ${port}: ${err}`);
-        } else if (printWrites) {
-            log(`${trackerName} - Data written to serial port ${port}: ${rawData.toString().replace(/\r\n/g, " ")}`);
+        if (!ports[port]) {
+            error(`Port ${port} not found in active ports.`, true);
+            reject(new Error(`Port ${port} not found in active ports.`));
+            return;
         }
+
+        ports[port].write(data, (err: any) => {
+            if (err) {
+                error(`${trackerName} - Error writing data to serial port ${port}: ${err}`);
+                reject(err);
+            } else {
+                if (printWrites) {
+                    log(`${trackerName} - Data written to serial port ${port}: ${rawData.toString().replace(/\r\n/g, " ")}`);
+                }
+                resolve();
+            }
+        });
     });
 }
 
@@ -1972,10 +1981,5 @@ function updateTrackerSettings(
     }
 }
 
-interface Vector3 {
-    x: number;
-    y: number;
-    z: number;
-}
-
 export { HaritoraX };
+
