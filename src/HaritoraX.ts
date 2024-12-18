@@ -372,7 +372,7 @@ export default class HaritoraX extends EventEmitter {
      * @example
      * trackers.setTrackerSettings("rightAnkle", 1, 100, ['accel', 'gyro'], true);
      **/
-    setTrackerSettings(
+    async setTrackerSettings(
         trackerName: string,
         sensorMode: SensorMode,
         fpsMode: FPSMode,
@@ -388,10 +388,14 @@ export default class HaritoraX extends EventEmitter {
         };
 
         if (trackerName.startsWith("HaritoraXW")) {
-            writeToBluetooth(trackerName, sensorModeCharacteristic, sensorMode === 1 ? 5 : 8);
-            writeToBluetooth(trackerName, fpsModeCharacteristic, fpsMode === 50 ? 1 : 2);
-            writeToBluetooth(trackerName, correctionCharacteristic, sensorAutoCorrectionBit);
-            writeToBluetooth(trackerName, ankleCharacteristic, ankleMotionDetection ? 1 : 0);
+            try {
+                await writeToBluetooth(trackerName, sensorModeCharacteristic, sensorMode === 1 ? 5 : 8);
+                await writeToBluetooth(trackerName, fpsModeCharacteristic, fpsMode === 50 ? 1 : 2);
+                await writeToBluetooth(trackerName, correctionCharacteristic, sensorAutoCorrectionBit);
+                await writeToBluetooth(trackerName, ankleCharacteristic, ankleMotionDetection ? 1 : 0);
+            } catch (err) {
+                error(`Error sending tracker settings: ${err}`);
+            }
         } else {
             // GX dongle(s)
             const trackerPort = com.getTrackerPort(trackerName);
@@ -401,8 +405,12 @@ export default class HaritoraX extends EventEmitter {
             const hexValue = getSettingsHexValue(sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
             const finalValue = `${identifierValue}${hexValue}`;
 
-            writeToPort(trackerPort, finalValue, trackerName);
-            writeToPort(trackerPort, identifierValue, trackerName);
+            try {
+                await writeToPort(trackerPort, finalValue, trackerName);
+                await writeToPort(trackerPort, identifierValue, trackerName);
+            } catch (err) {
+                error(`Error sending tracker settings: ${err}`);
+            }
         }
 
         logSettings(trackerName, settings);
@@ -434,7 +442,7 @@ export default class HaritoraX extends EventEmitter {
      * trackers.setAllTrackerSettings(2, 50, ['mag'], false);
      **/
 
-    setAllTrackerSettings(
+    async setAllTrackerSettings(
         sensorMode: SensorMode,
         fpsMode: FPSMode,
         sensorAutoCorrection: SensorAutoCorrection[],
@@ -442,7 +450,7 @@ export default class HaritoraX extends EventEmitter {
     ) {
         try {
             if (trackerModelEnabled === "wired") {
-                handleWiredSettings(sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
+                await handleWiredSettings(sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
             } else if (trackerModelEnabled === "wireless") {
                 handleWirelessSettings(sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
             }
@@ -508,8 +516,12 @@ export default class HaritoraX extends EventEmitter {
                     error(`Error reading characteristic: ${err}`);
                 }
             } else {
-                writeToPort(com.getTrackerPort(trackerName), `s${com.getTrackerPortId(trackerName)}:`, trackerName);
-                await new Promise((resolve) => setTimeout(resolve, 200));
+                try {
+                    await writeToPort(com.getTrackerPort(trackerName), `s${com.getTrackerPortId(trackerName)}:`, trackerName);
+                } catch (err) {
+                    error(`Error sending tracker settings: ${err}`);
+                }
+                await new Promise((resolve) => setTimeout(resolve, 500));
                 ({ sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection } = getTrackerSettingsFromMap(trackerName));
             }
         } else if (trackerModelEnabled === "wireless" && comEnabled && !trackerName.startsWith("HaritoraXW")) {
@@ -591,7 +603,12 @@ export default class HaritoraX extends EventEmitter {
 
             const rawValue = `i${trackerPortId}:`;
 
-            writeToPort(trackerPort, rawValue, trackerName);
+            try {
+                await writeToPort(trackerPort, rawValue, trackerName);
+            } catch (err) {
+                error(`Error sending device info command: ${err}`);
+                return null;
+            }
         }
 
         if (isWirelessBTTracker(trackerName)) {
@@ -651,7 +668,12 @@ export default class HaritoraX extends EventEmitter {
 
             const rawValue = `v${trackerPortId}:`;
 
-            writeToPort(trackerPort, rawValue, trackerName);
+            try {
+                await writeToPort(trackerPort, rawValue, trackerName);
+            } catch (err) {
+                error(`Error sending battery info command: ${err}`);
+                return null;
+            }
 
             // Wait for the battery info to be sent back
             await new Promise((resolve) => setTimeout(resolve, 500));
@@ -849,12 +871,20 @@ export default class HaritoraX extends EventEmitter {
         const commands = [`o${trackerPortId}:${modifiedSettingsHex}`, `o${trackerPortId}:${settingsHex}`];
 
         for (const command of commands) {
-            await writeToPort(trackerPort, command);
+            try {
+                await writeToPort(trackerPort, command);
+            } catch (err) {
+                error(`Error sending power off command: ${err}`);
+                return false;
+            }
             // Allow for small delay between commands so tracker can process the first command
             await new Promise((resolve) => setTimeout(resolve, delay));
         }
 
-        log(`Manually powered off tracker "${trackerName}" (Port ${trackerPort}, port id ${trackerPortId}). Delay between commands: ${delay}ms.`, true);
+        log(
+            `Manually powered off tracker "${trackerName}" (Port ${trackerPort}, port id ${trackerPortId}). Delay between commands: ${delay}ms.`,
+            true
+        );
         return true;
     }
 
@@ -1794,10 +1824,10 @@ function getSettingsHexValue(
     return `00000${postureDataRateBit}${sensorModeBit}010${sensorAutoCorrectionBit}00${ankleMotionDetectionBit}`;
 }
 
-function writeToBluetooth(trackerName: string, characteristic: string, value: number) {
+async function writeToBluetooth(trackerName: string, characteristic: string, value: number) {
     try {
         const buffer = Buffer.from([value]);
-        bluetooth.write(trackerName, settingsService, characteristic, buffer);
+        await bluetooth.write(trackerName, settingsService, characteristic, buffer);
         if (printWrites) log(`Data written to characteristic ${characteristic} ${trackerName}: ${value}`);
     } catch (err) {
         error(`Error writing to Bluetooth tracker ${trackerName}: ${err}`);
@@ -1908,7 +1938,7 @@ function getTrackerSettingsFromMap(trackerName: string) {
     }
 }
 
-function handleWiredSettings(
+async function handleWiredSettings(
     sensorMode: SensorMode,
     fpsMode: FPSMode,
     sensorAutoCorrection: SensorAutoCorrection[],
@@ -1936,7 +1966,7 @@ function handleWiredSettings(
     for (const port in ports) {
         for (const commandKey in commands) {
             const command = commands[commandKey];
-            if (command) writeToPort(port, command, "HaritoraXWired");
+            if (command) await writeToPort(port, command, "HaritoraXWired");
         }
     }
 
@@ -1948,7 +1978,7 @@ function handleWiredSettings(
     trackerSettings.set("HaritoraXWired", [sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection]);
 }
 
-function handleWirelessSettings(
+async function handleWirelessSettings(
     sensorMode: SensorMode,
     fpsMode: FPSMode,
     sensorAutoCorrection: SensorAutoCorrection[],
@@ -1959,7 +1989,7 @@ function handleWirelessSettings(
         const finalValue = `o0:${hexValue}\no1:${hexValue}`;
 
         for (const port in com.getActivePorts()) {
-            writeToPort(port, finalValue, "HaritoraXWireless");
+            await writeToPort(port, finalValue, "HaritoraXWireless");
         }
     }
 
