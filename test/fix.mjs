@@ -31,6 +31,7 @@ rl.question("Enter the COM ports you want to use (separated by spaces): ", (answ
 
     setInterval(() => {
         writeToPort(comPorts[0], `o0:00000110107000`);
+        writeToPort(comPorts[0], `o1:00000110107000`);
     }, 100);
 
     rl.close();
