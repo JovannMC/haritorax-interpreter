@@ -155,10 +155,10 @@ let trackerModelEnabled: TrackerModel;
  * @property {number} rotation.y - The y component of the rotation.
  * @property {number} rotation.z - The z component of the rotation.
  * @property {number} rotation.w - The w component of the rotation.
- * @property {object} gravity - The gravity data of the tracker.
- * @property {number} gravity.x - The x component of the gravity.
- * @property {number} gravity.y - The y component of the gravity.
- * @property {number} gravity.z - The z component of the gravity.
+ * @property {object} acceleration - The acceleration data of the tracker.
+ * @property {number} acceleration.x - The x component of the gravity.
+ * @property {number} acceleration.y - The y component of the gravity.
+ * @property {number} acceleration.z - The z component of the gravity.
  * @property {number|undefined} ankle - The ankle motion data of the tracker if enabled. Undefined if disabled.
  **/
 
@@ -174,7 +174,7 @@ let trackerModelEnabled: TrackerModel;
  **/
 
 /**
- * The SensorAutoCorrection.Magnetometer event which provides the tracker's magnetometer status
+ * The "mag" event which provides the tracker's magnetometer status
  * Supported trackers: wireless, wired
  * Supported connections: COM, Bluetooth
  *
@@ -863,7 +863,7 @@ export default class HaritoraX extends EventEmitter {
 
         const defaultSettings: [SensorMode, FPSMode, SensorAutoCorrection[], boolean] = [2, 50, [], false];
         const settings =
-            (trackerSettings.get(trackerName) as [SensorMode, FPSMode, SensorAutoCorrection[], boolean]) || defaultSettings;
+            (trackerSettings.get(trackerName) as [SensorMode, FPSMode, SensorAutoCorrection[], boolean]) ?? defaultSettings;
         const settingsHex = getSettingsHexValue(...settings);
 
         // Change the second-to-last bit to '2' (power off signal)
@@ -1076,10 +1076,11 @@ function listenToDeviceEvents() {
                     processMagData(data, localName);
                     break;
                 default:
+                    const buffer = Buffer.from(data, "base64");
                     log(`Unknown data from ${localName}: ${data} - ${characteristic} - ${service}`);
-                    log(`Data in utf-8: ${Buffer.from(data, "base64").toString("utf-8")}`);
-                    log(`Data in hex: ${Buffer.from(data, "base64").toString("hex")}`);
-                    log(`Data in base64: ${Buffer.from(data, "base64").toString("base64")}`);
+                    log(`Data in utf-8: ${buffer.toString("utf-8")}`);
+                    log(`Data in hex: ${buffer.toString("hex")}`);
+                    log(`Data in base64: ${buffer.toString("base64")}`);
             }
         });
 
@@ -1147,27 +1148,33 @@ function processWiredData(identifier: string, data: string) {
         trackerSettings.set("HaritoraXWired", trackerArray);
     }
 
-    if (identifier === "x") {
-        // 5 (base) trackers
-    } else if (identifier === "p" || identifier === "r") {
-        // 5 (base) + 1 (hip) = 6 trackers
-        trackerNames.push("hip");
-    } else if (identifier === "e" || (identifier === "h" && data.split("A").length - 1 >= 18)) {
-        // 5 (base) + 2 (elbows) = 7 trackers
-        trackerNames.push("leftElbow");
-        trackerNames.push("rightElbow");
-    } else if (identifier === "g" || (identifier === "h" && data.split("A").length - 1 < 18)) {
-        // 5 (base) + 1 (hip) + 2 (elbows) = 8 trackers
-        trackerNames.push("hip");
-        trackerNames.push("leftElbow");
-        trackerNames.push("rightElbow");
+    const dataLength = data.split("A").length - 1;
+
+    switch (identifier) {
+        case "p":
+        case "r":
+            trackerNames.push("hip");
+            break;
+        case "e":
+        case "h":
+            if (dataLength >= 18) {
+                trackerNames.push("leftElbow", "rightElbow");
+            }
+            break;
+        case "g":
+        case "h":
+            if (dataLength < 18) {
+                trackerNames.push("hip", "leftElbow", "rightElbow");
+            }
+            break;
     }
+
+    const ankleBuffer = buffer.slice(buffer.length - 4);
 
     trackerNames.forEach((trackerName, index) => {
         const start = index * 14; // 14 bytes per tracker
         const trackerBuffer = buffer.slice(start, start + 14);
 
-        const ankleBuffer = buffer.slice(buffer.length - 4);
         let ankleValue = undefined;
         if (ankleEnabled) {
             if (trackerName === "leftAnkle") {
@@ -1195,7 +1202,6 @@ function processWiredData(identifier: string, data: string) {
  * @fires haritora#connect
  * @fires haritora#mag
  **/
-
 function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) {
     if (!trackerName || !data) return;
 
@@ -1203,9 +1209,10 @@ function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) 
     if (!activeDevices.includes(trackerName) && (comEnabled || bluetoothEnabled)) {
         log(`Tracker "${trackerName}" isn't in active devices, adding and emitting connect event`);
 
-        const mode = trackerName.startsWith("HaritoraXW") ? "bluetooth" : "com";
-        const port = trackerName.startsWith("HaritoraXW") ? undefined : com.getTrackerPort(trackerName);
-        const portId = trackerName.startsWith("HaritoraXW") ? undefined : com.getTrackerPortId(trackerName);
+        const isWireless = trackerName.startsWith("HaritoraXW");
+        const mode = isWireless ? "bluetooth" : "com";
+        const port = isWireless ? undefined : com.getTrackerPort(trackerName);
+        const portId = isWireless ? undefined : com.getTrackerPortId(trackerName);
 
         activeDevices.push(trackerName);
         main.emit("connect", trackerName, mode, port, portId);
@@ -1213,21 +1220,19 @@ function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) 
 
     // Decode and log the data
     try {
-        const { rotation, gravity, ankle, magStatus } = decodeIMUPacket(data, trackerName);
+        const { rotation, acceleration, ankle, magStatus } = decodeIMUPacket(data, trackerName);
 
         if (printIMU) {
-            log(
-                `Tracker "${trackerName}" rotation: (${rotation.x.toFixed(5)}, ${rotation.y.toFixed(5)}, ${rotation.z.toFixed(
-                    5
-                )}, ${rotation.w.toFixed(5)})`
-            );
-            log(`Tracker "${trackerName}" gravity: (${gravity.x.toFixed(5)}, ${gravity.y.toFixed(5)}, ${gravity.z.toFixed(5)})`);
+            const { x: rX, y: rY, z: rZ, w: rW } = rotation;
+            const { x: aX, y: aY, z: aZ } = acceleration;
+            log(`Tracker "${trackerName}" rotation: (${rX.toFixed(5)}, ${rY.toFixed(5)}, ${rZ.toFixed(5)}, ${rW.toFixed(5)} )`);
+            log(`Tracker "${trackerName}" acceleration: (${aX.toFixed(5)}, ${aY.toFixed(5)}, ${aZ.toFixed(5)})`);
             if (ankle) log(`Tracker "${trackerName}" ankle: ${ankle}`);
             if (ankleValue) log(`Tracker "${trackerName}" (wired/manual) ankle: ${ankleValue}`);
             if (magStatus) log(`Tracker "${trackerName}" magnetometer status: ${magStatus}`);
         }
 
-        main.emit("imu", trackerName, rotation, gravity, ankle ? ankle : ankleValue);
+        main.emit("imu", trackerName, rotation, acceleration, ankle ?? ankleValue);
         if (!trackerName.startsWith("HaritoraXW")) main.emit("mag", trackerName, magStatus);
     } catch (err) {
         error(`Error decoding tracker "${trackerName}" IMU packet data: ${err}`, false);
@@ -1241,100 +1246,75 @@ function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) 
  * @see {@link https://github.com/OCSYT/SlimeTora/}
  **/
 
+const ROTATION_SCALAR = 0.01 / 180.0;
+const GRAVITY_SCALAR = 1 / 256.0;
+const GRAVITY_CONSTANT = 9.81;
+const GRAVITY_ADJUSTMENT = 1.2;
+
 function decodeIMUPacket(data: Buffer, trackerName: string) {
-    if (!trackerName) return;
+    if (!trackerName || data.length < 14) {
+        error(`Invalid data for IMU packet: ${!trackerName ? "no tracker name" : "insufficient data length"}`);
+        return null;
+    }
 
     try {
-        if (data.length < 14) {
-            error(`Too few bytes to decode IMU packet, data: ${data.toString("utf-8")}`);
-            return null;
-        }
+        const rotationX = data.readInt16LE(0) * ROTATION_SCALAR;
+        const rotationY = data.readInt16LE(2) * ROTATION_SCALAR;
+        const rotationZ = data.readInt16LE(4) * ROTATION_SCALAR * -1;
+        const rotationW = data.readInt16LE(6) * ROTATION_SCALAR * -1;
 
-        const rotationX = data.readInt16LE(0);
-        const rotationY = data.readInt16LE(2);
-        const rotationZ = data.readInt16LE(4);
-        const rotationW = data.readInt16LE(6);
+        const gravityRawX = data.readInt16LE(8) * GRAVITY_SCALAR;
+        const gravityRawY = data.readInt16LE(10) * GRAVITY_SCALAR;
+        const gravityRawZ = data.readInt16LE(12) * GRAVITY_SCALAR;
 
-        const gravityRawX = data.readInt16LE(8);
-        const gravityRawY = data.readInt16LE(10);
-        const gravityRawZ = data.readInt16LE(12);
-
-        // wireless
-        let ankle = undefined;
-        // wired
-        let magStatus = undefined;
+        let ankle, magStatus;
 
         if (trackerModelEnabled === "wireless") {
-            let bufferData = data.toString("base64");
+            const bufferData = data.toString("base64");
             ankle = bufferData.slice(-2) !== "==" ? data.readUint16LE(data.length - 2) : undefined;
 
             if (!trackerName.startsWith("HaritoraXW")) {
                 const magnetometerData = bufferData.charAt(bufferData.length - 5);
-
-                switch (magnetometerData) {
-                    case "A":
-                        magStatus = MagStatus.VERY_BAD;
-                        break;
-                    case "B":
-                        magStatus = MagStatus.BAD;
-                        break;
-                    case "C":
-                        magStatus = MagStatus.OKAY;
-                        break;
-                    case "D":
-                        magStatus = MagStatus.GREAT;
-                        break;
-                    default:
-                        magStatus = MagStatus.Unknown;
-                        break;
-                }
-
+                magStatus =
+                    {
+                        A: MagStatus.VERY_BAD,
+                        B: MagStatus.BAD,
+                        C: MagStatus.OKAY,
+                        D: MagStatus.GREAT,
+                    }[magnetometerData] || MagStatus.Unknown;
                 trackerMag.set(trackerName, magStatus);
             }
         }
 
-        const rotation = {
-            x: (rotationX / 180.0) * 0.01,
-            y: (rotationY / 180.0) * 0.01,
-            z: (rotationZ / 180.0) * 0.01 * -1.0,
-            w: (rotationW / 180.0) * 0.01 * -1.0,
+        const rotation = { x: rotationX, y: rotationY, z: rotationZ, w: rotationW };
+
+        const r0 = rotation.w,
+            r1 = -rotation.x,
+            r2 = -rotation.y,
+            r3 = -rotation.z;
+
+        const hrp0 = r0 * GRAVITY_CONSTANT;
+        const hrp1 = r1 * GRAVITY_CONSTANT;
+        const hrp2 = r2 * GRAVITY_CONSTANT;
+        const hrp3 = r3 * GRAVITY_CONSTANT;
+
+        const hFinal1 = -hrp1 * rotation.w + hrp0 * rotation.x + hrp3 * rotation.y - hrp2 * rotation.z;
+        const hFinal2 = -hrp2 * rotation.w - hrp3 * rotation.x + hrp0 * rotation.y + hrp1 * rotation.z;
+        const hFinal3 = -hrp3 * rotation.w + hrp2 * rotation.x - hrp1 * rotation.y + hrp0 * rotation.z;
+
+        const acceleration = {
+            x: gravityRawX + hFinal1 * GRAVITY_ADJUSTMENT,
+            y: gravityRawY + hFinal2 * GRAVITY_ADJUSTMENT,
+            z: gravityRawZ - hFinal3 * GRAVITY_ADJUSTMENT,
         };
 
-        const rc = [rotation.w, rotation.x, rotation.y, rotation.z];
-        const r = [rc[0], -rc[1], -rc[2], -rc[3]];
-        const p = [0.0, 0.0, 0.0, 9.81];
-
-        const hrp = [
-            r[0] * p[0] - r[1] * p[1] - r[2] * p[2] - r[3] * p[3],
-            r[0] * p[1] + r[1] * p[0] + r[2] * p[3] - r[3] * p[2],
-            r[0] * p[2] - r[1] * p[3] + r[2] * p[0] + r[3] * p[1],
-            r[0] * p[3] + r[1] * p[2] - r[2] * p[1] + r[3] * p[0],
-        ];
-
-        const hFinal = [
-            hrp[0] * rc[0] - hrp[1] * rc[1] - hrp[2] * rc[2] - hrp[3] * rc[3],
-            hrp[0] * rc[1] + hrp[1] * rc[0] + hrp[2] * rc[3] - hrp[3] * rc[2],
-            hrp[0] * rc[2] - hrp[1] * rc[3] + hrp[2] * rc[0] + hrp[3] * rc[1],
-            hrp[0] * rc[3] + hrp[1] * rc[2] - hrp[2] * rc[1] + hrp[3] * rc[0],
-        ];
-
-        const gravityRaw = {
-            x: gravityRawX / 256.0,
-            y: gravityRawY / 256.0,
-            z: gravityRawZ / 256.0,
-        };
-
-        const gravity = {
-            x: gravityRaw.x - hFinal[1] * -1.2,
-            y: gravityRaw.y - hFinal[2] * -1.2,
-            z: gravityRaw.z - hFinal[3] * 1.2,
-        };
-
-        return { rotation, gravity, ankle, magStatus };
+        return { rotation, acceleration, ankle, magStatus };
     } catch (err) {
         error(`Error decoding IMU packet: ${err}`, false);
+        return null;
     }
 }
+
 /**
  * Processes other tracker data received from the tracker by the dongle.
  * Read function comments for more information.
@@ -1457,17 +1437,12 @@ function processSettingsData(data: string, trackerName: string, characteristic?:
     // example: s:{"imu_mode":1, "imu_num":6, "magf_status":"020200", "speed_mode":2, "dcal_flags":"04", "detected":"04004C6C"}
     if (!trackerName || !data) return;
 
-    const SENSOR_MODE_INDEX = 6;
-    const POSTURE_DATA_RATE_INDEX = 5;
-    const SENSOR_AUTO_CORRECTION_INDEX = 10;
-    const ANKLE_MOTION_DETECTION_INDEX = 13;
-
     try {
         if (trackerModelEnabled === "wireless" && !trackerName.startsWith("HaritoraXW")) {
-            const sensorMode = parseInt(data[SENSOR_MODE_INDEX]);
-            const fpsMode = parseInt(data[POSTURE_DATA_RATE_INDEX]);
-            const sensorAutoCorrection = parseInt(data[SENSOR_AUTO_CORRECTION_INDEX]);
-            const ankleMotionDetection = parseInt(data[ANKLE_MOTION_DETECTION_INDEX]);
+            const sensorMode = parseInt(data[6]);
+            const fpsMode = parseInt(data[5]);
+            const sensorAutoCorrection = parseInt(data[10]);
+            const ankleMotionDetection = parseInt(data[13]);
 
             const sensorModeText = sensorMode === 0 ? 2 : 1;
             const fpsModeText = fpsMode === 0 ? 50 : 100;
@@ -1568,29 +1543,24 @@ function processInfoData(data: string, trackerName: string) {
 function processButtonData(data: string, trackerName: string, characteristic?: string) {
     if (!canSendButtonData || !trackerName || trackerName === "DONGLE") return;
 
-    let currentButtons = trackerButtons.get(trackerName) || [0, 0, 0];
-    let buttonPressed = undefined;
-    let isOn = true;
-
     try {
+        const currentButtons = trackerButtons.get(trackerName) || [0, 0, 0];
+        let result: { buttonPressed: string; isOn: boolean } = { buttonPressed: undefined, isOn: true };
+
         if (trackerName.startsWith("HaritoraXW")) {
-            buttonPressed = processWirelessBTTrackerData(characteristic, currentButtons);
-        } else if (comEnabled && trackerModelEnabled === "wireless") {
-            const { buttonPressed: newButtonPressed, isOn: newIsOn } = processWirelessTrackerData(
-                data,
-                trackerName,
-                currentButtons
-            );
-            buttonPressed = newButtonPressed;
-            isOn = newIsOn;
-        } else if (comEnabled && trackerModelEnabled === "wired") {
-            buttonPressed = processWiredTrackerData(data, trackerName, currentButtons);
+            result.buttonPressed = processWirelessBTTrackerData(characteristic, currentButtons);
+        } else if (comEnabled) {
+            result =
+                trackerModelEnabled === "wireless"
+                    ? processWirelessTrackerData(data, trackerName, currentButtons)
+                    : processWiredTrackerData(data, trackerName, currentButtons);
+        }
+        if (result.buttonPressed) {
+            log(`Button ${result.buttonPressed} pressed on tracker ${trackerName}. Current state: ${currentButtons}`);
         }
 
-        if (buttonPressed) log(`Button ${buttonPressed} pressed on tracker ${trackerName}. Current state: ${currentButtons}`);
-
         trackerButtons.set(trackerName, currentButtons);
-        main.emit("button", trackerName, buttonPressed, isOn, ...currentButtons);
+        main.emit("button", trackerName, result.buttonPressed, result.isOn, ...currentButtons);
     } catch (err) {
         error(`Error processing button data for ${trackerName}: ${err}`);
     }
@@ -1645,21 +1615,24 @@ function processWirelessBTTrackerData(characteristic: string, currentButtons: nu
     }
 }
 
-function processWiredTrackerData(data: string, trackerName: string, currentButtons: number[]): string | undefined {
+function processWiredTrackerData(data: string, trackerName: string, currentButtons: number[]) {
     // example data: t:{"id":"button2", "type":"click", "start_time":6937744, "option":""}
     // TODO: do more testing with wired trackers, find different "type"(s) and what "start_time" and "option" mean
     const buttonData = JSON.parse(data);
     if (trackerName === "HaritoraXWired") {
+        let pressed = undefined;
         if (buttonData.id === "button1") {
             currentButtons[MAIN_BUTTON_INDEX] += 1;
-            return "main";
+            pressed = "main";
         } else if (buttonData.id === "button2") {
             currentButtons[SUB_BUTTON_INDEX] += 1;
-            return "sub";
+            pressed = "sub";
         } else if (buttonData.id === "button3") {
             currentButtons[SUB2_BUTTON_INDEX] += 1;
-            return "sub2";
+            pressed = "sub2";
         }
+
+        return { buttonPressed: pressed, isOn: true };
     }
 
     return undefined;
@@ -1677,61 +1650,55 @@ function processWiredTrackerData(data: string, trackerName: string, currentButto
  * @fires haritora#battery
  **/
 
+const CHARGE_STATUS_MAP = new Map([
+    ["00", "discharging"],
+    ["01", "charging"],
+    ["02", "charged"],
+]);
+
 function processBatteryData(data: string, trackerName: string, characteristic?: string) {
     if (!trackerName || !data) return;
 
     const batteryData: [number | undefined, number | undefined, string | undefined] = [undefined, undefined, undefined];
-    const logBatteryInfo = (remaining: number | undefined, voltage: number | undefined, status: string | undefined) => {
-        if (remaining !== undefined) log(`Tracker "${trackerName}" remaining: ${remaining}%`);
-        if (voltage !== undefined) log(`Tracker "${trackerName}" voltage: ${voltage}`);
-        if (status !== undefined) log(`Tracker "${trackerName}" Status: ${status}`);
-    };
 
-    if (comEnabled && !isWirelessBTTracker(trackerName)) {
-        try {
+    try {
+        if (comEnabled && !isWirelessBTTracker(trackerName)) {
             const batteryInfo = JSON.parse(data);
             batteryData[0] = batteryInfo["battery remaining"];
             batteryData[1] = batteryInfo["battery voltage"];
             batteryData[2] = batteryInfo["charge status"];
-            logBatteryInfo(batteryData[0], batteryData[1], batteryData[2]);
-        } catch (err) {
-            error(`Error parsing battery data JSON for ${trackerName}: ${err}`);
-            log(`Raw battery data: ${data}`);
-        }
-    } else if (isWirelessBTTracker(trackerName) && characteristic) {
-        try {
-            if (characteristic === "BatteryLevel") {
-                const batteryRemaining = parseInt(Buffer.from(data, "base64").toString("hex"), 16);
-                updateAndEmitBatteryInfo(trackerName, "BatteryLevel", batteryRemaining);
-            } else if (characteristic === "BatteryVoltage") {
-                const batteryVoltage = Buffer.from(data, "base64").readInt16LE(0);
-                updateAndEmitBatteryInfo(trackerName, "BatteryVoltage", batteryVoltage);
-            } else if (characteristic === "ChargeStatus") {
-                const chargeStatus = Buffer.from(data, "base64").toString("hex");
-                let chargeStatusReadable;
-                switch (chargeStatus) {
-                    case "00":
-                        chargeStatusReadable = "discharging";
-                        break;
-                    case "01":
-                        chargeStatusReadable = "charging";
-                        break;
-                    case "02":
-                        chargeStatusReadable = "charged";
-                        break;
-                    default:
-                        chargeStatusReadable = "unknown";
-                        break;
-                }
-                updateAndEmitBatteryInfo(trackerName, "ChargeStatus", chargeStatusReadable);
-            }
-        } catch (err) {
-            error(`Error processing battery data for ${trackerName}: ${err}`);
-        }
-    }
 
-    trackerBattery.set(trackerName, batteryData);
-    main.emit("battery", trackerName, ...batteryData);
+            if (debug) {
+                const [remaining, voltage, status] = batteryData;
+                if (remaining !== undefined) log(`Tracker "${trackerName}" remaining: ${remaining}%`);
+                if (voltage !== undefined) log(`Tracker "${trackerName}" voltage: ${voltage}`);
+                if (status !== undefined) log(`Tracker "${trackerName}" Status: ${status}`);
+            }
+        } else if (isWirelessBTTracker(trackerName) && characteristic) {
+            const buffer = Buffer.from(data, "base64");
+
+            switch (characteristic) {
+                case "BatteryLevel":
+                    updateAndEmitBatteryInfo(trackerName, characteristic, parseInt(buffer.toString("hex"), 16));
+                    break;
+
+                case "BatteryVoltage":
+                    updateAndEmitBatteryInfo(trackerName, characteristic, buffer.readInt16LE(0));
+                    break;
+
+                case "ChargeStatus":
+                    const hex = buffer.toString("hex");
+                    updateAndEmitBatteryInfo(trackerName, characteristic, CHARGE_STATUS_MAP.get(hex) || "unknown");
+                    break;
+            }
+        }
+
+        trackerBattery.set(trackerName, batteryData);
+        main.emit("battery", trackerName, ...batteryData);
+    } catch (err) {
+        error(`Error processing battery data for ${trackerName}: ${err}`);
+        if (debug) log(`Raw battery data: ${data}`);
+    }
 }
 
 let batteryInfo: any = {};
