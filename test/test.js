@@ -39,7 +39,6 @@ if (mode === "bt" || mode === "bluetooth") {
     setTimeout(() => {
         //device.setTrackerSettings("rightAnkle", 50, 2, [''], false);
         console.log(`Tracker settings map:`, device.getTrackerSettings("rightAnkle"));
-        console.log(`Tracker raw hex settings map:`, device.getTrackerSettingsRaw("rightAnkle"));
         console.log(`Tracker buttons map:`, device.getTrackerButtons("rightAnkle"));
     }, 5000);
 
