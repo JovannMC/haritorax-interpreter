@@ -1260,8 +1260,8 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
     try {
         const rotationX = data.readInt16LE(0) * ROTATION_SCALAR;
         const rotationY = data.readInt16LE(2) * ROTATION_SCALAR;
-        const rotationZ = data.readInt16LE(4) * ROTATION_SCALAR * -1;
-        const rotationW = data.readInt16LE(6) * ROTATION_SCALAR * -1;
+        const rotationZ = data.readInt16LE(4) * -ROTATION_SCALAR;
+        const rotationW = data.readInt16LE(6) * -ROTATION_SCALAR;
 
         const gravityRawX = data.readInt16LE(8) * GRAVITY_SCALAR;
         const gravityRawY = data.readInt16LE(10) * GRAVITY_SCALAR;
@@ -1288,24 +1288,28 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
 
         const rotation = { x: rotationX, y: rotationY, z: rotationZ, w: rotationW };
 
-        const r0 = rotation.w,
-            r1 = -rotation.x,
-            r2 = -rotation.y,
-            r3 = -rotation.z;
+        const rc = [rotation.w, rotation.x, rotation.y, rotation.z];
+        const r = [rc[0], -rc[1], -rc[2], -rc[3]];
+        const p = [0.0, 0.0, 0.0, GRAVITY_CONSTANT];
 
-        const hrp0 = r0 * GRAVITY_CONSTANT;
-        const hrp1 = r1 * GRAVITY_CONSTANT;
-        const hrp2 = r2 * GRAVITY_CONSTANT;
-        const hrp3 = r3 * GRAVITY_CONSTANT;
+        const hrp = [
+            r[0] * p[0] - r[1] * p[1] - r[2] * p[2] - r[3] * p[3],
+            r[0] * p[1] + r[1] * p[0] + r[2] * p[3] - r[3] * p[2],
+            r[0] * p[2] - r[1] * p[3] + r[2] * p[0] + r[3] * p[1],
+            r[0] * p[3] + r[1] * p[2] - r[2] * p[1] + r[3] * p[0],
+        ];
 
-        const hFinal1 = -hrp1 * rotation.w + hrp0 * rotation.x + hrp3 * rotation.y - hrp2 * rotation.z;
-        const hFinal2 = -hrp2 * rotation.w - hrp3 * rotation.x + hrp0 * rotation.y + hrp1 * rotation.z;
-        const hFinal3 = -hrp3 * rotation.w + hrp2 * rotation.x - hrp1 * rotation.y + hrp0 * rotation.z;
+        const hFinal = [
+            hrp[0] * rc[0] - hrp[1] * rc[1] - hrp[2] * rc[2] - hrp[3] * rc[3],
+            hrp[0] * rc[1] + hrp[1] * rc[0] + hrp[2] * rc[3] - hrp[3] * rc[2],
+            hrp[0] * rc[2] - hrp[1] * rc[3] + hrp[2] * rc[0] + hrp[3] * rc[1],
+            hrp[0] * rc[3] + hrp[1] * rc[2] - hrp[2] * rc[1] + hrp[3] * rc[0],
+        ];
 
         const acceleration = {
-            x: gravityRawX + hFinal1 * GRAVITY_ADJUSTMENT,
-            y: gravityRawY + hFinal2 * GRAVITY_ADJUSTMENT,
-            z: gravityRawZ - hFinal3 * GRAVITY_ADJUSTMENT,
+            x: gravityRawX - hFinal[1] * -GRAVITY_ADJUSTMENT,
+            y: gravityRawY - hFinal[2] * -GRAVITY_ADJUSTMENT,
+            z: gravityRawZ - hFinal[3] * GRAVITY_ADJUSTMENT,
         };
 
         return { rotation, acceleration, ankle, magStatus };
