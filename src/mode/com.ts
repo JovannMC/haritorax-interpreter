@@ -5,6 +5,7 @@ import { ReadlineParser } from "@serialport/parser-readline";
 import { SerialPortStream } from "@serialport/stream";
 import { EventEmitter } from "events";
 import { BTSPP } from "../libs/btspp";
+import { TrackerModel } from "../types";
 
 const Binding = autoDetect();
 
@@ -64,7 +65,7 @@ export default class COM extends EventEmitter {
     async isDeviceAvailable() {
         const ports = await Binding.list();
         const btsppDevices = await btspp.getPairedDevices();
-        const allDevices = [...dongles, ...btsppDevices];
+        const allDevices = btsppDevices ? [...dongles, ...btsppDevices] : [...dongles];
 
         for (const device of allDevices) {
             if (
@@ -93,9 +94,11 @@ export default class COM extends EventEmitter {
             }
         }
 
-        for (const btDevice of btsppDevices) {
-            if (btDevice.name.startsWith("HaritoraX-") || btDevice.name.startsWith("Haritora-")) {
-                availableDeviceNames.add("HaritoraX Wired");
+        if (btsppDevices) {
+            for (const btDevice of btsppDevices) {
+                if (btDevice.name.startsWith("HaritoraX-") || btDevice.name.startsWith("Haritora-")) {
+                    availableDeviceNames.add("HaritoraX Wired");
+                }
             }
         }
 
@@ -106,7 +109,8 @@ export default class COM extends EventEmitter {
 
     async getDevicePorts(device: string) {
         const ports = await Binding.list();
-        const bluetoothDevices = await btspp.getPairedDevices();
+        let bluetoothDevices;
+        if (device === TrackerModel.Wired) bluetoothDevices = await btspp.getPairedDevices();
         const availablePorts = ports
             .map((port) => {
                 const deviceMatch = dongles.find(
@@ -130,9 +134,11 @@ export default class COM extends EventEmitter {
             if (port_2.deviceName?.toLowerCase() === device.toLowerCase()) foundPorts.push(port_2.path);
         }
 
-        for (const btDevice of bluetoothDevices) {
-            if ((btDevice.name.startsWith("HaritoraX-") || btDevice.name.startsWith("Haritora-")) && btDevice.comPort) {
-                foundPorts.push(btDevice.comPort);
+        if (device === TrackerModel.Wired) {
+            for (const btDevice of bluetoothDevices) {
+                if (btDevice.name.startsWith("HaritoraX-") || btDevice.name.startsWith("Haritora-")) {
+                    foundPorts.push(btDevice.comPort);
+                }
             }
         }
 
@@ -544,3 +550,4 @@ export interface ActivePorts {
 }
 
 export { COM };
+

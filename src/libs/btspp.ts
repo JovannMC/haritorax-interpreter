@@ -155,13 +155,19 @@ export default class BTSPP extends EventEmitter {
         });
     };
 
-    getPairedDevices = (): Promise<BluetoothDevice[]> => {
+    getPairedDevices = (): Promise<BluetoothDevice[] | null> => {
         const platform = process.platform;
         switch (platform) {
             case "win32":
-                return this.getPairedDevicesWindows();
+                return this.getPairedDevicesWindows().catch((): Promise<BluetoothDevice[] | null> => {
+                    error("Bluetooth is not available on this system", false);
+                    return null;
+                });
             case "linux":
-                return this.getPairedDevicesLinux();
+                return this.getPairedDevicesLinux().catch((): Promise<BluetoothDevice[] | null> => {
+                    error("Bluetooth is not available on this system", false);
+                    return null;
+                });
             default:
                 return Promise.reject(new Error("Unsupported platform"));
         }
