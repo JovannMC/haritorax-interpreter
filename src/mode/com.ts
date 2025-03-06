@@ -489,11 +489,6 @@ async function processData(data: string, port: string) {
                     main.emit("data", ankleTrackerName, port, portId, identifier, ankleBuffer.toString("base64"));
                     main.emit("data", thighTrackerName, port, portId, identifier, thighBuffer.toString("base64"));
 
-                    // Optionally, process the IMU data immediately:
-                    //processIMUData(ankleBuffer, ankleTrackerName);
-                    //processIMUData(thighBuffer, thighTrackerName);
-
-                    // Since we've handled both trackers here, exit early:
                     return;
                 } else {
                     log(`Normal tracker detected on port ${port} with data length: ${dataLength} bytes`);
