@@ -1667,29 +1667,24 @@ function processBatteryData(data: string, trackerName: string, characteristic?: 
 
     try {
         if (comEnabled && !isWirelessBTTracker(trackerName)) {
+            // If battery data isn't in JSON format, skip processing it
+            if (!data.trim().startsWith("{")) {
+                log(`No valid battery data for tracker ${trackerName}: ${data}`);
+                return;
+            }
             const batteryInfo = JSON.parse(data);
             batteryData[0] = batteryInfo["battery remaining"];
             batteryData[1] = batteryInfo["battery voltage"];
             batteryData[2] = batteryInfo["charge status"];
-
-            if (debug) {
-                const [remaining, voltage, status] = batteryData;
-                if (remaining !== undefined) log(`Tracker "${trackerName}" remaining: ${remaining}%`);
-                if (voltage !== undefined) log(`Tracker "${trackerName}" voltage: ${voltage}`);
-                if (status !== undefined) log(`Tracker "${trackerName}" Status: ${status}`);
-            }
         } else if (isWirelessBTTracker(trackerName) && characteristic) {
             const buffer = Buffer.from(data, "base64");
-
             switch (characteristic) {
                 case "BatteryLevel":
                     updateAndEmitBatteryInfo(trackerName, characteristic, parseInt(buffer.toString("hex"), 16));
                     break;
-
                 case "BatteryVoltage":
                     updateAndEmitBatteryInfo(trackerName, characteristic, buffer.readInt16LE(0));
                     break;
-
                 case "ChargeStatus":
                     const hex = buffer.toString("hex");
                     updateAndEmitBatteryInfo(trackerName, characteristic, CHARGE_STATUS_MAP.get(hex) || "unknown");

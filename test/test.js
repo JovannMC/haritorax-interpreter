@@ -2,7 +2,7 @@ const { HaritoraX } = require("../dist/index.js");
 require("../dist/libs/btspp.js");
 
 let mode = process.argv[2] || "com";
-let device = new HaritoraX("wireless", true, false, false);
+let device = new HaritoraX("wireless", true, true, false);
 
 if (mode === "bt" || mode === "bluetooth") {
     device.startConnection("bluetooth");
@@ -20,7 +20,7 @@ if (mode === "bt" || mode === "bluetooth") {
         }
     }, 3000);*/
 } else {
-    device.startConnection("com", ["COM3", "COM4", "COM5"]);
+    device.startConnection("com", ["COM9", "COM8", "COM11"]);
 
     device.on("connect", (trackerName) => {
         console.log(`Connected to tracker ${trackerName}`);

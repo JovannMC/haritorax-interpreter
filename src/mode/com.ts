@@ -451,8 +451,55 @@ async function processData(data: string, port: string) {
                 portId = match ? match[0] : "DONGLE";
                 portData = splitData[1];
 
-                // silently listen to data and silently assign any missing trackers
-                // these should have been already assigned from when the COM port is opened though
+                // Decode the Base64 data to check its length
+                const decodedData = Buffer.from(portData, 'base64');
+                const dataLength = decodedData.length;
+
+                // If leg tracker data is detected (double 14 bytes)…
+                if (dataLength >= 28) { // Leg tracker detected
+                    log(`Leg tracker detected on port ${port} with data length: ${dataLength} bytes`);
+
+                    // Split the data into two 14-byte buffers:
+                    const ankleBuffer = decodedData.slice(0, 14);
+                    const thighBuffer = decodedData.slice(14, 28);
+
+                    // Determine tracker names based on portId.
+                    // (Adjust these names if your assignment differs.)
+                    let ankleTrackerName: string;
+                    let thighTrackerName: string;
+                    if (portId === "2") {
+                        ankleTrackerName = "leftAnkle";
+                        thighTrackerName = "leftKnee"; // New tracker name for the thigh
+                    } else if (portId === "4") {
+                        ankleTrackerName = "rightAnkle";
+                        thighTrackerName = "rightKnee";
+                    } else {
+                        // Fallback names if needed
+                        ankleTrackerName = portId;
+                        thighTrackerName = portId;
+                    }
+
+                    // Update trackerAssignment for both trackers:
+                    trackerAssignment.set(ankleTrackerName, [portId, port, portId]);
+                    trackerAssignment.set(thighTrackerName, [(parseInt(portId) + 1).toString(), port, portId]);
+
+                    log(`Assigned ${ankleTrackerName} and ${thighTrackerName} to port ${port} with port ID ${portId}`);
+
+                    // Emit separate "data" events for each tracker (using Base64 strings)
+                    main.emit("data", ankleTrackerName, port, portId, identifier, ankleBuffer.toString("base64"));
+                    main.emit("data", thighTrackerName, port, portId, identifier, thighBuffer.toString("base64"));
+
+                    // Optionally, process the IMU data immediately:
+                    //processIMUData(ankleBuffer, ankleTrackerName);
+                    //processIMUData(thighBuffer, thighTrackerName);
+
+                    // Since we've handled both trackers here, exit early:
+                    return;
+                } else {
+                    log(`Normal tracker detected on port ${port} with data length: ${dataLength} bytes`);
+                }
+
+                // If not a leg tracker then continue with your existing silent assignment code...
                 for (let [key, value] of trackerAssignment.entries()) {
                     if (value[1] === "" && /^r.+/.test(identifier)) {
                         const trackerId = parseInt(portData.charAt(4));
