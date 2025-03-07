@@ -457,11 +457,13 @@ async function processData(data: string, port: string) {
                 const dataLength = decodedData.length;
 
                 // Leg tracker data is expected to be at least 28 bytes (sometimes 30 bytes)
-                if (dataLength >= 28) {
-                    log(`Leg tracker detected on port ${port} with data length: ${dataLength} bytes`);
-
-                    const kneeData = decodedData.slice(0, 14);  // First 14 bytes
-                    const ankleData = decodedData.slice(14, 28); // Next 14 bytes
+                if (dataLength >= 30) {
+                    //log(`Leg tracker detected on port ${port} with data length: ${dataLength} bytes`);
+    
+                    // If extra bytes exist (e.g., a 2-byte checksum), only use the first 28 bytes.
+                    //const validData = dataLength > 28 ? decodedData.slice(0, 28) : decodedData;
+                    const kneeData = decodedData.slice(0, 14);  // First 14 bytes for knee
+                    const ankleData = decodedData.slice(16, 30); // Next 14 bytes for ankle
 
                     // Determine which leg tracker to assign by checking current assignments
                     const leftKneeAssign = trackerAssignment.get("leftKnee");
@@ -504,7 +506,7 @@ async function processData(data: string, port: string) {
                     const assignedTrackerId = (kneeTracker === "leftKnee") ? "2" : "4";
                     trackerAssignment.set(kneeTracker, [assignedTrackerId, port, assignedTrackerId]);
                     trackerAssignment.set(ankleTracker, [(parseInt(assignedTrackerId) + 1).toString(), port, assignedTrackerId]);
-                    log(`Assigned ${kneeTracker} and ${ankleTracker} to port ${port} with tracker id ${assignedTrackerId}`);
+                    //log(`Assigned ${kneeTracker} and ${ankleTracker} to port ${port} with tracker id ${assignedTrackerId}`);
 
                     main.emit("data", kneeTracker, port, assignedTrackerId, identifier, kneeData.toString("base64"));
                     main.emit("data", ankleTracker, port, assignedTrackerId, identifier, ankleData.toString("base64"));
