@@ -47,7 +47,7 @@ export default class Bluetooth extends EventEmitter {
             let availableDevices = [];
 
             noble.on("discover", (peripheral) => {
-                if (peripheral.advertisement.localName && peripheral.advertisement.localName.startsWith("HaritoraXW-")) {
+                if (peripheral.advertisement.localName && peripheral.advertisement.localName.startsWith("HaritoraXW-") || peripheral.advertisement.localName.startsWith("HaritoraX2")) {
                     availableDevices.push("HaritoraX Wireless");
                     found = true;
                     noble.removeAllListeners();
@@ -118,7 +118,7 @@ export default class Bluetooth extends EventEmitter {
         const {
             advertisement: { localName },
         } = peripheral;
-        if (!localName || !localName.startsWith("HaritoraXW-")) return;
+        if (!localName || (!localName.startsWith("HaritoraX2") && !localName.startsWith("HaritoraXW-"))) return;
 
         const deviceExists = activeDevices.some((device) => device[0] === localName || device[1] === peripheral);
         if (deviceExists) return;
