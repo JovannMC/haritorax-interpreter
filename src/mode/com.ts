@@ -502,24 +502,34 @@ async function processData(data: string, port: string) {
             // HaritoraX 2 legs data
             const trackerNameThigh = trackerName === "leftAnkle" ? "leftKnee" : "rightKnee";
 
-            const legData = portData.slice(0, 19);
-            const magData = portData.slice(19, 21);
-            const thighData = portData.slice(21, 40);
-            const lidarData = dataLength === 44 ? portData.slice(40) : null;
+            const buffer = Buffer.from(portData, "base64");
+            const legData = buffer.slice(0, 14);
+            let thighData, remainingData;
+
+            if (dataLength === 40) {
+                thighData = buffer.slice(16, 30);
+                //remainingData = buffer.slice(30);
+            } else if (dataLength === 44) {
+                thighData = buffer.slice(18, 32);
+                //remainingData = buffer.slice(32);
+                const extraBytes = buffer.slice(16, 18);
+                log(`Extra bytes: ${extraBytes.toString("base64")}`);
+            }
 
             log(`Processing HaritoraX2 legs data for ${trackerName}`);
-            log(`IMU data (leg): ${legData}`);
-            log(`IMU data (thigh): ${thighData}`);
-            log(`Mag data: ${magData}`);
-            if (lidarData) log(`LiDAR data: ${lidarData}`);
+            log(`IMU data (leg): ${legData.toString("base64")}`);
+            log(`IMU data (thigh): ${thighData.toString("base64")}`);
+            //if (remainingData.length > 0) log(`Remaining data: ${remainingData.toString("base64")}`);
 
             // emit data event for main "leg" tracker
-            main.emit("data", trackerName, port, portId, identifier, legData + magData);
+            main.emit("data", trackerName, port, portId, identifier, legData.toString("base64"));
             // emit data event for extension "thigh" tracker
-            main.emit("data", trackerNameThigh, port, portId, identifier, thighData + magData);
+            main.emit("data", trackerNameThigh, port, portId, identifier, thighData.toString("base64"));
+            log(`Processed HaritoraX2 legs data for ${trackerName}`);
             return;
         } else {
             // regular HaritoraX 2 / Wireless data
+            log(`Processing data for ${trackerName}: ${portData}`);
             main.emit("data", trackerName, port, portId, identifier, portData);
         }
     } catch (err) {
