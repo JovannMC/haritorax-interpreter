@@ -425,6 +425,10 @@ export default class COM extends EventEmitter {
             }
         });
     }
+
+    processData(data: string, port: string) {
+        processData(data, port);
+    }
 }
 
 /*
@@ -443,99 +447,32 @@ async function processData(data: string, port: string) {
         let portId = null;
         let portData = null;
 
+        const splitData = data.toString().split(/:(.+)/);
+        if (splitData.length < 1) return;
+        identifier = splitData[0].toLowerCase();
+        portData = splitData[1];
+
         if (trackerModelEnabled === "wireless") {
-            const splitData = data.toString().split(/:(.+)/);
-            if (splitData.length > 1) {
-                identifier = splitData[0].toLowerCase();
-                // For normal trackers we extract a digit from the identifier...
-                const match = identifier.match(/\d/);
-                portId = match ? match[0] : "DONGLE";
-                portData = splitData[1];
+            const match = identifier.match(/\d/);
+            portId = match ? match[0] : "DONGLE";
 
-                // Decode Base64 data
-                const decodedData = Buffer.from(portData, "base64");
-                const dataLength = decodedData.length;
-
-                // Leg tracker data is expected to be at least 28 bytes (sometimes 30 bytes)
-                if (dataLength >= 30) {
-                    //log(`Leg tracker detected on port ${port} with data length: ${dataLength} bytes`);
-    
-                    // If extra bytes exist (e.g., a 2-byte checksum), only use the first 28 bytes.
-                    //const validData = dataLength > 28 ? decodedData.slice(0, 28) : decodedData;
-                    const kneeData = decodedData.slice(0, 14);  // First 14 bytes for knee
-                    const ankleData = decodedData.slice(16, 30); // Next 14 bytes for ankle
-
-                    // Determine which leg tracker to assign by checking current assignments
-                    const leftKneeAssign = trackerAssignment.get("leftKnee");
-                    const rightKneeAssign = trackerAssignment.get("rightKnee");
-                    let kneeTracker, ankleTracker;
-
-                    if ((!leftKneeAssign[1] || leftKneeAssign[1] === "") && (!rightKneeAssign[1] || rightKneeAssign[1] === "")) {
-                        // Neither leg has been assigned yet; assign this one to left by default.
-                        kneeTracker = "leftKnee";
-                        ankleTracker = "leftAnkle";
-                    } else if (leftKneeAssign[1] && leftKneeAssign[1] !== port) {
-                        // Left is assigned elsewhere, so assign this tracker to right if available.
-                        if (!rightKneeAssign[1] || rightKneeAssign[1] === "") {
-                            kneeTracker = "rightKnee";
-                            ankleTracker = "rightAnkle";
-                        } else if (rightKneeAssign[1] === port) {
-                            kneeTracker = "rightKnee";
-                            ankleTracker = "rightAnkle";
-                        } else {
-                            // Fallback: update left if current port already matches left.
-                            kneeTracker = "leftKnee";
-                            ankleTracker = "leftAnkle";
-                        }
-                    } else if (leftKneeAssign[1] === port) {
-                        // Current port is already assigned to left.
-                        kneeTracker = "leftKnee";
-                        ankleTracker = "leftAnkle";
-                    } else if ((!rightKneeAssign[1] || rightKneeAssign[1] === "") || rightKneeAssign[1] === port) {
-                        // Otherwise, assign to right.
-                        kneeTracker = "rightKnee";
-                        ankleTracker = "rightAnkle";
-                    } else {
-                        // Fallback to left if none of the above conditions match.
-                        kneeTracker = "leftKnee";
-                        ankleTracker = "leftAnkle";
-                    }
-
-                    // Use default tracker IDs:
-                    // leftKnee is "2" (and leftAnkle "3"), rightKnee is "4" (and rightAnkle "5")
-                    const assignedTrackerId = (kneeTracker === "leftKnee") ? "2" : "4";
-                    trackerAssignment.set(kneeTracker, [assignedTrackerId, port, assignedTrackerId]);
-                    trackerAssignment.set(ankleTracker, [(parseInt(assignedTrackerId) + 1).toString(), port, assignedTrackerId]);
-                    //log(`Assigned ${kneeTracker} and ${ankleTracker} to port ${port} with tracker id ${assignedTrackerId}`);
-
-                    main.emit("data", kneeTracker, port, assignedTrackerId, identifier, kneeData.toString("base64"));
-                    main.emit("data", ankleTracker, port, assignedTrackerId, identifier, ankleData.toString("base64"));
-                    return;
-                }
-
-                // Normal tracker assignment for non-leg trackers
-                for (let [key, value] of trackerAssignment.entries()) {
-                    if (value[1] === "" && /^r.+/.test(identifier)) {
-                        const trackerId = parseInt(portData.charAt(4));
-                        if (parseInt(value[0]) === trackerId && trackerId !== 0) {
-                            trackerAssignment.set(key, [trackerId.toString(), port, portId]);
-                            log(`Setting ${key} to port ${port} with port ID ${portId}`);
-                        }
-                    }
-                }
-
-                for (let [key, value] of trackerAssignment.entries()) {
-                    if (value[1] === port && value[2] === portId) {
-                        trackerName = key;
-                        break;
+            // silently listen to data and silently assign any missing trackers
+            // these should have been already assigned from when the COM port is opened though
+            for (let [key, value] of trackerAssignment.entries()) {
+                if (value[1] === "" && identifier.startsWith("i")) {
+                    const trackerId = parseInt(portData.charAt(4));
+                    if (parseInt(value[0]) === trackerId && trackerId !== 0) {
+                        trackerAssignment.set(key, [trackerId.toString(), port, portId]);
+                        log(`Setting ${key} to port ${port} with port ID ${portId}`);
                     }
                 }
             }
-        } else if (trackerModelEnabled === "wired") {
-            const splitData = data.toString().split(/:(.+)/);
-            if (splitData.length > 1) {
-                identifier = splitData[0].toLowerCase();
-                portData = splitData[1];
+
+            for (let [key, value] of trackerAssignment.entries()) {
+                if (value[1] === port && value[2] === portId) {
+                    trackerName = key;
+                    break;
+                }
             }
         }
 
@@ -554,7 +491,37 @@ async function processData(data: string, port: string) {
             }
         }
 
-        main.emit("data", trackerName, port, portId, identifier, portData);
+        // "legs" ids in HX2 are equivalent to ankles in HXW - no need for new identifier
+        const isAnkle = trackerName === "leftAnkle" || trackerName === "rightAnkle";
+        const dataLength = portData.length;
+        const isLegs = isAnkle && dataLength >= 40;
+        const isIMUData = identifier.startsWith("x");
+
+        // Check if it's IMU (x) data, and if it's for the legs ("ankles" and is at least 40 bits long)
+        if (isIMUData && isLegs) {
+            // HaritoraX 2 legs data
+            const trackerNameThigh = trackerName === "leftAnkle" ? "leftKnee" : "rightKnee";
+
+            const legData = portData.slice(0, 19);
+            const magData = portData.slice(19, 21);
+            const thighData = portData.slice(21, 40);
+            const lidarData = dataLength === 44 ? portData.slice(40) : null;
+
+            log(`Processing HaritoraX2 legs data for ${trackerName}`);
+            log(`IMU data (leg): ${legData}`);
+            log(`IMU data (thigh): ${thighData}`);
+            log(`Mag data: ${magData}`);
+            if (lidarData) log(`LiDAR data: ${lidarData}`);
+
+            // emit data event for main "leg" tracker
+            main.emit("data", trackerName, port, portId, identifier, legData);
+            // emit data event for extension "thigh" tracker
+            main.emit("data", trackerNameThigh, port, portId, identifier, thighData);
+            return;
+        } else {
+            // regular HaritoraX 2 / Wireless data
+            main.emit("data", trackerName, port, portId, identifier, portData);
+        }
     } catch (err) {
         error(`An unexpected error occurred: ${err}`);
     }
@@ -611,4 +578,3 @@ export interface ActivePorts {
 }
 
 export { COM };
-
