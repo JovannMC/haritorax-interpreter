@@ -1157,15 +1157,11 @@ function processWiredData(identifier: string, data: string) {
             break;
         case "e":
         case "h":
-            if (dataLength >= 18) {
-                trackerNames.push("leftElbow", "rightElbow");
-            }
+            if (dataLength >= 18) trackerNames.push("leftElbow", "rightElbow");
             break;
         case "g":
         case "h":
-            if (dataLength < 18) {
-                trackerNames.push("hip", "leftElbow", "rightElbow");
-            }
+            if (dataLength < 18) trackerNames.push("hip", "leftElbow", "rightElbow");
             break;
     }
 
@@ -1980,4 +1976,3 @@ function updateTrackerSettings(
 }
 
 export { HaritoraX };
-

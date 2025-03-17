@@ -459,7 +459,7 @@ async function processData(data: string, port: string) {
             // silently listen to data and silently assign any missing trackers
             // these should have been already assigned from when the COM port is opened though
             for (let [key, value] of trackerAssignment.entries()) {
-                if (value[1] === "" && identifier.startsWith("i")) {
+                if (value[1] === "" && identifier.startsWith("r")) {
                     const trackerId = parseInt(portData.charAt(4));
                     if (parseInt(value[0]) === trackerId && trackerId !== 0) {
                         trackerAssignment.set(key, [trackerId.toString(), port, portId]);
@@ -514,9 +514,9 @@ async function processData(data: string, port: string) {
             if (lidarData) log(`LiDAR data: ${lidarData}`);
 
             // emit data event for main "leg" tracker
-            main.emit("data", trackerName, port, portId, identifier, legData);
+            main.emit("data", trackerName, port, portId, identifier, legData + magData);
             // emit data event for extension "thigh" tracker
-            main.emit("data", trackerNameThigh, port, portId, identifier, thighData);
+            main.emit("data", trackerNameThigh, port, portId, identifier, thighData + magData);
             return;
         } else {
             // regular HaritoraX 2 / Wireless data
