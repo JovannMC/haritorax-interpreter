@@ -2,10 +2,9 @@
 
 ![Showcase of the package output with debug logs on, showing the data such as tracker settings, info, and interpreted IMU data via the GX6 dongle](showcase.png)
 
-A node.js package that enables communication with the HaritoraX FBT trackers to read/write data to the trackers. No HaritoraConfigurator software needed (mostly)!
+A node.js package that enables communication with the HaritoraX FBT trackers to read/write data to the trackers. No HaritoraConfigurator / VR Manager software needed (mostly)!
 
 Check out the Haritora-GX(6/2) proof-of-concept repository here: https://github.com/JovannMC/haritora-gx-poc
--  A new proof-of-concept repo will be made soon, including all the information I've found about the trackers while developing this package!
 
 ## Installation
 
@@ -23,7 +22,6 @@ For Linux users, you (or your users) need to do some setup depending on the conn
 
 - Run the following commands in your terminal:
   - `sudo usermod -a -G dialout $USER`
-  - `sudo usermod -a -G tty $USER`
   - `sudo usermod -a -G uucp $USER` (for Arch-based distros)
 - Restart your computer
 
@@ -31,14 +29,15 @@ For Linux users, you (or your users) need to do some setup depending on the conn
 
 > See https://github.com/chrvadala/node-ble/tree/main?tab=readme-ov-file#provide-permissions for more info
 
-- Create a new dbus rule (e.g. `/etc/dbus-1/system.d/node-ble.conf`)
-- Insert the following as the contents, changing `%userid%` with your user
+- Run the following command:
+  - This creates a DBus config that will allow the interpreter to access your BLE devices
+  - You may need to change `__USERID__` if it couldn't detect your user
 
 ```
-<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
+echo '<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
   "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
 <busconfig>
-  <policy user="%userid%">
+  <policy user="__USERID__">
    <allow own="org.bluez"/>
     <allow send_destination="org.bluez"/>
     <allow send_interface="org.bluez.GattCharacteristic1"/>
@@ -46,25 +45,26 @@ For Linux users, you (or your users) need to do some setup depending on the conn
     <allow send_interface="org.freedesktop.DBus.ObjectManager"/>
     <allow send_interface="org.freedesktop.DBus.Properties"/>
   </policy>
-</busconfig>
+</busconfig>' | sed "s/__USERID__/$(id -un)/" | sudo tee /etc/dbus-1/system.d/node-ble.conf > /dev/null
 ```
 
 - Restart your computer
 
 ## Supported devices
 
-| Device             | Supported | Elbow/Hip support |
-|--------------------|-----------|-------------------|
-| HaritoraX Wireless |     Y     |         Y         |
-| HaritoraX 1.1B     |     Y     |         Y         |
-| HaritoraX 1.1      |     Y     |         Y         |
-| HaritoraX 1.0      |     Y     |         Y         |
-| Haritora           |     ?     |         ?         |
+| Device             | Supported | Elbow/Hip support | Additional trackers | Extensions |
+|--------------------|-----------|-------------------|---------------------|------------|
+| HaritoraX 2        |     Y     |         Y         |         Y           |     Y      |
+| HaritoraX Wireless |     Y     |         Y         |         Y           |     N      |
+| HaritoraX 1.1B     |     Y     |         Y         |         N           |     N      |
+| HaritoraX 1.1      |     Y     |         Y         |         N           |     N      |
+| HaritoraX 1.0      |     Y     |         Y         |         N           |     N      |
+| Haritora           |     ?     |         ?         |         N           |     N      |
 
 | Communication mode        | Supported |
 |---------------------------|-----------|
 | Bluetooth (Low Energy)    |     Y     |
-| Bluetooth Classic (COM)   |     Y     |
+| Bluetooth Classic (serial)|     Y     |
 | GX6 Communication Dongle  |     Y     |
 | GX2 Communication Dongle  |     Y     |
 
