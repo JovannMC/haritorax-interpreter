@@ -529,7 +529,6 @@ async function processData(data: string, port: string) {
             return;
         } else {
             // regular HaritoraX 2 / Wireless data
-            log(`Processing data for ${trackerName}: ${portData}`);
             main.emit("data", trackerName, port, portId, identifier, portData);
         }
     } catch (err) {
