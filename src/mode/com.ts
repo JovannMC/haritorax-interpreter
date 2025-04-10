@@ -425,6 +425,10 @@ export default class COM extends EventEmitter {
             }
         });
     }
+
+    processData(data: string, port: string) {
+        processData(data, port);
+    }
 }
 
 /*
@@ -438,43 +442,37 @@ async function processData(data: string, port: string) {
     main.emit("dataRaw", data, port);
 
     try {
-        let trackerName: string = null;
-        let identifier: string = null;
-        let portId: string = null;
-        let portData: string = null;
+        let trackerName = null;
+        let identifier = null;
+        let portId = null;
+        let portData = null;
+
+        const splitData = data.toString().split(/:(.+)/);
+        if (splitData.length < 1) return;
+        identifier = splitData[0].toLowerCase();
+        portData = splitData[1];
 
         if (trackerModelEnabled === "wireless") {
-            const splitData = data.toString().split(/:(.+)/);
-            if (splitData.length > 1) {
-                identifier = splitData[0].toLowerCase();
-                const match = identifier.match(/\d/);
-                portId = match ? match[0] : "DONGLE";
-                portData = splitData[1];
+            const match = identifier.match(/\d/);
+            portId = match ? match[0] : "DONGLE";
 
-                // silently listen to data and silently assign any missing trackers
-                // these should have been already assigned from when the COM port is opened though
-                for (let [key, value] of trackerAssignment.entries()) {
-                    if (value[1] === "" && /^r.+/.test(identifier)) {
-                        const trackerId = parseInt(portData.charAt(4));
-                        if (parseInt(value[0]) === trackerId && trackerId !== 0) {
-                            trackerAssignment.set(key, [trackerId.toString(), port, portId]);
-                            log(`Setting ${key} to port ${port} with port ID ${portId}`);
-                        }
-                    }
-                }
-
-                for (let [key, value] of trackerAssignment.entries()) {
-                    if (value[1] === port && value[2] === portId) {
-                        trackerName = key;
-                        break;
+            // silently listen to data and silently assign any missing trackers
+            // these should have been already assigned from when the COM port is opened though
+            for (let [key, value] of trackerAssignment.entries()) {
+                if (value[1] === "" && identifier.startsWith("r")) {
+                    const trackerId = parseInt(portData.charAt(4));
+                    if (parseInt(value[0]) === trackerId && trackerId !== 0) {
+                        trackerAssignment.set(key, [trackerId.toString(), port, portId]);
+                        log(`Setting ${key} to port ${port} with port ID ${portId}`);
                     }
                 }
             }
-        } else if (trackerModelEnabled === "wired") {
-            const splitData = data.toString().split(/:(.+)/);
-            if (splitData.length > 1) {
-                identifier = splitData[0].toLowerCase();
-                portData = splitData[1];
+
+            for (let [key, value] of trackerAssignment.entries()) {
+                if (value[1] === port && value[2] === portId) {
+                    trackerName = key;
+                    break;
+                }
             }
         }
 
@@ -493,7 +491,47 @@ async function processData(data: string, port: string) {
             }
         }
 
-        main.emit("data", trackerName, port, portId, identifier, portData);
+        // "legs" ids in HX2 are equivalent to ankles in HXW - no need for new identifier
+        const isAnkle = trackerName === "leftAnkle" || trackerName === "rightAnkle";
+        const dataLength = portData.length;
+        const isLegs = isAnkle && dataLength >= 40;
+        const isIMUData = identifier.startsWith("x");
+
+        // Check if it's IMU (x) data, and if it's for the legs ("ankles" and is at least 40 bits long)
+        if (isIMUData && isLegs) {
+            // HaritoraX 2 legs data
+            const trackerNameThigh = trackerName === "leftAnkle" ? "leftKnee" : "rightKnee";
+
+            const buffer = Buffer.from(portData, "base64");
+            const legData = buffer.slice(0, 14);
+            let thighData, remainingData;
+
+            if (dataLength === 40) {
+                thighData = buffer.slice(16, 30);
+                //remainingData = buffer.slice(30);
+            } else if (dataLength === 44) {
+                thighData = buffer.slice(18, 32);
+                //remainingData = buffer.slice(32);
+                // const extraBytes = buffer.slice(16, 18);
+                // log(`Extra bytes: ${extraBytes.toString("base64")}`);
+            }
+
+            // log(`Processing HaritoraX2 legs data for ${trackerName}`);
+            // log(`IMU data (leg): ${legData.toString("base64")}`);
+            // log(`IMU data (thigh): ${thighData.toString("base64")}`);
+            //if (remainingData.length > 0) log(`Remaining data: ${remainingData.toString("base64")}`);
+
+            // emit data event for main "leg" tracker
+            main.emit("data", trackerName, port, portId, identifier, legData.toString("base64"));
+            // emit data event for extension "thigh" tracker
+            main.emit("data", trackerNameThigh, port, portId, identifier, thighData.toString("base64"));
+            log(`Processed HaritoraX2 legs data for ${trackerName}`);
+            return;
+        } else {
+            // regular HaritoraX 2 / Wireless data
+            log(`Processing data for ${trackerName}: ${portData}`);
+            main.emit("data", trackerName, port, portId, identifier, portData);
+        }
     } catch (err) {
         error(`An unexpected error occurred: ${err}`);
     }
@@ -550,4 +588,3 @@ export interface ActivePorts {
 }
 
 export { COM };
-

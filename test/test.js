@@ -1,8 +1,8 @@
 const { HaritoraX } = require("../dist/index.js");
 require("../dist/libs/btspp.js");
 
-let mode = process.argv[2] || "com";
-let device = new HaritoraX("wireless", true, false, false);
+let mode = process.argv[2] || "bluetooth";
+let device = new HaritoraX("wireless", true, true, false);
 
 if (mode === "bt" || mode === "bluetooth") {
     device.startConnection("bluetooth");

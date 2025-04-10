@@ -34,7 +34,7 @@ export default class BluetoothLinux extends EventEmitter {
         for (let deviceUUID of devices) {
             const device = await ble.getDevice(deviceUUID);
             const name = await device.getName();
-            if (name.startsWith("HaritoraXW-")) {
+            if (name.startsWith("HaritoraXW-") || name.startsWith("HaritoraX2-")) {
                 log(`Found device: ${name}`);
                 return true;
             }
@@ -84,7 +84,7 @@ export default class BluetoothLinux extends EventEmitter {
                 continue;
             }
 
-            if (deviceName.startsWith("HaritoraXW-")) {
+            if (deviceName.startsWith("HaritoraXW-") || deviceName.startsWith("HaritoraX2-")) {
                 log(`Found device: ${deviceName}`);
 
                 if (!(await device.isConnected())) {
@@ -274,7 +274,8 @@ export default class BluetoothLinux extends EventEmitter {
 }
 
 async function getDevice(localName: string): Promise<ActiveDevice> {
-    const device = activeDevices.find((device: ActiveDevice) => device[0] === localName);
+    const cleanedName = localName.replace("-ext", "");
+    const device = activeDevices.find((device: ActiveDevice) => device[0] === cleanedName);
     if (!device) error(`Device ${localName} not found, list: ${activeDevices}`, true);
 
     return device;

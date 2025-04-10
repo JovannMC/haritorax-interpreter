@@ -47,7 +47,7 @@ export default class Bluetooth extends EventEmitter {
             let availableDevices = [];
 
             noble.on("discover", (peripheral) => {
-                if (peripheral.advertisement.localName && peripheral.advertisement.localName.startsWith("HaritoraXW-")) {
+                if (peripheral.advertisement.localName && (peripheral.advertisement.localName.startsWith("HaritoraXW-") || peripheral.advertisement.localName.startsWith("HaritoraX2-"))) {
                     availableDevices.push("HaritoraX Wireless");
                     found = true;
                     noble.removeAllListeners();
@@ -118,7 +118,7 @@ export default class Bluetooth extends EventEmitter {
         const {
             advertisement: { localName },
         } = peripheral;
-        if (!localName || !localName.startsWith("HaritoraXW-")) return;
+        if (!localName || (!localName.startsWith("HaritoraX2") && !localName.startsWith("HaritoraXW-"))) return;
 
         const deviceExists = activeDevices.some((device) => device[0] === localName || device[1] === peripheral);
         if (deviceExists) return;
@@ -343,8 +343,9 @@ async function writeCharacteristic(characteristicInstance: Characteristic, data:
 }
 
 async function getDevice(localName: string): Promise<ActiveDevice> {
-    const device = activeDevices.find((device: ActiveDevice) => device[0] === localName);
-    if (!device) error(`Device ${localName} not found, list: ${activeDevices}`, true);
+    const normalizedLocalName = localName.replace("-ext", "");
+    const device = activeDevices.find((device: ActiveDevice) => device[0] === normalizedLocalName);
+    if (!device) error(`Device ${normalizedLocalName} not found, list: ${activeDevices}`, true);
 
     return device;
 }
