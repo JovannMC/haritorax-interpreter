@@ -525,7 +525,7 @@ async function processData(data: string, port: string) {
             main.emit("data", trackerName, port, portId, identifier, legData.toString("base64"));
             // emit data event for extension "thigh" tracker
             main.emit("data", trackerNameThigh, port, portId, identifier, thighData.toString("base64"));
-            log(`Processed HaritoraX2 legs data for ${trackerName}`);
+            //log(`Processed HaritoraX2 legs data for ${trackerName}`);
             return;
         } else {
             // regular HaritoraX 2 / Wireless data

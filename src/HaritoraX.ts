@@ -1087,9 +1087,9 @@ function listenToDeviceEvents() {
                             // log(`Extra bytes: ${extraBytes.toString("base64")}`);
                         }
 
-                        console.log(`Processing HaritoraX2 legs data for ${localName}`);
-                        console.log(`IMU data (leg): ${legData.toString("base64")}`);
-                        console.log(`IMU data (thigh): ${thighData.toString("base64")}`);
+                        // console.log(`Processing HaritoraX2 legs data for ${localName}`);
+                        // console.log(`IMU data (leg): ${legData.toString("base64")}`);
+                        // console.log(`IMU data (thigh): ${thighData.toString("base64")}`);
 
                         // Process leg tracker data
                         processIMUData(legData, localName);
@@ -1251,7 +1251,7 @@ function processWiredData(identifier: string, data: string) {
 function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) {
     if (!trackerName || !data) return;
 
-    console.log(`Processing for tracker: ${trackerName}`)
+    // console.log(`Processing for tracker: ${trackerName}`)
 
     // If tracker isn't in activeDevices, add it and emit "connect" event
     if (!activeDevices.includes(trackerName) && (comEnabled || bluetoothEnabled)) {
