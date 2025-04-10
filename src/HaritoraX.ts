@@ -387,7 +387,7 @@ export default class HaritoraX extends EventEmitter {
             "Ankle motion detection": ankleMotionDetection,
         };
 
-        if (trackerName.startsWith("HaritoraXW")) {
+        if (trackerName.startsWith("HaritoraXW-") || trackerName.startsWith("HaritoraX2-")) {
             try {
                 await writeToBluetooth(trackerName, sensorModeCharacteristic, sensorMode === 1 ? 5 : 8);
                 await writeToBluetooth(trackerName, fpsModeCharacteristic, fpsMode === 50 ? 1 : 2);
@@ -524,7 +524,12 @@ export default class HaritoraX extends EventEmitter {
                 await new Promise((resolve) => setTimeout(resolve, 500));
                 ({ sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection } = getTrackerSettingsFromMap(trackerName));
             }
-        } else if (trackerModelEnabled === "wireless" && comEnabled && !trackerName.startsWith("HaritoraXW")) {
+        } else if (
+            trackerModelEnabled === "wireless" &&
+            comEnabled &&
+            !trackerName.startsWith("HaritoraXW") &&
+            !trackerName.startsWith("HaritoraX2-")
+        ) {
             ({ sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection } = getTrackerSettingsFromMap(trackerName));
         } else {
             error(`Cannot get tracker settings for "${trackerName}".`);
@@ -593,35 +598,37 @@ export default class HaritoraX extends EventEmitter {
      **/
 
     async fireDeviceInfo(trackerName: string) {
+        let normalizedName = trackerName.replace(/-ext/g, "");
+
         // Global
         let serial, model, version, comm, comm_next;
 
-        if (comEnabled && !isWirelessBTTracker(trackerName)) {
+        if (comEnabled && !isWirelessBTTracker(normalizedName)) {
             // Get device info from COM by sending "i0" and "i1" commands
-            const trackerPort = com.getTrackerPort(trackerName);
-            const trackerPortId = com.getTrackerPortId(trackerName);
+            const trackerPort = com.getTrackerPort(normalizedName);
+            const trackerPortId = com.getTrackerPortId(normalizedName);
 
             const rawValue = `i${trackerPortId}:`;
 
             try {
-                await writeToPort(trackerPort, rawValue, trackerName);
+                await writeToPort(trackerPort, rawValue, normalizedName);
             } catch (err) {
                 error(`Error sending device info command: ${err}`);
                 return null;
             }
         }
 
-        if (isWirelessBTTracker(trackerName)) {
-            const trackerObject = bluetooth.getActiveDevices().find((device) => device[0] === trackerName);
+        if (isWirelessBTTracker(normalizedName)) {
+            const trackerObject = bluetooth.getActiveDevices().find((device) => device[0] === normalizedName);
             if (!trackerObject) {
-                error(`Tracker "${trackerName}" not found`);
+                error(`Tracker "${normalizedName}" not found`);
                 return null;
             }
 
             const decoder = new TextDecoder("utf-8");
 
             const readCharacteristic = async (uuid: string) => {
-                const buffer = await bluetooth.read(trackerName, SERVICE_UUID, uuid);
+                const buffer = await bluetooth.read(normalizedName, SERVICE_UUID, uuid);
                 return buffer ? decoder.decode(buffer) : undefined;
             };
 
@@ -631,14 +638,14 @@ export default class HaritoraX extends EventEmitter {
                 readCharacteristic(SERIAL_UUID),
             ]);
         } else if (comEnabled) {
-            const deviceInfo = deviceInformation.get(trackerName);
+            const deviceInfo = deviceInformation.get(normalizedName);
             [version, model, serial] = [deviceInfo[VERSION_INDEX], deviceInfo[MODEL_INDEX], deviceInfo[SERIAL_INDEX]];
 
             if (trackerModelEnabled === "wired") {
                 [comm, comm_next] = [deviceInfo[COMM_INDEX], deviceInfo[COMM_NEXT_INDEX]];
             }
         } else {
-            error(`Tracker "${trackerName}" not found or unsupported model enabled`);
+            error(`Tracker "${normalizedName}" not found or unsupported model enabled`);
             return null;
         }
 
@@ -657,19 +664,20 @@ export default class HaritoraX extends EventEmitter {
      **/
 
     async fireTrackerBattery(trackerName: string) {
+        let normalizedName = trackerName.replace(/-ext/g, "");
         let batteryRemaining, batteryVoltage, chargeStatus;
 
         // Get battery info from COM
-        if (comEnabled && !isWirelessBTTracker(trackerName)) {
-            const trackerPort = com.getTrackerPort(trackerName);
-            const trackerPortId = com.getTrackerPortId(trackerName);
+        if (comEnabled && !isWirelessBTTracker(normalizedName)) {
+            const trackerPort = com.getTrackerPort(normalizedName);
+            const trackerPortId = com.getTrackerPortId(normalizedName);
 
             if (!trackerPort || !trackerPortId) return;
 
             const rawValue = `v${trackerPortId}:`;
 
             try {
-                await writeToPort(trackerPort, rawValue, trackerName);
+                await writeToPort(trackerPort, rawValue, normalizedName);
             } catch (err) {
                 error(`Error sending battery info command: ${err}`);
                 return null;
@@ -739,13 +747,14 @@ export default class HaritoraX extends EventEmitter {
      * @fires this#mag
      */
     async fireTrackerMag(trackerName: string) {
-        if (trackerMag.has(trackerName)) {
-            let magStatus = trackerMag.get(trackerName);
-            log(`Tracker "${trackerName}" magnetometer status: ${magStatus}`, true);
-            main.emit("mag", trackerName, magStatus);
+        let normalizedName = trackerName.replace(/-ext/g, "");
+        if (trackerMag.has(normalizedName)) {
+            let magStatus = trackerMag.get(normalizedName);
+            log(`Tracker "${normalizedName}" magnetometer status: ${magStatus}`, true);
+            main.emit("mag", normalizedName, magStatus);
         } else {
             // Read from BLE device
-            if (!trackerName.startsWith("HaritoraXW")) {
+            if (!trackerName.startsWith("HaritoraXW") || !trackerName.startsWith("HaritoraX2-")) {
                 error(`Tracker "${trackerName}" magnetometer status not found`);
                 return;
             }
@@ -1052,10 +1061,45 @@ function listenToDeviceEvents() {
             if (!canProcessBluetoothData || service === "Device Information") return;
 
             resetDataTimeout(localName, bluetooth);
+            const buffer = Buffer.from(data, "base64");
 
             switch (characteristic) {
                 case "Sensor":
-                    processIMUData(Buffer.from(data, "base64"), localName);
+                    const dataLength = buffer.toString("base64").length;
+
+                    if (dataLength >= 40) {
+                        // HaritoraX 2 legs data
+                        const trackerNameThigh = `${localName}-ext`;
+
+                        // emit bluetooth's "connect" event
+                        if (!activeDevices.includes(trackerNameThigh)) {
+                            bluetooth.emit("connect", trackerNameThigh);
+                        }
+
+                        const legData = buffer.slice(0, 14);
+                        let thighData;
+
+                        if (dataLength === 40) {
+                            thighData = buffer.slice(14, 29);
+                        } else if (dataLength === 44) {
+                            thighData = buffer.slice(18, 32);
+                            // const extraBytes = buffer.slice(16, 18);
+                            // log(`Extra bytes: ${extraBytes.toString("base64")}`);
+                        }
+
+                        console.log(`Processing HaritoraX2 legs data for ${localName}`);
+                        console.log(`IMU data (leg): ${legData.toString("base64")}`);
+                        console.log(`IMU data (thigh): ${thighData.toString("base64")}`);
+
+                        // Process leg tracker data
+                        processIMUData(legData, localName);
+
+                        // Process thigh tracker data
+                        processIMUData(thighData, trackerNameThigh);
+                    } else {
+                        // Regular HaritoraX 2 / Wireless data
+                        processIMUData(buffer, localName);
+                    }
                     break;
                 case "MainButton":
                 case "SecondaryButton":
@@ -1076,7 +1120,6 @@ function listenToDeviceEvents() {
                     processMagData(data, localName);
                     break;
                 default:
-                    const buffer = Buffer.from(data, "base64");
                     log(`Unknown data from ${localName}: ${data} - ${characteristic} - ${service}`);
                     log(`Data in utf-8: ${buffer.toString("utf-8")}`);
                     log(`Data in hex: ${buffer.toString("hex")}`);
@@ -1094,6 +1137,13 @@ function listenToDeviceEvents() {
         bluetooth.on("disconnect", (trackerName) => {
             main.emit("disconnect", trackerName);
             removeDataTimeout(trackerName);
+
+            // Check for "-ext" tracker and disconnect it as well
+            const extensionTrackerName = `${trackerName}-ext`;
+            if (activeDevices.includes(extensionTrackerName)) {
+                main.emit("disconnect", extensionTrackerName);
+                removeDataTimeout(extensionTrackerName);
+            }
         });
 
         bluetooth.on("log", (message: string) => {
@@ -1201,17 +1251,26 @@ function processWiredData(identifier: string, data: string) {
 function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) {
     if (!trackerName || !data) return;
 
+    console.log(`Processing for tracker: ${trackerName}`)
+
     // If tracker isn't in activeDevices, add it and emit "connect" event
     if (!activeDevices.includes(trackerName) && (comEnabled || bluetoothEnabled)) {
-        log(`Tracker "${trackerName}" isn't in active devices, adding and emitting connect event`);
+        let isExtension = false;
+        log(`Tracker "${trackerName}" isn't in active devices, adding and emitting connect event`, true);
+        const isWireless = trackerName.startsWith("HaritoraXW") || trackerName.startsWith("HaritoraX2-");
 
-        const isWireless = trackerName.startsWith("HaritoraXW");
+        if (trackerName.endsWith("-ext")) {
+            trackerName = trackerName.slice(0, -4);
+            isExtension = true;
+        }
+        
         const mode = isWireless ? "bluetooth" : "com";
         const port = isWireless ? undefined : com.getTrackerPort(trackerName);
         const portId = isWireless ? undefined : com.getTrackerPortId(trackerName);
 
-        activeDevices.push(trackerName);
-        main.emit("connect", trackerName, mode, port, portId);
+        const finalName = isExtension ? `${trackerName}-ext` : trackerName;
+        activeDevices.push(finalName);
+        main.emit("connect", finalName, mode, port, portId);
     }
 
     // Decode and log the data
@@ -1229,7 +1288,8 @@ function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) 
         }
 
         main.emit("imu", trackerName, rotation, acceleration, ankle ?? ankleValue);
-        if (!trackerName.startsWith("HaritoraXW")) main.emit("mag", trackerName, magStatus);
+        if (!trackerName.startsWith("HaritoraXW") && !trackerName.startsWith("HaritoraX2-"))
+            main.emit("mag", trackerName, magStatus);
     } catch (err) {
         error(`Error decoding tracker "${trackerName}" IMU packet data: ${err}`, false);
     }
@@ -1249,7 +1309,7 @@ const GRAVITY_ADJUSTMENT = 1.2;
 
 function decodeIMUPacket(data: Buffer, trackerName: string) {
     if (!trackerName || data.length < 14) {
-        error(`Invalid data for IMU packet: ${!trackerName ? "no tracker name" : "insufficient data length"}`);
+        error(`Invalid data for IMU packet: ${!trackerName ? "no tracker name" : `insufficient data length (${data.length})`}`, false);
         return null;
     }
 
@@ -1265,11 +1325,14 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
 
         let ankle, magStatus;
 
+        // TODO: check imu data for hx2, then compare to wireless
+        // either: move mag (and ankle) data to specified place in line 1274 OR simply add HX2 as a different support option in haritorax-interpreter
+
         if (trackerModelEnabled === "wireless") {
             const bufferData = data.toString("base64");
             ankle = bufferData.slice(-2) !== "==" ? data.readUint16LE(data.length - 2) : undefined;
 
-            if (!trackerName.startsWith("HaritoraXW")) {
+            if (!trackerName.startsWith("HaritoraXW") && !trackerName.startsWith("HaritoraX2-")) {
                 const magnetometerData = bufferData.charAt(bufferData.length - 5);
                 magStatus =
                     {
@@ -1438,7 +1501,11 @@ function processSettingsData(data: string, trackerName: string, characteristic?:
     if (!trackerName || !data) return;
 
     try {
-        if (trackerModelEnabled === "wireless" && !trackerName.startsWith("HaritoraXW")) {
+        if (
+            trackerModelEnabled === "wireless" &&
+            !trackerName.startsWith("HaritoraXW") &&
+            !trackerName.startsWith("HaritoraX2-")
+        ) {
             const sensorMode = parseInt(data[6]);
             const fpsMode = parseInt(data[5]);
             const sensorAutoCorrection = parseInt(data[10]);
@@ -1547,7 +1614,7 @@ function processButtonData(data: string, trackerName: string, characteristic?: s
         const currentButtons = trackerButtons.get(trackerName) || [0, 0, 0];
         let result: { buttonPressed: string; isOn: boolean } = { buttonPressed: undefined, isOn: true };
 
-        if (trackerName.startsWith("HaritoraXW")) {
+        if (trackerName.startsWith("HaritoraXW") || trackerName.startsWith("HaritoraX2-")) {
             result.buttonPressed = processWirelessBTTrackerData(characteristic, currentButtons);
         } else if (comEnabled) {
             result =
@@ -1743,7 +1810,11 @@ function error(message: string, exceptional = false) {
 }
 
 function isWirelessBTTracker(trackerName: string) {
-    return trackerModelEnabled === "wireless" && bluetoothEnabled && trackerName.startsWith("HaritoraXW");
+    return (
+        trackerModelEnabled === "wireless" &&
+        bluetoothEnabled &&
+        (trackerName.startsWith("HaritoraXW") || trackerName.startsWith("HaritoraX2-"))
+    );
 }
 
 function writeToPort(port: string, rawData: string, trackerName = "unknown"): Promise<void> {

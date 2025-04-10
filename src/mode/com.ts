@@ -512,13 +512,13 @@ async function processData(data: string, port: string) {
             } else if (dataLength === 44) {
                 thighData = buffer.slice(18, 32);
                 //remainingData = buffer.slice(32);
-                const extraBytes = buffer.slice(16, 18);
-                log(`Extra bytes: ${extraBytes.toString("base64")}`);
+                // const extraBytes = buffer.slice(16, 18);
+                // log(`Extra bytes: ${extraBytes.toString("base64")}`);
             }
 
-            log(`Processing HaritoraX2 legs data for ${trackerName}`);
-            log(`IMU data (leg): ${legData.toString("base64")}`);
-            log(`IMU data (thigh): ${thighData.toString("base64")}`);
+            // log(`Processing HaritoraX2 legs data for ${trackerName}`);
+            // log(`IMU data (leg): ${legData.toString("base64")}`);
+            // log(`IMU data (thigh): ${thighData.toString("base64")}`);
             //if (remainingData.length > 0) log(`Remaining data: ${remainingData.toString("base64")}`);
 
             // emit data event for main "leg" tracker
