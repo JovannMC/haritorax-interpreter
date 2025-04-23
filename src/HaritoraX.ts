@@ -3,8 +3,6 @@
 import { Buffer } from "buffer";
 import { EventEmitter } from "events";
 import BluetoothLinux from "./mode/bluetooth-linux.js";
-import Bluetooth from "./mode/bluetooth.js";
-import { COM } from "./mode/com.js";
 import { FPSMode, MagStatus, SensorAutoCorrection, SensorMode, TrackerModel } from "./types.js";
 
 let debug = false;
@@ -12,13 +10,10 @@ let printIMU = false;
 let printRaw = false;
 let printWrites = false;
 
-let com: COM;
-let bluetooth: Bluetooth | BluetoothLinux;
-let comEnabled = false;
+let bluetooth: BluetoothLinux | null = null;
 let bluetoothEnabled = false;
 let main: HaritoraX;
 let canSendButtonData = false;
-let canProcessComData = false;
 let canProcessBluetoothData = false;
 
 /*
@@ -40,13 +35,6 @@ const SENSOR_CORRECTION_BITS: Record<SensorAutoCorrection, number> = {
     gyro: 2,
     mag: 4,
 };
-
-// COM
-const VERSION_INDEX = 0;
-const MODEL_INDEX = 1;
-const SERIAL_INDEX = 2;
-const COMM_INDEX = 3; // wired only
-const COMM_NEXT_INDEX = 4; // wired only
 
 // Bluetooth
 const SERVICE_UUID = "180a";
@@ -299,14 +287,9 @@ export default class HaritoraX extends EventEmitter {
             error(`${connectionMode} connection not supported for ${trackerModelEnabled}`, true);
 
         if (connectionMode === "com") {
-            com = new COM(trackerModelEnabled, heartbeatInterval, printWrites);
-            comEnabled = true;
-
-            com.startConnection(portNames);
-            canProcessComData = true;
+            error("COM removed for this patch", true)
         } else if (connectionMode === "bluetooth") {
-            const isLinux = process.platform === "linux";
-            bluetooth = isLinux ? new BluetoothLinux() : new Bluetooth();
+            bluetooth = new BluetoothLinux();
 
             bluetooth.startConnection();
             bluetoothEnabled = true;
@@ -318,7 +301,7 @@ export default class HaritoraX extends EventEmitter {
             }
         }
 
-        if (com || bluetooth) {
+        if (bluetooth) {
             setTimeout(() => {
                 canSendButtonData = true;
             }, 2000);
@@ -337,12 +320,8 @@ export default class HaritoraX extends EventEmitter {
      **/
     stopConnection(connectionMode: string) {
         let removedDevices: string[] = [];
-        if (connectionMode === "com" && comEnabled) {
-            canProcessComData = false;
-            removedDevices = removeActiveDevices("com");
-
-            com.stopConnection();
-            comEnabled = false;
+        if (connectionMode === "com") {
+            error("COM removed for this patch", true)
         } else if (connectionMode === "bluetooth" && bluetoothEnabled) {
             canProcessBluetoothData = false;
             removedDevices = removeActiveDevices("bluetooth");
@@ -396,21 +375,6 @@ export default class HaritoraX extends EventEmitter {
             } catch (err) {
                 error(`Error sending tracker settings: ${err}`);
             }
-        } else {
-            // GX dongle(s)
-            const trackerPort = com.getTrackerPort(trackerName);
-            const trackerPortId = com.getTrackerPortId(trackerName);
-
-            const identifierValue = `o${trackerPortId}:`;
-            const hexValue = getSettingsHexValue(sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
-            const finalValue = `${identifierValue}${hexValue}`;
-
-            try {
-                await writeToPort(trackerPort, finalValue, trackerName);
-                await writeToPort(trackerPort, identifierValue, trackerName);
-            } catch (err) {
-                error(`Error sending tracker settings: ${err}`);
-            }
         }
 
         logSettings(trackerName, settings);
@@ -449,9 +413,7 @@ export default class HaritoraX extends EventEmitter {
         ankleMotionDetection: boolean
     ) {
         try {
-            if (trackerModelEnabled === "wired") {
-                await handleWiredSettings(sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
-            } else if (trackerModelEnabled === "wireless") {
+            if (trackerModelEnabled === "wireless") {
                 handleWirelessSettings(sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
             }
             updateTrackerSettings(sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
@@ -471,10 +433,9 @@ export default class HaritoraX extends EventEmitter {
      **/
 
     getActiveTrackers(): string[] {
-        if (!comEnabled && !bluetoothEnabled) return null;
-        const comTrackers = comEnabled ? activeDevices : [];
-        const bluetoothTrackers = bluetoothEnabled ? bluetooth.getActiveTrackers() : [];
-        return comTrackers.concat(bluetoothTrackers);
+        if (!bluetoothEnabled) return null;
+        const bluetoothTrackers = bluetooth.getActiveTrackers();
+        return bluetoothTrackers;
     }
 
     /**
@@ -515,22 +476,7 @@ export default class HaritoraX extends EventEmitter {
                 } catch (err) {
                     error(`Error reading characteristic: ${err}`);
                 }
-            } else {
-                try {
-                    await writeToPort(com.getTrackerPort(trackerName), `s${com.getTrackerPortId(trackerName)}:`, trackerName);
-                } catch (err) {
-                    error(`Error sending tracker settings: ${err}`);
-                }
-                await new Promise((resolve) => setTimeout(resolve, 500));
-                ({ sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection } = getTrackerSettingsFromMap(trackerName));
             }
-        } else if (
-            trackerModelEnabled === "wireless" &&
-            comEnabled &&
-            !trackerName.startsWith("HaritoraXW") &&
-            !trackerName.startsWith("HaritoraX2-")
-        ) {
-            ({ sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection } = getTrackerSettingsFromMap(trackerName));
         } else {
             error(`Cannot get tracker settings for "${trackerName}".`);
             return null;
@@ -574,8 +520,6 @@ export default class HaritoraX extends EventEmitter {
      **/
     getConnectionModeActive(connectionMode: string): boolean {
         switch (connectionMode) {
-            case "com":
-                return comEnabled;
             case "bluetooth":
                 return bluetoothEnabled;
             default:
@@ -603,21 +547,6 @@ export default class HaritoraX extends EventEmitter {
         // Global
         let serial, model, version, comm, comm_next;
 
-        if (comEnabled && !isWirelessBTTracker(normalizedName)) {
-            // Get device info from COM by sending "i0" and "i1" commands
-            const trackerPort = com.getTrackerPort(normalizedName);
-            const trackerPortId = com.getTrackerPortId(normalizedName);
-
-            const rawValue = `i${trackerPortId}:`;
-
-            try {
-                await writeToPort(trackerPort, rawValue, normalizedName);
-            } catch (err) {
-                error(`Error sending device info command: ${err}`);
-                return null;
-            }
-        }
-
         if (isWirelessBTTracker(normalizedName)) {
             const trackerObject = bluetooth.getActiveDevices().find((device) => device[0] === normalizedName);
             if (!trackerObject) {
@@ -637,13 +566,6 @@ export default class HaritoraX extends EventEmitter {
                 readCharacteristic(MODEL_UUID),
                 readCharacteristic(SERIAL_UUID),
             ]);
-        } else if (comEnabled) {
-            const deviceInfo = deviceInformation.get(normalizedName);
-            [version, model, serial] = [deviceInfo[VERSION_INDEX], deviceInfo[MODEL_INDEX], deviceInfo[SERIAL_INDEX]];
-
-            if (trackerModelEnabled === "wired") {
-                [comm, comm_next] = [deviceInfo[COMM_INDEX], deviceInfo[COMM_NEXT_INDEX]];
-            }
         } else {
             error(`Tracker "${normalizedName}" not found or unsupported model enabled`);
             return null;
@@ -664,28 +586,7 @@ export default class HaritoraX extends EventEmitter {
      **/
 
     async fireTrackerBattery(trackerName: string) {
-        let normalizedName = trackerName.replace(/-ext/g, "");
         let batteryRemaining, batteryVoltage, chargeStatus;
-
-        // Get battery info from COM
-        if (comEnabled && !isWirelessBTTracker(normalizedName)) {
-            const trackerPort = com.getTrackerPort(normalizedName);
-            const trackerPortId = com.getTrackerPortId(normalizedName);
-
-            if (!trackerPort || !trackerPortId) return;
-
-            const rawValue = `v${trackerPortId}:`;
-
-            try {
-                await writeToPort(trackerPort, rawValue, normalizedName);
-            } catch (err) {
-                error(`Error sending battery info command: ${err}`);
-                return null;
-            }
-
-            // Wait for the battery info to be sent back
-            await new Promise((resolve) => setTimeout(resolve, 500));
-        }
 
         // Check if battery info is already available
         if (trackerBattery.has(trackerName) && !isWirelessBTTracker(trackerName)) {
@@ -775,140 +676,6 @@ export default class HaritoraX extends EventEmitter {
     }
 
     /**
-     * Gets the available devices
-     *
-     * @function getAvailableDevices
-     * @returns {string} The available devices to connect to/with (HaritoraX Wired/HaritoraX Wireless/GX6/GX2/Bluetooth).
-     */
-    async getAvailableDevices(): Promise<string[]> {
-        let availableDevices: string[] = [];
-
-        com = new COM("wireless"); // variable doesn't matter, just need to initialize it to get the available devices
-        bluetooth = new Bluetooth();
-
-        listenToDeviceEvents();
-
-        log("Checking if any COM devices is available");
-        if (await com.isDeviceAvailable()) {
-            log("COM devices available");
-            const devices = await com.getAvailableDevices();
-            log(`Got COM devices: ${devices}`);
-            // for each device, add the device name to the available devices
-            devices.forEach((device: string) => {
-                if (device === "HaritoraX 1.0" || device === "HaritoraX 1.1" || device === "HaritoraX 1.1b") {
-                    availableDevices.push("HaritoraX Wired");
-                } else {
-                    availableDevices.push(device);
-                }
-            });
-        }
-        log("Checking if any Bluetooth devices is available");
-        if (await bluetooth.isDeviceAvailable()) {
-            log("Bluetooth available");
-            availableDevices.push("Bluetooth");
-
-            const devices = await bluetooth.getAvailableDevices();
-            log(`Got Bluetooth devices: ${devices}`);
-
-            if (devices) {
-                devices.forEach((device: string) => {
-                    availableDevices.push(device);
-                });
-            }
-        }
-
-        com.removeAllListeners();
-        bluetooth.removeAllListeners();
-
-        com = null;
-        bluetooth = null;
-
-        log(`Available devices: ${availableDevices}`, true);
-
-        return availableDevices;
-    }
-
-    /**
-     * Gets the available ports for the specified device
-     * Supported devices: wireless, wired
-     * Supported connections: COM
-     *
-     * @function getDevicePorts
-     * @param {string} device - The device to get the ports for.
-     * @returns {string[]} The available ports for the specified device.
-     */
-    async getDevicePorts(device: string): Promise<string[]> {
-        let com = new COM("wireless");
-        try {
-            if (device === "HaritoraX Wired") {
-                return await com.getDevicePorts("HaritoraX Wired");
-            } else {
-                return await com.getDevicePorts(device);
-            }
-        } finally {
-            com.removeAllListeners();
-            com = null;
-        }
-    }
-
-    /**
-     * Turns off the specified tracker.
-     * Supported trackers: wireless
-     * Supported connections: COM
-     *
-     * @function powerOffTracker
-     * @param {string} trackerName - The name of the tracker to power off.
-     */
-    async powerOffTracker(trackerName: string): Promise<boolean> {
-        if (!com || !comEnabled) {
-            error("COM connection not enabled", true);
-            return false;
-        }
-
-        const delay = 25;
-
-        const trackerPort = com.getTrackerPort(trackerName);
-        const trackerPortId = com.getTrackerPortId(trackerName);
-
-        const defaultSettings: [SensorMode, FPSMode, SensorAutoCorrection[], boolean] = [2, 50, [], false];
-        const settings =
-            (trackerSettings.get(trackerName) as [SensorMode, FPSMode, SensorAutoCorrection[], boolean]) ?? defaultSettings;
-        const settingsHex = getSettingsHexValue(...settings);
-
-        // Change the second-to-last bit to '2' (power off signal)
-        // note to self: MAKE SURE the settings is set to original after sending power off signal, otherwise you'll soft brick the trackers lol
-        // this is because the power off signal uses a bit in the "settings" portion of the trackers, and if it's not set back to normal, the trackers will load the settings and keep turning back off
-        const modifiedSettingsHex = settingsHex.slice(0, -2) + "2" + settingsHex.slice(-1);
-        const commands = [`o${trackerPortId}:${modifiedSettingsHex}`, `o${trackerPortId}:${settingsHex}`];
-
-        for (const command of commands) {
-            try {
-                await writeToPort(trackerPort, command);
-            } catch (err) {
-                error(`Error sending power off command: ${err}`);
-                return false;
-            }
-            // Allow for small delay between commands so tracker can process the first command
-            await new Promise((resolve) => setTimeout(resolve, delay));
-        }
-
-        log(
-            `Manually powered off tracker "${trackerName}" (Port ${trackerPort}, port id ${trackerPortId}). Delay between commands: ${delay}ms.`,
-            true
-        );
-        return true;
-    }
-
-    /**
-     * Returns the COM instance so you can use its methods with the instance this class is using.
-     * @function getComInstance
-     * @returns {COM} The COM instance.
-     */
-    getComInstance() {
-        return com;
-    }
-
-    /**
      * Returns the Bluetooth instance so you can use its methods with the instance this class is using.
      * @function getBluetoothInstance
      * @returns {Bluetooth} The Bluetooth instance.
@@ -927,7 +694,7 @@ const removeDataTimeout = (trackerName: string) => {
 
 const dataTimeouts: Map<string, NodeJS.Timeout> = new Map();
 function listenToDeviceEvents() {
-    const resetDataTimeout = (trackerName: string, connection: COM | Bluetooth | BluetoothLinux) => {
+    const resetDataTimeout = (trackerName: string, connection: BluetoothLinux) => {
         if (!trackerName || trackerName === "DONGLE") return;
         if (dataTimeouts.has(trackerName)) {
             clearTimeout(dataTimeouts.get(trackerName));
@@ -944,113 +711,6 @@ function listenToDeviceEvents() {
         }, 10000);
         dataTimeouts.set(trackerName, timeout);
     };
-
-    /*
-     * COM events
-     */
-
-    if (com) {
-        com.on("data", (trackerName: string, port: string, _portId: string, identifier: string, portData: string) => {
-            if (!canProcessComData) return;
-
-            resetDataTimeout(trackerName, com);
-
-            if (trackerModelEnabled === "wireless") {
-                switch (identifier[0]) {
-                    case "x":
-                        processIMUData(Buffer.from(portData, "base64"), trackerName);
-                        break;
-                    case "a":
-                        processTrackerData(portData, trackerName);
-                        break;
-                    case "r":
-                        processButtonData(portData, trackerName);
-                        break;
-                    case "v":
-                        processBatteryData(portData, trackerName);
-                        break;
-                    case "o":
-                        processSettingsData(portData, trackerName);
-                        break;
-                    case "i":
-                        processInfoData(portData, trackerName);
-                        break;
-                    default:
-                        log(`${port} - Unknown data from "${trackerName}" (identifier: ${identifier}): ${portData}`);
-                }
-            } else if (trackerModelEnabled === "wired") {
-                switch (identifier[0]) {
-                    // alright, so for some ungodly reason shiftall decided to use different letters for different number of trackers,
-                    // AND if they have ankle motion enabled or not
-                    // WHAT THE HELL.
-                    // x = 5 trackers
-                    // p = 6 trackers
-                    // r = 6 trackers (w/ ankle motion)
-                    // e = 7 trackers
-                    // h = 7 trackers (w/ ankle motion)
-                    // g = 8 trackers
-                    // h = 8 trackers (w/ ankle motion)
-                    // (yes. there's even duplicates.)
-                    case "x":
-                    case "r":
-                    case "p":
-                    case "h":
-                    case "e":
-                    case "g":
-                        processWiredData(identifier, portData);
-                        break;
-                    case "s":
-                        // settings and tracker info, for now we will only use this for mag status
-                        // example: s:{"imu_mode":1, "imu_num":6, "magf_status":"020200", "speed_mode":2, "dcal_flags":"04", "detected":"04004C6C"}
-                        processMagData(portData, "HaritoraXWired");
-                        processSettingsData(portData, "HaritoraXWired");
-                        break;
-                    case "t":
-                        processButtonData(portData, "HaritoraXWired");
-                        break;
-                    case "v":
-                        processBatteryData(portData, "HaritoraXWired");
-                        break;
-                    case "i":
-                        // "comm" shows it is in bluetooth mode, a dongle for the wired trackers *was* planned, but never released
-                        // "comm_next" defines whether it is in classic bluetooth (Bluetooth Serial Port Profile) or BLE (Bluetooth Low Energy) mode
-                        // example: {"model":"MC2B", "version":"1.7.10", "serial no":"0000000", "comm":"BLT", "comm_next":"BTSPP"}
-                        processInfoData(portData, "HaritoraXWired");
-                        break;
-                    default:
-                        log(`${port} - Unknown data from "${trackerName}" (identifier: ${identifier}): ${portData}`);
-                }
-            }
-        });
-
-        com.on("paired", (trackerName: string, port: string, portId: string) => {
-            log(`Tracker "${trackerName}" paired, emitting paired event`, true);
-            main.emit("paired", trackerName, port, portId);
-        });
-
-        com.on("unpaired", (trackerName: string) => {
-            log(`Tracker "${trackerName}" unpaired, emitting unpaired event`, true);
-            main.emit("unpaired", trackerName);
-        });
-
-        com.on("disconnected", (port: string) => {
-            if (port) log(`A COM port connected (${port}) was disconnected, removing all devices...`, true);
-            activeDevices = [];
-        });
-
-        com.on("log", (message: string) => {
-            log(message);
-        });
-
-        com.on("logError", ({ message, exceptional }) => {
-            error(message, exceptional);
-        });
-
-        com.on("dataRaw", (data, port) => {
-            if (!printRaw) return;
-            log(`${port} - Raw data: ${data}`, true);
-        });
-    }
 
     /*
      * BLE events
@@ -1254,7 +914,7 @@ function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) 
     // console.log(`Processing for tracker: ${trackerName}`)
 
     // If tracker isn't in activeDevices, add it and emit "connect" event
-    if (!activeDevices.includes(trackerName) && (comEnabled || bluetoothEnabled)) {
+    if (!activeDevices.includes(trackerName) && (bluetoothEnabled)) {
         let isExtension = false;
         log(`Tracker "${trackerName}" isn't in active devices, adding and emitting connect event`, true);
         const isWireless = trackerName.startsWith("HaritoraXW") || trackerName.startsWith("HaritoraX2-");
@@ -1265,12 +925,10 @@ function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) 
         }
         
         const mode = isWireless ? "bluetooth" : "com";
-        const port = isWireless ? undefined : com.getTrackerPort(trackerName);
-        const portId = isWireless ? undefined : com.getTrackerPortId(trackerName);
 
         const finalName = isExtension ? `${trackerName}-ext` : trackerName;
         activeDevices.push(finalName);
-        main.emit("connect", finalName, mode, port, portId);
+        main.emit("connect", finalName, mode);
     }
 
     // Decode and log the data
@@ -1616,11 +1274,6 @@ function processButtonData(data: string, trackerName: string, characteristic?: s
 
         if (trackerName.startsWith("HaritoraXW") || trackerName.startsWith("HaritoraX2-")) {
             result.buttonPressed = processWirelessBTTrackerData(characteristic, currentButtons);
-        } else if (comEnabled) {
-            result =
-                trackerModelEnabled === "wireless"
-                    ? processWirelessTrackerData(data, trackerName, currentButtons)
-                    : processWiredTrackerData(data, trackerName, currentButtons);
         }
         if (result.buttonPressed) {
             log(`Button ${result.buttonPressed} pressed on tracker ${trackerName}. Current state: ${currentButtons}`);
@@ -1729,17 +1382,7 @@ function processBatteryData(data: string, trackerName: string, characteristic?: 
     const batteryData: [number | undefined, number | undefined, string | undefined] = [undefined, undefined, undefined];
 
     try {
-        if (comEnabled && !isWirelessBTTracker(trackerName)) {
-            // If battery data isn't in JSON format, skip processing it
-            if (!data.trim().startsWith("{")) {
-                log(`No valid battery data for tracker ${trackerName}: ${data}`);
-                return;
-            }
-            const batteryInfo = JSON.parse(data);
-            batteryData[0] = batteryInfo["battery remaining"];
-            batteryData[1] = batteryInfo["battery voltage"];
-            batteryData[2] = batteryInfo["charge status"];
-        } else if (isWirelessBTTracker(trackerName) && characteristic) {
+        if (isWirelessBTTracker(trackerName) && characteristic) {
             const buffer = Buffer.from(data, "base64");
             switch (characteristic) {
                 case "BatteryLevel":
@@ -1815,31 +1458,6 @@ function isWirelessBTTracker(trackerName: string) {
         bluetoothEnabled &&
         (trackerName.startsWith("HaritoraXW") || trackerName.startsWith("HaritoraX2-"))
     );
-}
-
-function writeToPort(port: string, rawData: string, trackerName = "unknown"): Promise<void> {
-    return new Promise((resolve, reject) => {
-        const ports = com.getActivePorts();
-        const data = `\n${rawData}\n`;
-
-        if (!ports[port]) {
-            error(`Port ${port} not found in active ports.`, true);
-            reject(new Error(`Port ${port} not found in active ports.`));
-            return;
-        }
-
-        ports[port].write(data, (err: any) => {
-            if (err) {
-                error(`${trackerName} - Error writing data to serial port ${port}: ${err}`);
-                reject(err);
-            } else {
-                if (printWrites) {
-                    log(`${trackerName} - Data written to serial port ${port}: ${rawData.toString().replace(/\r\n/g, " ")}`);
-                }
-                resolve();
-            }
-        });
-    });
 }
 
 function getSettingsHexValue(
@@ -1931,7 +1549,7 @@ function setupBluetoothServices(): boolean {
  */
 
 function removeActiveDevices(deviceTypeToRemove: string) {
-    let devices = deviceTypeToRemove === "bluetooth" ? bluetooth.getActiveTrackers() : com.getTrackers();
+    let devices = bluetooth.getActiveTrackers();
     let removedDevices: string[] = [];
 
     for (let device of devices) {
@@ -1973,61 +1591,12 @@ function getTrackerSettingsFromMap(trackerName: string) {
     }
 }
 
-async function handleWiredSettings(
-    sensorMode: SensorMode,
-    fpsMode: FPSMode,
-    sensorAutoCorrection: SensorAutoCorrection[],
-    ankleMotionDetection: boolean
-) {
-    const ports = com.getActivePorts();
-
-    // Prepare commands
-    const commands: { [key: string]: string | null } = {
-        sensorMode: sensorMode === 1 ? "sensor imu mode 1\r\n" : sensorMode === 2 ? "sensor imu mode 2\r\n" : null,
-        fpsMode: fpsMode === 50 ? "system speed mode 1\r\n" : fpsMode === 100 ? "system speed mode 2\r\n" : null,
-        sensorAutoCorrection: (() => {
-            let sensorAutoCorrectionBit = 0;
-            if (sensorAutoCorrection.includes("accel")) sensorAutoCorrectionBit += 1;
-            if (sensorAutoCorrection.includes("gyro")) sensorAutoCorrectionBit += 2;
-            if (sensorAutoCorrection.includes("mag")) sensorAutoCorrectionBit += 4;
-            return `sensor cal flags ${sensorAutoCorrectionBit}\r\nsensor restart\r\n`;
-        })(),
-        ankleMotionDetection: ankleMotionDetection
-            ? "param sensor range\r\nparam save\r\nsensor restart\r\n"
-            : "param sensor basic\r\nparam save\r\nsensor restart\r\n",
-    };
-
-    // Send commands to all ports
-    for (const port in ports) {
-        for (const commandKey in commands) {
-            const command = commands[commandKey];
-            if (command) await writeToPort(port, command, "HaritoraXWired");
-        }
-    }
-
-    log(
-        `Wired trackers settings applied: ${JSON.stringify([sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection])}`,
-        true
-    );
-
-    trackerSettings.set("HaritoraXWired", [sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection]);
-}
-
 async function handleWirelessSettings(
     sensorMode: SensorMode,
     fpsMode: FPSMode,
     sensorAutoCorrection: SensorAutoCorrection[],
     ankleMotionDetection: boolean
 ) {
-    if (comEnabled) {
-        const hexValue = getSettingsHexValue(sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
-        const finalValue = `o0:${hexValue}\no1:${hexValue}`;
-
-        for (const port in com.getActivePorts()) {
-            await writeToPort(port, finalValue, "HaritoraXWireless");
-        }
-    }
-
     if (bluetoothEnabled) {
         bluetooth.getActiveTrackers().forEach((trackerName) => {
             main.setTrackerSettings(trackerName, sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
