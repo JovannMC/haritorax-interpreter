@@ -1220,6 +1220,7 @@ function listenToDeviceEvents() {
         });
 
         bluetooth.on("disconnect", (trackerName) => {
+            activeDevices = activeDevices.filter((device) => device !== trackerName);
             main.emit("disconnect", trackerName);
             removeDataTimeout(trackerName);
 
