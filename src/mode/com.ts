@@ -27,10 +27,10 @@ const trackerAssignment: Map<string, string[]> = new Map([
     ["leftElbow", ["7", "", ""]],
     ["rightElbow", ["8", "", ""]],
     ["leftWrist", ["9", "", ""]],
-    ["rightWrist", ["10", "", ""]],
-    ["head", ["11", "", ""]],
-    ["leftFoot", ["12", "", ""]],
-    ["rightFoot", ["13", "", ""]],
+    ["rightWrist", ["a", "", ""]],
+    ["head", ["b", "", ""]],
+    ["leftFoot", ["c", "", ""]],
+    ["rightFoot", ["d", "", ""]],
 ]);
 
 const dongles = [
@@ -460,9 +460,9 @@ async function processData(data: string, port: string) {
             // these should have been already assigned from when the COM port is opened though
             for (let [key, value] of trackerAssignment.entries()) {
                 if (value[1] === "" && identifier.startsWith("r")) {
-                    const trackerId = parseInt(portData.charAt(4));
-                    if (parseInt(value[0]) === trackerId && trackerId !== 0) {
-                        trackerAssignment.set(key, [trackerId.toString(), port, portId]);
+                    const trackerId = portData.charAt(4);
+                    if (value[0] === trackerId && trackerId !== "0") {
+                        trackerAssignment.set(key, [trackerId, port, portId]);
                         log(`Setting ${key} to port ${port} with port ID ${portId}`);
                     }
                 }

@@ -113,16 +113,16 @@ const trackerMag: Map<string, string> = new Map([
 
 const deviceInformation: Map<string, string[]> = new Map([
     // example for wired: {"model":"MC2B", "version":"1.7.10", "serial no":"0000000", "comm":"BLT", "comm_next":"BTSPP"}
-    // deviceName, [version, model, serial, comm, comm_next]
-    ["HaritoraXWired", ["", "", "", "", ""]],
-    ["rightKnee", ["", "", "", "", ""]],
-    ["rightAnkle", ["", "", "", "", ""]],
-    ["hip", ["", "", "", "", ""]],
-    ["chest", ["", "", "", "", ""]],
-    ["leftKnee", ["", "", "", "", ""]],
-    ["leftAnkle", ["", "", "", "", ""]],
-    ["leftElbow", ["", "", "", "", ""]],
-    ["rightElbow", ["", "", "", "", ""]],
+    // deviceName, [version, model, serial, comm, comm_next, imu_num]
+    ["HaritoraXWired", ["", "", "", "", "", ""]],
+    ["rightKnee", ["", "", "", "", "", ""]],
+    ["rightAnkle", ["", "", "", "", "", ""]],
+    ["hip", ["", "", "", "", "", ""]],
+    ["chest", ["", "", "", "", "", ""]],
+    ["leftKnee", ["", "", "", "", "", ""]],
+    ["leftAnkle", ["", "", "", "", "", ""]],
+    ["leftElbow", ["", "", "", "", "", ""]],
+    ["rightElbow", ["", "", "", "", "", ""]],
 ]);
 
 let trackerService: string;
@@ -932,7 +932,8 @@ export default class HaritoraX extends EventEmitter {
         return bluetooth;
     }
 
-    // TODO: add changing body part assignment within app (BLE)
+    // TODO: add changing body part assignment within app (for BLE)
+    // TODO: add switching between BLE and GX
 }
 
 const removeDataTimeout = (trackerName: string) => {
@@ -1051,8 +1052,14 @@ function listenToDeviceEvents() {
         });
 
         com.on("disconnected", (port: string) => {
-            if (port) log(`A COM port connected (${port}) was disconnected, removing all devices...`, true);
-            activeDevices = [];
+            log(`COM port ${port} disconnected, removing devices connected to it.`, true);
+            activeDevices = activeDevices.filter(device => {
+            if (com.getTrackerPort(device) === port) {
+                log(`Removing device ${device} due to COM port ${port} disconnection.`, true);
+                return false;
+            }
+            return true;
+            });
         });
 
         com.on("log", (message: string) => {
@@ -1605,10 +1612,11 @@ function processSettingsData(data: string, trackerName: string, characteristic?:
 
 function processInfoData(data: string, trackerName: string) {
     // example: {"model":"MC2B", "version":"1.7.10", "serial no":"0000000", "comm":"BLT", "comm_next":"BTSPP"}
+    // example 2 (HX2): i1:{"version":"0.0.1","model":"mc3s","imu_num":1,"serial no":"A00000"}
     try {
-        const { version, model, "serial no": serial, comm, comm_next } = JSON.parse(data);
-        main.emit("info", trackerName, version, model, serial, comm, comm_next);
-        deviceInformation.set(trackerName, [version, model, serial, comm, comm_next]);
+        const { version, model, "serial no": serial, comm, comm_next, imu_num } = JSON.parse(data);
+        main.emit("info", trackerName, version, model, serial, comm, comm_next, imu_num);
+        deviceInformation.set(trackerName, [version, model, serial, comm, comm_next, imu_num]);
     } catch (err) {
         log(`Error processing info data for tracker ${trackerName}: ${err}`);
     }
