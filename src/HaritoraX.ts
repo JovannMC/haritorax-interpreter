@@ -915,6 +915,65 @@ export default class HaritoraX extends EventEmitter {
     }
 
     /**
+     * Switches the communication mode of the tracker.
+     * Supported trackers: x2, wireless
+     * Supported connections: COM, Bluetooth
+     *
+     * @function switchCommunication
+     * @param {string} trackerName - The name of the tracker to switch communication for.
+     * @param {string} mode - The mode to switch to (com or bluetooth).
+     */
+    async switchCommunication(trackerName: string, mode: "com" | "bluetooth") {
+        // does not work for wired trackers
+        if (trackerModelEnabled === "wired") {
+            error("Wired trackers do not support switching communcation modes.", true);
+            return false;
+        }
+
+        if (isWirelessBTTracker(trackerName) && mode === "com") {
+            // is BT tracker and wants to switch to serial
+            try {
+                await writeToBluetooth(trackerName, wirelessModeCharacteristic, 1);
+            } catch (err) {
+                error(`Error powering off tracker "${trackerName}": ${err}`);
+                return false;
+            }
+            log(`Switched communication mode of tracker "${trackerName}" to serial.`, true);
+        } else if (!isWirelessBTTracker(trackerName) && mode === "bluetooth") {
+            // is serial tracker and wants to switch to BT
+            const delay = 25;
+
+            const trackerPort = com.getTrackerPort(trackerName);
+            const trackerPortId = com.getTrackerPortId(trackerName);
+
+            const defaultSettings: [SensorMode, FPSMode, SensorAutoCorrection[], boolean] = [2, 50, [], false];
+            const settings =
+                (trackerSettings.get(trackerName) as [SensorMode, FPSMode, SensorAutoCorrection[], boolean]) ?? defaultSettings;
+            const settingsHex = getSettingsHexValue(...settings);
+
+            // change the 13th bit to '1' (and back) to switch to bluetooth
+            const modifiedSettingsHex = settingsHex.slice(0, 12) + "1" + settingsHex.slice(13);
+            const commands = [`o${trackerPortId}:${modifiedSettingsHex}`, `o${trackerPortId}:${settingsHex}`];
+
+            for (const command of commands) {
+                try {
+                    await writeToPort(trackerPort, command);
+                } catch (err) {
+                    error(`Error sending power off command: ${err}`);
+                    return false;
+                }
+                // Allow for small delay between commands so tracker can process the first command
+                await new Promise((resolve) => setTimeout(resolve, delay));
+            }
+
+            log(
+                `Switched communication mode of tracker "${trackerName}" to Bluetooth (Port ${trackerPort}, port id ${trackerPortId}). Delay between commands: ${delay}ms.`,
+                true
+            );
+        }
+    }
+
+    /**
      * Returns the COM instance so you can use its methods with the instance this class is using.
      * @function getComInstance
      * @returns {COM} The COM instance.
@@ -933,7 +992,6 @@ export default class HaritoraX extends EventEmitter {
     }
 
     // TODO: add changing body part assignment within app (for BLE)
-    // TODO: add switching between BLE and GX
 }
 
 const removeDataTimeout = (trackerName: string) => {
@@ -1042,23 +1100,26 @@ function listenToDeviceEvents() {
         });
 
         com.on("paired", (trackerName: string, port: string, portId: string) => {
+            if (!trackerName || !port || !portId) return;
             log(`Tracker "${trackerName}" paired, emitting paired event`, true);
             main.emit("paired", trackerName, port, portId);
         });
 
         com.on("unpaired", (trackerName: string) => {
+            if (!trackerName) return;
             log(`Tracker "${trackerName}" unpaired, emitting unpaired event`, true);
             main.emit("unpaired", trackerName);
         });
 
         com.on("disconnected", (port: string) => {
+            if (!port) return;
             log(`COM port ${port} disconnected, removing devices connected to it.`, true);
-            activeDevices = activeDevices.filter(device => {
-            if (com.getTrackerPort(device) === port) {
-                log(`Removing device ${device} due to COM port ${port} disconnection.`, true);
-                return false;
-            }
-            return true;
+            activeDevices = activeDevices.filter((device) => {
+                if (com.getTrackerPort(device) === port) {
+                    log(`Removing device ${device} due to COM port ${port} disconnection.`, true);
+                    return false;
+                }
+                return true;
             });
         });
 
