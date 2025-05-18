@@ -1,6 +1,6 @@
 {
     "name": "haritorax-interpreter",
-    "version": "3.3.2",
+    "version": "3.4.0",
     "homepage": "https://github.com/JovannMC/haritorax-interpreter",
     "repository": {
         "type": "git",
@@ -35,7 +35,7 @@
         "node-ble": "^1.13.0"
     },
     "devDependencies": {
-        "eslint": "^9.24.0",
+        "eslint": "^9.27.0",
         "node-gyp-build": "^4.8.4",
         "ts-node": "^10.9.2",
         "typescript": "^5.8.3"

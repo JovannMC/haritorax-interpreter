@@ -1498,6 +1498,7 @@ function processTrackerData(data: string, trackerName: string) {
     }
 
     // TODO: find out what "other data" represents, then add to emitted event.
+    // "other data" is likely connection strength (RSSI) for dongle and tracker maybe?
     main.emit("tracker", trackerName, data);
 }
 
