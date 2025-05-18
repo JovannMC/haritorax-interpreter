@@ -756,7 +756,7 @@ export default class HaritoraX extends EventEmitter {
             main.emit("mag", normalizedName, magStatus);
         } else {
             // Read from BLE device
-            if (!trackerName.startsWith("HaritoraXW") || !trackerName.startsWith("HaritoraX2-")) {
+            if (!trackerName.startsWith("HaritoraXW") && !trackerName.startsWith("HaritoraX2")) {
                 error(`Tracker "${trackerName}" magnetometer status not found`);
                 return;
             }

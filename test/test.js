@@ -2,13 +2,22 @@ const { HaritoraX } = require("../dist/index.js");
 require("../dist/libs/btspp.js");
 
 let mode = process.argv[2] || "bluetooth";
-let device = new HaritoraX("wireless", true, true, false);
+let device = new HaritoraX("wireless", false, false, false);
 
 if (mode === "bt" || mode === "bluetooth") {
     device.startConnection("bluetooth");
 
+    device.on("connect", async (trackerName) => {
+        console.log(`Connected to tracker ${trackerName}`);
+    });
+
+    device.on("mag", async (trackerName, magData) => {
+        console.log(`Mag data for ${trackerName}:`, magData);
+    });
+
     setInterval(async () => {
         console.log("Active trackers for BT:", device.getActiveTrackers());
+        await device.fireTrackerMag("HaritoraX2-C1M8W0")
     }, 5000);
 
     /*setInterval(async () => {
@@ -22,7 +31,7 @@ if (mode === "bt" || mode === "bluetooth") {
 } else {
     device.startConnection("com", ["COM3", "COM4", "COM5"]);
 
-    device.on("connect", (trackerName) => {
+    device.on("connect", async (trackerName) => {
         console.log(`Connected to tracker ${trackerName}`);
         console.log(`Active trackers for COM:`, device.getActiveTrackers());
     });
