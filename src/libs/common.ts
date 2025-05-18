@@ -54,6 +54,7 @@ addUUIDs(characteristics, "ef84c30590a911eda1eb0242ac120002", "AutoCalibrationSe
 addUUIDs(characteristics, "ef84476690a911eda1eb0242ac120002", "SensorDataControl");
 addUUIDs(characteristics, "ef843b5490a911eda1eb0242ac120002", "BatteryVoltage");
 addUUIDs(characteristics, "ef843cb290a911eda1eb0242ac120002", "ChargeStatus");
+addUUIDs(characteristics, "ef84c30190a911eda1eb0242ac120002", "BodyPartAssignment");
 addUUIDs(characteristics, "8ec90003f3154f609fb8838830daea50", "DFUControl");
 addUUIDs(characteristics, "0c900914a85e11edafa10242ac120002", "CommandMode");
 addUUIDs(characteristics, "0c900c84a85e11edafa10242ac120002", "Command");

@@ -136,6 +136,8 @@ let sensorModeCharacteristic: string;
 let fpsModeCharacteristic: string;
 let correctionCharacteristic: string;
 let ankleCharacteristic: string;
+let wirelessModeCharacteristic: string;
+let bodyPartAssignmentCharacteristic: string;
 
 let activeDevices: string[] = [];
 let trackerModelEnabled: TrackerModel;
@@ -144,7 +146,7 @@ let trackerModelEnabled: TrackerModel;
 
 /**
  * The "imu" event which provides info about the tracker's IMU data.
- * Supported trackers: wireless, wired
+ * Supported trackers: x2, wireless, wired
  * Supported connections: COM, Bluetooth
  *
  * @event this#imu
@@ -164,7 +166,7 @@ let trackerModelEnabled: TrackerModel;
 
 /**
  * The "tracker" event which provides info about the tracker's other data.
- * Supported trackers: wireless
+ * Supported trackers: x2, wireless
  * Supported connections: COM, Bluetooth
  *
  * @event this#tracker
@@ -175,7 +177,7 @@ let trackerModelEnabled: TrackerModel;
 
 /**
  * The "mag" event which provides the tracker's magnetometer status
- * Supported trackers: wireless, wired
+ * Supported trackers: x2, wireless, wired
  * Supported connections: COM, Bluetooth
  *
  * @event this#mag
@@ -186,7 +188,7 @@ let trackerModelEnabled: TrackerModel;
 
 /**
  * The "button" event which provides info about the tracker's button data.
- * Supported trackers: wireless, wired
+ * Supported trackers: x2, wireless, wired
  * Supported connections: COM, Bluetooth
  *
  * @event this#button
@@ -201,7 +203,7 @@ let trackerModelEnabled: TrackerModel;
 
 /**
  * The "battery" event which provides info about the tracker's battery data.
- * Supported trackers: wireless, wired
+ * Supported trackers: x2, wireless, wired
  * Supported connections: COM, Bluetooth
  *
  * @event this#battery
@@ -214,7 +216,7 @@ let trackerModelEnabled: TrackerModel;
 
 /**
  * The "info" event which provides info about the tracker or dongle.
- * Supported trackers: wireless, wired
+ * Supported trackers: x2, wireless, wired
  * Supported connections: COM, Bluetooth
  *
  * @event this#info
@@ -229,7 +231,7 @@ let trackerModelEnabled: TrackerModel;
 
 /**
  * The "connect" event which provides the name of the tracker that has connected.
- * Supported trackers: wireless, wired
+ * Supported trackers: x2, wireless, wired
  * Supported connections: COM, Bluetooth
  *
  * @event this#connect
@@ -242,7 +244,7 @@ let trackerModelEnabled: TrackerModel;
 
 /**
  * The "disconnect" event which provides the name of the tracker that has disconnected.
- * Supported trackers: wireless, wired
+ * Supported trackers: x2, wireless, wired
  * Supported connections: COM, Bluetooth
  *
  * @event this#disconnect
@@ -359,7 +361,7 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Sets the tracker settings for a specific tracker.
-     * Supported trackers: wireless
+     * Supported trackers: x2, wireless
      * Supported connections: COM, Bluetooth
      *
      * @param {string} trackerName - The name of the tracker to apply settings to (rightKnee, rightAnkle, hip, chest, leftKnee, leftAnkle, leftElbow, rightElbow).
@@ -429,7 +431,7 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Sets the tracker settings for all connected trackers
-     * Supported trackers: wireless, wired
+     * Supported trackers: x2, wireless, wired
      * Supported connections: COM, Bluetooth
      *
      * @param {number} sensorMode - The sensor mode, which controls whether magnetometer is used (1 or 2).
@@ -463,7 +465,7 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Get the active trackers.
-     * Supported trackers: wireless, wired
+     * Supported trackers: x2, wireless, wired
      * Supported connections: COM, Bluetooth
      *
      * @function getActiveTrackers
@@ -479,7 +481,7 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Get the tracker's settings.
-     * Supported trackers: wireless, wired
+     * Supported trackers: x2, wireless, wired
      * Supported connections: COM, Bluetooth
      *
      * @function getTrackerSettings
@@ -542,7 +544,7 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Get the tracker's buttons.
-     * Supported trackers: wireless, wired
+     * Supported trackers: x2, wireless, wired
      * Supported connections: COM, Bluetooth
      *
      * @function getTrackerButtons
@@ -565,7 +567,7 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Check whether the connection mode is active or not.
-     * Supported trackers: wireless, wired
+     * Supported trackers: x2, wireless, wired
      * Supported connections: COM, Bluetooth
      *
      * @function getConnectionModeActive
@@ -589,7 +591,7 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Fires the "info" event to get the tracker info.
-     * Supported trackers: wireless, wired
+     * Supported trackers: x2, wireless, wired
      * Supported connections: COM, Bluetooth
      *
      * @function fireDeviceInfo
@@ -656,7 +658,7 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Fires the "battery" event to get the battery info of the trackers.
-     * Supported trackers: wireless, wired
+     * Supported trackers: x2, wireless, wired
      * Supported connections: COM, Bluetooth
      *
      * @function fireTrackerBattery
@@ -739,7 +741,7 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Fires the "mag" event to get the magnetometer status of the trackers.
-     * Supported trackers: wireless, wired
+     * Supported trackers: x2, wireless, wired
      * Supported connections: COM, Bluetooth
      *
      * @function fireTrackerMag
@@ -830,7 +832,7 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Gets the available ports for the specified device
-     * Supported devices: wireless, wired
+     * Supported trackers: x2, wireless, wired
      * Supported connections: COM
      *
      * @function getDevicePorts
@@ -853,49 +855,62 @@ export default class HaritoraX extends EventEmitter {
 
     /**
      * Turns off the specified tracker.
-     * Supported trackers: wireless
-     * Supported connections: COM
+     * Supported trackers: x2, wireless
+     * Supported connections: COM, Bluetooth
      *
      * @function powerOffTracker
      * @param {string} trackerName - The name of the tracker to power off.
      */
     async powerOffTracker(trackerName: string): Promise<boolean> {
-        if (!com || !comEnabled) {
-            error("COM connection not enabled", true);
+        if ((!com && !comEnabled) || (!bluetooth && !bluetoothEnabled)) {
+            error("No active connection to power off tracker", true);
             return false;
         }
 
-        const delay = 25;
-
-        const trackerPort = com.getTrackerPort(trackerName);
-        const trackerPortId = com.getTrackerPortId(trackerName);
-
-        const defaultSettings: [SensorMode, FPSMode, SensorAutoCorrection[], boolean] = [2, 50, [], false];
-        const settings =
-            (trackerSettings.get(trackerName) as [SensorMode, FPSMode, SensorAutoCorrection[], boolean]) ?? defaultSettings;
-        const settingsHex = getSettingsHexValue(...settings);
-
-        // Change the second-to-last bit to '2' (power off signal)
-        // note to self: MAKE SURE the settings is set to original after sending power off signal, otherwise you'll soft brick the trackers lol
-        // this is because the power off signal uses a bit in the "settings" portion of the trackers, and if it's not set back to normal, the trackers will load the settings and keep turning back off
-        const modifiedSettingsHex = settingsHex.slice(0, -2) + "2" + settingsHex.slice(-1);
-        const commands = [`o${trackerPortId}:${modifiedSettingsHex}`, `o${trackerPortId}:${settingsHex}`];
-
-        for (const command of commands) {
+        // check if tracker is serial or bt
+        if (isWirelessBTTracker(trackerName)) {
             try {
-                await writeToPort(trackerPort, command);
+                await writeToBluetooth(trackerName, wirelessModeCharacteristic, 2);
             } catch (err) {
-                error(`Error sending power off command: ${err}`);
+                error(`Error powering off tracker "${trackerName}": ${err}`);
                 return false;
             }
-            // Allow for small delay between commands so tracker can process the first command
-            await new Promise((resolve) => setTimeout(resolve, delay));
-        }
+        } else if (comEnabled) {
+            const delay = 25;
 
-        log(
-            `Manually powered off tracker "${trackerName}" (Port ${trackerPort}, port id ${trackerPortId}). Delay between commands: ${delay}ms.`,
-            true
-        );
+            const trackerPort = com.getTrackerPort(trackerName);
+            const trackerPortId = com.getTrackerPortId(trackerName);
+
+            const defaultSettings: [SensorMode, FPSMode, SensorAutoCorrection[], boolean] = [2, 50, [], false];
+            const settings =
+                (trackerSettings.get(trackerName) as [SensorMode, FPSMode, SensorAutoCorrection[], boolean]) ?? defaultSettings;
+            const settingsHex = getSettingsHexValue(...settings);
+
+            // Change the second-to-last bit to '2' (power off signal)
+            // note to self: MAKE SURE the settings is set to original after sending power off signal, otherwise you'll soft brick the trackers lol
+            // this is because the power off signal uses a bit in the "settings" portion of the trackers, and if it's not set back to normal, the trackers will load the settings and keep turning back off
+            const modifiedSettingsHex = settingsHex.slice(0, -2) + "2" + settingsHex.slice(-1);
+            const commands = [`o${trackerPortId}:${modifiedSettingsHex}`, `o${trackerPortId}:${settingsHex}`];
+
+            for (const command of commands) {
+                try {
+                    await writeToPort(trackerPort, command);
+                } catch (err) {
+                    error(`Error sending power off command: ${err}`);
+                    return false;
+                }
+                // Allow for small delay between commands so tracker can process the first command
+                await new Promise((resolve) => setTimeout(resolve, delay));
+            }
+
+            log(
+                `Manually powered off tracker "${trackerName}" (Port ${trackerPort}, port id ${trackerPortId}). Delay between commands: ${delay}ms.`,
+                true
+            );
+        } else {
+            error("No active connection to power off tracker", true);
+            return false;
+        }
         return true;
     }
 
@@ -916,6 +931,8 @@ export default class HaritoraX extends EventEmitter {
     getBluetoothInstance() {
         return bluetooth;
     }
+
+    // TODO: add changing body part assignment within app (BLE)
 }
 
 const removeDataTimeout = (trackerName: string) => {
@@ -1236,7 +1253,7 @@ function processWiredData(identifier: string, data: string) {
 /**
  * Processes the IMU data received from the tracker by the dongle.
  * The data contains the information about the rotation, gravity, and ankle motion (if enabled) of the tracker.
- * Supported trackers: wireless, wired
+ * Supported trackers: x2, wireless, wired
  * Supported connections: COM, Bluetooth
  *
  * @function processIMUData
@@ -1263,7 +1280,7 @@ function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) 
             trackerName = trackerName.slice(0, -4);
             isExtension = true;
         }
-        
+
         const mode = isWireless ? "bluetooth" : "com";
         const port = isWireless ? undefined : com.getTrackerPort(trackerName);
         const portId = isWireless ? undefined : com.getTrackerPortId(trackerName);
@@ -1309,7 +1326,10 @@ const GRAVITY_ADJUSTMENT = 1.2;
 
 function decodeIMUPacket(data: Buffer, trackerName: string) {
     if (!trackerName || data.length < 14) {
-        error(`Invalid data for IMU packet: ${!trackerName ? "no tracker name" : `insufficient data length (${data.length})`}`, false);
+        error(
+            `Invalid data for IMU packet: ${!trackerName ? "no tracker name" : `insufficient data length (${data.length})`}`,
+            false
+        );
         return null;
     }
 
@@ -1381,7 +1401,7 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
 /**
  * Processes other tracker data received from the tracker by the dongle.
  * Read function comments for more information.
- * Supported trackers: wireless
+ * Supported trackers: x2, wireless
  * Supported connections: COM
  *
  * @function processTrackerData
@@ -1415,7 +1435,7 @@ function processTrackerData(data: string, trackerName: string) {
 /**
  * Processes the magnetometer data received from the Bluetooth tracker.
  * GX(6/2) mag status for wireless is processed by decodeIMUPacket()
- * Supported trackers: wireless, wired
+ * Supported trackers: x2, wireless, wired
  * Supported connections: COM, Bluetooth
  *
  * @function processMagData
@@ -1487,7 +1507,7 @@ function getMagStatus(magData: number) {
 
 /**
  * Processes the settings data received from the trackers.
- * Supported trackers: wireless, wired
+ * Supported trackers: x2, wireless, wired
  * Supported connections: COM
  *
  * @function processSettingsData
@@ -1597,7 +1617,7 @@ function processInfoData(data: string, trackerName: string) {
 /**
  * Processes the button data received from the tracker by the dongle.
  * The data contains the information about the main and sub buttons on the tracker along with which one was pressed/updated.
- * Supported trackers: wireless, wired
+ * Supported trackers: x2, wireless, wired
  * Supported connections: COM, Bluetooth
  *
  * @function processButtonData
@@ -1708,7 +1728,7 @@ function processWiredTrackerData(data: string, trackerName: string, currentButto
 /**
  * Processes the battery data received from the tracker by the dongle.
  * It contains the information about the battery percentage, voltage, and charge status of the tracker.
- * Supported trackers: wireless, wired
+ * Supported trackers: x2, wireless, wired
  * Supported connections: COM, Bluetooth
  *
  * @function processBatteryData
@@ -1813,7 +1833,7 @@ function isWirelessBTTracker(trackerName: string) {
     return (
         trackerModelEnabled === "wireless" &&
         bluetoothEnabled &&
-        (trackerName.startsWith("HaritoraXW") || trackerName.startsWith("HaritoraX2-"))
+        (trackerName.startsWith("HaritoraXW") || trackerName.startsWith("HaritoraX2"))
     );
 }
 
@@ -1912,6 +1932,8 @@ function setupBluetoothServices(): boolean {
     fpsModeCharacteristic = bluetooth.getCharacteristicUUID("FpsSetting");
     correctionCharacteristic = bluetooth.getCharacteristicUUID("AutoCalibrationSetting");
     ankleCharacteristic = bluetooth.getCharacteristicUUID("TofSetting");
+    wirelessModeCharacteristic = bluetooth.getCharacteristicUUID("WirelessModeSetting");
+    bodyPartAssignmentCharacteristic = bluetooth.getCharacteristicUUID("BodyPartAssignment");
 
     return (
         !!trackerService &&
