@@ -15,7 +15,6 @@ let allowReconnect = true;
 export default class Bluetooth extends EventEmitter {
     constructor() {
         super();
-        noble.on("discover", this.onDiscover.bind(this));
         main = this;
         log(`Initialized Bluetooth module.`);
     }
@@ -47,7 +46,11 @@ export default class Bluetooth extends EventEmitter {
             let availableDevices = [];
 
             noble.on("discover", (peripheral) => {
-                if (peripheral.advertisement.localName && (peripheral.advertisement.localName.startsWith("HaritoraXW-") || peripheral.advertisement.localName.startsWith("HaritoraX2-"))) {
+                if (
+                    peripheral.advertisement.localName &&
+                    (peripheral.advertisement.localName.startsWith("HaritoraXW-") ||
+                        peripheral.advertisement.localName.startsWith("HaritoraX2-"))
+                ) {
                     availableDevices.push("HaritoraX Wireless");
                     found = true;
                     noble.removeAllListeners();
@@ -111,6 +114,13 @@ export default class Bluetooth extends EventEmitter {
                 noble.removeAllListeners();
                 error("Bluetooth initialization failed (timeout)", true);
             }, 3500);
+
+            // wait a second before firing onDiscover()
+            noble.on("discover", (peripheral) => {
+                setTimeout(() => {
+                    this.onDiscover(peripheral);
+                }, 1000);
+            });
         }
     }
 
@@ -130,7 +140,13 @@ export default class Bluetooth extends EventEmitter {
         try {
             await connectPeripheral(peripheral);
 
-            const { services, characteristics } = await discoverServicesAndCharacteristics(peripheral);
+            const result = await discoverServicesAndCharacteristics(peripheral);
+            if (!result) {
+                error(`Failed to discover services for ${localName}`, true);
+                return;
+            }
+
+            const { services, characteristics } = result;
             updateActiveDevices(localName, peripheral, services, characteristics);
 
             log(`Connected to ${localName}`);
