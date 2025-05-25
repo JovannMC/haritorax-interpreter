@@ -9,8 +9,9 @@ let main: Bluetooth = undefined;
 
 type ActiveDevice = [string, Peripheral, Service[], Characteristic[]];
 let activeDevices: ActiveDevice[] = [];
-
 let allowReconnect = true;
+const CONNECTION_RETRY_COUNT = 3;
+const DISCOVERY_TIMEOUT = 20000;
 
 export default class Bluetooth extends EventEmitter {
     constructor() {
@@ -140,9 +141,24 @@ export default class Bluetooth extends EventEmitter {
         try {
             await connectPeripheral(peripheral);
 
-            const result = await discoverServicesAndCharacteristics(peripheral);
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+
+            let result = null;
+            let attempts = 0;
+
+            while (!result && attempts < CONNECTION_RETRY_COUNT) {
+                attempts++;
+                log(`Attempting to discover services for ${localName} (attempt ${attempts}/${CONNECTION_RETRY_COUNT})`);
+                result = await discoverServicesAndCharacteristics(peripheral);
+
+                if (!result && attempts < CONNECTION_RETRY_COUNT) {
+                    log(`Service discovery failed, retrying in 2 seconds...`);
+                    await new Promise((resolve) => setTimeout(resolve, 2000));
+                }
+            }
+
             if (!result) {
-                error(`Failed to discover services for ${localName}`, true);
+                error(`Failed to discover services for ${localName} after ${CONNECTION_RETRY_COUNT} attempts`, true);
                 return;
             }
 
@@ -272,21 +288,29 @@ async function connectPeripheral(peripheral: Peripheral): Promise<void> {
 }
 
 async function discoverServicesAndCharacteristics(peripheral: Peripheral): Promise<any> {
-    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("Operation timed out")), 10000));
+    const localName = peripheral.advertisement.localName;
+    log(`Starting service discovery for ${localName}...`);
+
+    const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`Operation timed out after ${DISCOVERY_TIMEOUT}ms`)), DISCOVERY_TIMEOUT)
+    );
 
     const discovery = (async () => {
         const services = await discoverServices(peripheral);
-        const characteristics = await Promise.all(
-            services.map((service) => discoverCharacteristics(peripheral.advertisement.localName, service))
-        );
+        log(`Found ${services.length} services for ${localName}`);
 
-        return { services, characteristics: characteristics.flat() };
+        const characteristics = await Promise.all(services.map((service) => discoverCharacteristics(localName, service)));
+
+        const flattenedCharacteristics = characteristics.flat();
+        log(`Found ${flattenedCharacteristics.length} characteristics for ${localName}`);
+
+        return { services, characteristics: flattenedCharacteristics };
     })();
 
     try {
         return await Promise.race([discovery, timeout]);
     } catch (err) {
-        error(`Discovering services/characteristics for ${peripheral.advertisement.localName} failed: ${err}`);
+        error(`Discovering services/characteristics for ${localName} failed: ${err}`, true);
         return null;
     }
 }
