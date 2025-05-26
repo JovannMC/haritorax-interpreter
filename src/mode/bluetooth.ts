@@ -13,6 +13,9 @@ let allowReconnect = true;
 const CONNECTION_RETRY_COUNT = 3;
 const DISCOVERY_TIMEOUT = 20000;
 
+// TODO: stop scanning while connecting for certain adapters
+// https://github.com/abandonware/noble?tab=readme-ov-file#adapter-specific-known-issues
+
 export default class Bluetooth extends EventEmitter {
     constructor() {
         super();
@@ -271,6 +274,8 @@ async function connectPeripheral(peripheral: Peripheral): Promise<void> {
     const timeout = new Promise<void>((_, reject) =>
         setTimeout(() => reject(new Error(`Connection to ${peripheral.advertisement.localName} timed out`)), 10000)
     );
+
+    noble.reset();
 
     const connection = new Promise<void>((resolve, reject) => {
         peripheral.connect((err) => {
