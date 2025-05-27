@@ -10,8 +10,6 @@ let main: Bluetooth = undefined;
 type ActiveDevice = [string, Peripheral, Service[], Characteristic[]];
 let activeDevices: ActiveDevice[] = [];
 let allowReconnect = true;
-const CONNECTION_RETRY_COUNT = 3;
-const DISCOVERY_TIMEOUT = 20000;
 
 // TODO: stop scanning while connecting for certain adapters
 // https://github.com/abandonware/noble?tab=readme-ov-file#adapter-specific-known-issues
@@ -22,109 +20,108 @@ export default class Bluetooth extends EventEmitter {
         main = this;
         log(`Initialized Bluetooth module.`);
     }
-
     async isDeviceAvailable() {
-        return new Promise<Boolean>((resolve) => {
-            if (noble._state === "poweredOn") {
-                resolve(true);
-            } else {
-                const timeout = setTimeout(() => {
-                    resolve(false);
-                }, 3000);
+        try {
+            if (noble._state === "poweredOn") return true;
+
+            return new Promise<boolean>((resolve) => {
+                const timeout = setTimeout(() => resolve(false), 3000);
 
                 noble.on("stateChange", (state) => {
                     clearTimeout(timeout);
-                    if (state === "poweredOn") {
-                        resolve(true);
-                    } else {
-                        resolve(false);
-                    }
+                    noble.removeAllListeners("stateChange");
+                    resolve(state === "poweredOn");
                 });
-            }
-        });
+            });
+        } catch (err) {
+            return false;
+        }
     }
 
     async getAvailableDevices() {
-        return new Promise<string[]>((resolve) => {
-            let found = false;
-            let availableDevices = [];
-
-            noble.on("discover", (peripheral) => {
-                if (
-                    peripheral.advertisement.localName &&
-                    (peripheral.advertisement.localName.startsWith("HaritoraXW-") ||
-                        peripheral.advertisement.localName.startsWith("HaritoraX2-"))
-                ) {
-                    availableDevices.push("HaritoraX Wireless");
-                    found = true;
-                    noble.removeAllListeners();
-                    noble.stopScanning();
-                    resolve(availableDevices);
-                }
-            });
-
-            noble.on("stateChange", (state) => {
-                if (state === "poweredOn" && !found) {
-                    noble.startScanning([], true);
-
-                    setTimeout(() => {
-                        if (!found) {
-                            noble.stopScanning();
-                            noble.removeAllListeners();
-                            resolve(null);
+        try {
+            if (noble._state !== "poweredOn") {
+                await new Promise<void>((resolve) => {
+                    const timeout = setTimeout(() => resolve(), 3000);
+                    noble.on("stateChange", (state) => {
+                        if (state === "poweredOn") {
+                            clearTimeout(timeout);
+                            noble.removeAllListeners("stateChange");
+                            resolve();
                         }
-                    }, 3000);
-                } else if (noble._state !== "poweredOn") {
-                    noble.removeAllListeners();
+                    });
+                });
+            }
+
+            await noble.startScanningAsync([], true);
+
+            const scanTimeout = setTimeout(async () => {
+                await noble.stopScanningAsync();
+            }, 3000);
+
+            const peripheral = await new Promise<any>((resolve) => {
+                noble.on("discover", (peripheral) => {
+                    if (
+                        peripheral.advertisement.localName &&
+                        (peripheral.advertisement.localName.startsWith("HaritoraXW-") ||
+                            peripheral.advertisement.localName.startsWith("HaritoraX2-"))
+                    ) {
+                        clearTimeout(scanTimeout);
+                        noble.removeAllListeners("discover");
+                        resolve(peripheral);
+                    }
+                });
+
+                setTimeout(() => {
+                    noble.removeAllListeners("discover");
                     resolve(null);
-                }
+                }, 3000);
             });
 
-            // Fail-safe if noble never initializes properly (no "stateChange" event fired)
-            setTimeout(() => {
-                noble.stopScanning();
-                noble.removeAllListeners();
-                resolve(null);
-            }, 3500);
-        });
+            await noble.stopScanningAsync();
+            return peripheral ? ["HaritoraX Wireless"] : null;
+        } catch (err) {
+            error(`Error getting available devices: ${err}`);
+            await noble.stopScanningAsync().catch(() => {});
+            return null;
+        }
     }
 
-    startConnection() {
-        const startScanning = () => {
-            try {
-                allowReconnect = true;
-                noble.startScanning([], true);
-                this.emit("connected");
-            } catch (err) {
-                error(`Error starting Bluetooth scanning: ${err}`, true);
+    async startConnection() {
+        try {
+            log("Starting Bluetooth connection...");
+
+            if (noble._state !== "poweredOn") {
+                await new Promise<void>((resolve, reject) => {
+                    const timeout = setTimeout(() => {
+                        noble.removeAllListeners("stateChange");
+                        reject(new Error("Bluetooth initialization failed (timeout)"));
+                    }, 5000);
+
+                    noble.on("stateChange", (state) => {
+                        if (state === "poweredOn") {
+                            clearTimeout(timeout);
+                            noble.removeAllListeners("stateChange");
+                            resolve();
+                        }
+                    });
+                });
             }
-        };
 
-        log("Connected to bluetooth");
+            allowReconnect = true;
+            await noble.startScanningAsync([], true);
+            this.emit("connected");
 
-        if (noble._state === "poweredOn") {
-            return startScanning();
-        } else {
-            noble.on("stateChange", (state) => {
-                if (state === "poweredOn") {
-                    clearTimeout(connectionTimeout);
-                    return startScanning();
-                }
-            });
+            log("Connected to bluetooth");
 
-            // Fail-safe if noble never initializes properly (no "stateChange" event fired)
-            const connectionTimeout = setTimeout(() => {
-                noble.stopScanning();
-                noble.removeAllListeners();
-                error("Bluetooth initialization failed (timeout)", true);
-            }, 3500);
-
-            // wait a second before firing onDiscover()
             noble.on("discover", (peripheral) => {
+                // add delay to prevent overwhelming the adapter
                 setTimeout(() => {
                     this.onDiscover(peripheral);
-                }, 1000);
+                }, 500);
             });
+        } catch (err) {
+            error(`Error starting Bluetooth connection: ${err}`, true);
         }
     }
 
@@ -140,32 +137,35 @@ export default class Bluetooth extends EventEmitter {
         log(`Found device: ${localName}`);
 
         updateActiveDevices(localName, peripheral, [], []);
-
         try {
-            await connectPeripheral(peripheral);
+            await peripheral.connectAsync();
+            log(`Connected to ${localName}, waiting before service discovery...`);
 
             await new Promise((resolve) => setTimeout(resolve, 1000));
 
-            let result = null;
-            let attempts = 0;
+            const { services, characteristics } = await peripheral.discoverAllServicesAndCharacteristicsAsync();
+            log(`Found ${services.length} services and ${characteristics.length} characteristics for ${localName}`);
 
-            while (!result && attempts < CONNECTION_RETRY_COUNT) {
-                attempts++;
-                log(`Attempting to discover services for ${localName} (attempt ${attempts}/${CONNECTION_RETRY_COUNT})`);
-                result = await discoverServicesAndCharacteristics(peripheral);
-
-                if (!result && attempts < CONNECTION_RETRY_COUNT) {
-                    log(`Service discovery failed, retrying in 2 seconds...`);
-                    await new Promise((resolve) => setTimeout(resolve, 2000));
+            characteristics.forEach((characteristic) => {
+                // find the service that contains this characteristic
+                const service = services.find((s) => s.characteristics.includes(characteristic));
+                if (!service) {
+                    error(`Could not find service for characteristic ${characteristic.uuid}`);
+                    return;
                 }
-            }
 
-            if (!result) {
-                error(`Failed to discover services for ${localName} after ${CONNECTION_RETRY_COUNT} attempts`, true);
-                return;
-            }
+                characteristic.on("data", (data, isNotification) => {
+                    emitData(localName, service.uuid, characteristic.uuid, data);
+                });
 
-            const { services, characteristics } = result;
+                // subscribe to notifications if the characteristic supports it
+                if (characteristic.properties.includes("notify") || characteristic.properties.includes("indicate")) {
+                    characteristic.subscribeAsync().catch((err) => {
+                        error(`Error subscribing to characteristic ${characteristic.uuid}: ${err}`);
+                    });
+                }
+            });
+
             updateActiveDevices(localName, peripheral, services, characteristics);
 
             log(`Connected to ${localName}`);
@@ -181,10 +181,9 @@ export default class Bluetooth extends EventEmitter {
             if (index !== -1) {
                 activeDevices.splice(index, 1);
             }
-
             if (!allowReconnect) return;
             setTimeout(() => {
-                noble.startScanning([], true);
+                noble.startScanningAsync([], true);
             }, 3000);
         });
     }
@@ -209,13 +208,12 @@ export default class Bluetooth extends EventEmitter {
             error(`Error while closing Bluetooth connection: ${err}`, true);
         }
     }
-
     async read(localName: string, service: string, characteristic: string): Promise<ArrayBufferLike> {
         const device = await getDevice(localName);
         const serviceInstance = getService(device, service);
         const characteristicInstance = getCharacteristic(serviceInstance, characteristic);
 
-        return readCharacteristic(characteristicInstance);
+        return await characteristicInstance.readAsync();
     }
 
     async write(localName: string, service: string, characteristic: string, data: any): Promise<void> {
@@ -223,7 +221,8 @@ export default class Bluetooth extends EventEmitter {
         const serviceInstance = getService(device, service);
         const characteristicInstance = getCharacteristic(serviceInstance, characteristic);
 
-        return await writeCharacteristic(characteristicInstance, data);
+        const withoutResponse = characteristicInstance.properties.includes("writeWithoutResponse");
+        return await characteristicInstance.writeAsync(data, withoutResponse);
     }
 
     getActiveDevices() {
@@ -267,151 +266,6 @@ export default class Bluetooth extends EventEmitter {
 }
 
 /*
- * startConnection() helper functions
- */
-
-async function connectPeripheral(peripheral: Peripheral): Promise<void> {
-    const timeout = new Promise<void>((_, reject) =>
-        setTimeout(() => reject(new Error(`Connection to ${peripheral.advertisement.localName} timed out`)), 10000)
-    );
-
-    noble.reset();
-
-    const connection = new Promise<void>((resolve, reject) => {
-        peripheral.connect((err) => {
-            if (err) reject(new Error(`Error connecting to ${peripheral.advertisement.localName}: ${err}`));
-            else resolve();
-        });
-    });
-
-    try {
-        await Promise.race([connection, timeout]);
-    } catch (err) {
-        error(err as any);
-        throw err;
-    }
-}
-
-async function discoverServicesAndCharacteristics(peripheral: Peripheral): Promise<any> {
-    const localName = peripheral.advertisement.localName;
-    log(`Starting service discovery for ${localName}...`);
-
-    const timeout = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error(`Operation timed out after ${DISCOVERY_TIMEOUT}ms`)), DISCOVERY_TIMEOUT)
-    );
-
-    const discovery = (async () => {
-        const services = await discoverServices(peripheral);
-        log(`Found ${services.length} services for ${localName}`);
-
-        const characteristics = await Promise.all(services.map((service) => discoverCharacteristics(localName, service)));
-
-        const flattenedCharacteristics = characteristics.flat();
-        log(`Found ${flattenedCharacteristics.length} characteristics for ${localName}`);
-
-        return { services, characteristics: flattenedCharacteristics };
-    })();
-
-    try {
-        return await Promise.race([discovery, timeout]);
-    } catch (err) {
-        error(`Discovering services/characteristics for ${localName} failed: ${err}`, true);
-        return null;
-    }
-}
-
-async function discoverServices(peripheral: Peripheral): Promise<Service[]> {
-    return new Promise((resolve, reject) => {
-        peripheral.discoverServices(null, (err, services) => {
-            if (err) reject(`Error discovering services: ${err}`);
-            else resolve(services);
-        });
-    });
-}
-
-async function discoverCharacteristics(localName: string, service: Service) {
-    return new Promise((resolve, reject) => {
-        service.discoverCharacteristics([], (err, characteristics) => {
-            if (err) {
-                reject(`Error discovering characteristics for service ${service.uuid}: ${err}`);
-                return;
-            }
-            characteristics.forEach((characteristic) => {
-                characteristic.on("data", (data) => {
-                    emitData(localName, service.uuid, characteristic.uuid, data);
-                });
-                characteristic.subscribe((err) => {
-                    if (err) error(`Error subscribing to characteristic ${characteristic.uuid}: ${err}`);
-                });
-            });
-            resolve(characteristics);
-        });
-    });
-}
-
-function updateActiveDevices(localName: string, peripheral: Peripheral, services: Service[], characteristics: Characteristic[]) {
-    const deviceIndex = activeDevices.findIndex((device) => device[0] === localName);
-    const deviceData: ActiveDevice = [localName, peripheral, services, characteristics];
-    if (deviceIndex !== -1) activeDevices[deviceIndex] = deviceData;
-    else activeDevices.push(deviceData);
-}
-
-/*
- * read() and write() helper functions
- */
-
-async function readCharacteristic(characteristicInstance: Characteristic): Promise<ArrayBufferLike> {
-    return new Promise((resolve, reject) => {
-        characteristicInstance.read((err: any, data: any) => {
-            if (err) {
-                error(`Error reading characteristic ${characteristicInstance.uuid}: ${err}`);
-                reject(err);
-                return;
-            }
-            resolve(new Uint8Array(data).buffer);
-        });
-    });
-}
-
-async function writeCharacteristic(characteristicInstance: Characteristic, data: any): Promise<void> {
-    return new Promise((resolve, reject) => {
-        characteristicInstance.write(data, false, (err) => {
-            if (err) {
-                error(`Error writing to characteristic ${characteristicInstance.uuid}: ${err}`);
-                reject(err);
-                return;
-            }
-            log(`Wrote data to characteristic ${characteristicInstance.uuid}`);
-            resolve();
-        });
-    });
-}
-
-async function getDevice(localName: string): Promise<ActiveDevice> {
-    const normalizedLocalName = localName.replace("-ext", "");
-    const device = activeDevices.find((device: ActiveDevice) => device[0] === normalizedLocalName);
-    if (!device) error(`Device ${normalizedLocalName} not found, list: ${activeDevices}`, true);
-
-    return device;
-}
-
-function getService(device: ActiveDevice, service: string): Service {
-    const serviceInstance = device[2].find((s) => s.uuid === service);
-    if (!serviceInstance) error(`Service ${service} not found for ${device[0]}, service list: ${device[2]}`, true);
-    return serviceInstance;
-}
-
-function getCharacteristic(service: Service, characteristic: string): Characteristic {
-    const characteristicInstance = service.characteristics.find((c) => c.uuid === characteristic);
-    if (!characteristicInstance)
-        error(
-            `Characteristic ${characteristic} not found for ${service.uuid}, characteristic list: ${service.characteristics}`,
-            true
-        );
-    return characteristicInstance;
-}
-
-/*
  * General helper functions
  */
 
@@ -436,6 +290,37 @@ function error(message: string, exceptional = false) {
     const finalError = `(Bluetooth) ${message}`;
     console.error(finalError);
     main.emit("logError", { message: finalError, exceptional });
+}
+
+function updateActiveDevices(localName: string, peripheral: Peripheral, services: Service[], characteristics: Characteristic[]) {
+    const deviceIndex = activeDevices.findIndex((device) => device[0] === localName);
+    const deviceData: ActiveDevice = [localName, peripheral, services, characteristics];
+    if (deviceIndex !== -1) activeDevices[deviceIndex] = deviceData;
+    else activeDevices.push(deviceData);
+}
+
+async function getDevice(localName: string): Promise<ActiveDevice> {
+    const normalizedLocalName = localName.replace("-ext", "");
+    const device = activeDevices.find((device: ActiveDevice) => device[0] === normalizedLocalName);
+    if (!device) error(`Device ${normalizedLocalName} not found, list: ${activeDevices}`, true);
+
+    return device;
+}
+
+function getService(device: ActiveDevice, service: string): Service {
+    const serviceInstance = device[2].find((s) => s.uuid === service);
+    if (!serviceInstance) error(`Service ${service} not found for ${device[0]}, service list: ${device[2]}`, true);
+    return serviceInstance;
+}
+
+function getCharacteristic(service: Service, characteristic: string): Characteristic {
+    const characteristicInstance = service.characteristics.find((c) => c.uuid === characteristic);
+    if (!characteristicInstance)
+        error(
+            `Characteristic ${characteristic} not found for ${service.uuid}, characteristic list: ${service.characteristics}`,
+            true
+        );
+    return characteristicInstance;
 }
 
 export { Bluetooth };
