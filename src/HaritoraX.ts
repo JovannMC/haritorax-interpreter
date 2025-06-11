@@ -862,7 +862,7 @@ export default class HaritoraX extends EventEmitter {
      * @param {string} trackerName - The name of the tracker to power off.
      */
     async powerOffTracker(trackerName: string): Promise<boolean> {
-        if ((!com && !comEnabled) || (!bluetooth && !bluetoothEnabled)) {
+        if ((!com && !comEnabled) && (!bluetooth && !bluetoothEnabled)) {
             error("No active connection to power off tracker", true);
             return false;
         }
