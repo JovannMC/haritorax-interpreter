@@ -862,7 +862,7 @@ export default class HaritoraX extends EventEmitter {
      * @param {string} trackerName - The name of the tracker to power off.
      */
     async powerOffTracker(trackerName: string): Promise<boolean> {
-        if ((!com && !comEnabled) && (!bluetooth && !bluetoothEnabled)) {
+        if (!com && !comEnabled && !bluetooth && !bluetoothEnabled) {
             error("No active connection to power off tracker", true);
             return false;
         }
@@ -1003,7 +1003,7 @@ const removeDataTimeout = (trackerName: string) => {
 
 const dataTimeouts: Map<string, NodeJS.Timeout> = new Map();
 function listenToDeviceEvents() {
-    const resetDataTimeout = (trackerName: string, connection: COM | Bluetooth | BluetoothLinux) => {
+    const resetDataTimeout = (trackerName: string, connection: COM | Bluetooth | BluetoothLinux, hasExtension: boolean) => {
         if (!trackerName || trackerName === "DONGLE") return;
         if (dataTimeouts.has(trackerName)) {
             clearTimeout(dataTimeouts.get(trackerName));
@@ -1012,11 +1012,23 @@ function listenToDeviceEvents() {
             log(`No data received within 10 seconds for ${trackerName}, emitting disconnect event.`);
             connection.emit("disconnect", trackerName);
             dataTimeouts.delete(trackerName);
-            activeDevices.find((device) => device[0] === trackerName) &&
-                activeDevices.splice(
-                    activeDevices.findIndex((device) => device[0] === trackerName),
-                    1
-                );
+            if (activeDevices.includes(trackerName)) activeDevices.splice(activeDevices.indexOf(trackerName), 1);
+
+            // If hasExtension and is leftAnkle/leftKnee or rightAnkle/rightKnee, disconnect the other tracker as well
+            if (hasExtension) {
+                let pair: string | undefined;
+                if (trackerName === "leftAnkle") pair = "leftKnee";
+                else if (trackerName === "leftKnee") pair = "leftAnkle";
+                else if (trackerName === "rightAnkle") pair = "rightKnee";
+                else if (trackerName === "rightKnee") pair = "rightAnkle";
+                if (pair) {
+                    log(`No data received for extension pair ${pair}, emitting disconnect event.`);
+                    connection.emit("disconnect", pair);
+                    dataTimeouts.has(pair) && clearTimeout(dataTimeouts.get(pair));
+                    dataTimeouts.delete(pair);
+                    if (activeDevices.includes(pair)) activeDevices.splice(activeDevices.indexOf(pair), 1);
+                }
+            }
         }, 10000);
         dataTimeouts.set(trackerName, timeout);
     };
@@ -1026,78 +1038,88 @@ function listenToDeviceEvents() {
      */
 
     if (com) {
-        com.on("data", (trackerName: string, port: string, _portId: string, identifier: string, portData: string) => {
-            if (!canProcessComData) return;
+        com.on(
+            "data",
+            (
+                trackerName: string,
+                port: string,
+                _portId: string,
+                identifier: string,
+                portData: string,
+                hasExtension?: boolean
+            ) => {
+                if (!canProcessComData) return;
 
-            resetDataTimeout(trackerName, com);
+                resetDataTimeout(trackerName, com, hasExtension);
 
-            if (trackerModelEnabled === "wireless") {
-                switch (identifier[0]) {
-                    case "x":
-                        processIMUData(Buffer.from(portData, "base64"), trackerName);
-                        break;
-                    case "a":
-                        processTrackerData(portData, trackerName);
-                        break;
-                    case "r":
-                        processButtonData(portData, trackerName);
-                        break;
-                    case "v":
-                        processBatteryData(portData, trackerName);
-                        break;
-                    case "o":
-                        processSettingsData(portData, trackerName);
-                        break;
-                    case "i":
-                        processInfoData(portData, trackerName);
-                        break;
-                    default:
-                        log(`${port} - Unknown data from "${trackerName}" (identifier: ${identifier}): ${portData}`);
-                }
-            } else if (trackerModelEnabled === "wired") {
-                switch (identifier[0]) {
-                    // alright, so for some ungodly reason shiftall decided to use different letters for different number of trackers,
-                    // AND if they have ankle motion enabled or not
-                    // WHAT THE HELL.
-                    // x = 5 trackers
-                    // p = 6 trackers
-                    // r = 6 trackers (w/ ankle motion)
-                    // e = 7 trackers
-                    // h = 7 trackers (w/ ankle motion)
-                    // g = 8 trackers
-                    // h = 8 trackers (w/ ankle motion)
-                    // (yes. there's even duplicates.)
-                    case "x":
-                    case "r":
-                    case "p":
-                    case "h":
-                    case "e":
-                    case "g":
-                        processWiredData(identifier, portData);
-                        break;
-                    case "s":
-                        // settings and tracker info, for now we will only use this for mag status
-                        // example: s:{"imu_mode":1, "imu_num":6, "magf_status":"020200", "speed_mode":2, "dcal_flags":"04", "detected":"04004C6C"}
-                        processMagData(portData, "HaritoraXWired");
-                        processSettingsData(portData, "HaritoraXWired");
-                        break;
-                    case "t":
-                        processButtonData(portData, "HaritoraXWired");
-                        break;
-                    case "v":
-                        processBatteryData(portData, "HaritoraXWired");
-                        break;
-                    case "i":
-                        // "comm" shows it is in bluetooth mode, a dongle for the wired trackers *was* planned, but never released
-                        // "comm_next" defines whether it is in classic bluetooth (Bluetooth Serial Port Profile) or BLE (Bluetooth Low Energy) mode
-                        // example: {"model":"MC2B", "version":"1.7.10", "serial no":"0000000", "comm":"BLT", "comm_next":"BTSPP"}
-                        processInfoData(portData, "HaritoraXWired");
-                        break;
-                    default:
-                        log(`${port} - Unknown data from "${trackerName}" (identifier: ${identifier}): ${portData}`);
+                if (trackerModelEnabled === "wireless") {
+                    switch (identifier[0]) {
+                        case "x":
+                            processIMUData(Buffer.from(portData, "base64"), trackerName);
+                            break;
+                        case "a":
+                            processTrackerData(portData, trackerName);
+                            break;
+                        case "r":
+                            processButtonData(portData, trackerName);
+                            break;
+                        case "v":
+                            processBatteryData(portData, trackerName);
+                            break;
+                        case "o":
+                            processSettingsData(portData, trackerName);
+                            break;
+                        case "i":
+                            processInfoData(portData, trackerName);
+                            break;
+                        default:
+                            log(`${port} - Unknown data from "${trackerName}" (identifier: ${identifier}): ${portData}`);
+                    }
+                } else if (trackerModelEnabled === "wired") {
+                    switch (identifier[0]) {
+                        // alright, so for some ungodly reason shiftall decided to use different letters for different number of trackers,
+                        // AND if they have ankle motion enabled or not
+                        // WHAT THE HELL.
+                        // x = 5 trackers
+                        // p = 6 trackers
+                        // r = 6 trackers (w/ ankle motion)
+                        // e = 7 trackers
+                        // h = 7 trackers (w/ ankle motion)
+                        // g = 8 trackers
+                        // h = 8 trackers (w/ ankle motion)
+                        // (yes. there's even duplicates.)
+                        case "x":
+                        case "r":
+                        case "p":
+                        case "h":
+                        case "e":
+                        case "g":
+                            processWiredData(identifier, portData);
+                            break;
+                        case "s":
+                            // settings and tracker info, for now we will only use this for mag status
+                            // example: s:{"imu_mode":1, "imu_num":6, "magf_status":"020200", "speed_mode":2, "dcal_flags":"04", "detected":"04004C6C"}
+                            processMagData(portData, "HaritoraXWired");
+                            processSettingsData(portData, "HaritoraXWired");
+                            break;
+                        case "t":
+                            processButtonData(portData, "HaritoraXWired");
+                            break;
+                        case "v":
+                            processBatteryData(portData, "HaritoraXWired");
+                            break;
+                        case "i":
+                            // "comm" shows it is in bluetooth mode, a dongle for the wired trackers *was* planned, but never released
+                            // "comm_next" defines whether it is in classic bluetooth (Bluetooth Serial Port Profile) or BLE (Bluetooth Low Energy) mode
+                            // example: {"model":"MC2B", "version":"1.7.10", "serial no":"0000000", "comm":"BLT", "comm_next":"BTSPP"}
+                            processInfoData(portData, "HaritoraXWired");
+                            break;
+                        default:
+                            log(`${port} - Unknown data from "${trackerName}" (identifier: ${identifier}): ${portData}`);
+                    }
                 }
             }
-        });
+        );
 
         com.on("paired", (trackerName: string, port: string, portId: string) => {
             if (!trackerName || !port || !portId) return;
@@ -1123,8 +1145,8 @@ function listenToDeviceEvents() {
             });
         });
 
-        com.on("log", (message: string) => {
-            log(message);
+        com.on("log", (message: string, bypass: boolean) => {
+            log(message, bypass);
         });
 
         com.on("logError", ({ message, exceptional }) => {
@@ -1145,7 +1167,7 @@ function listenToDeviceEvents() {
         bluetooth.on("data", (localName: string, service: string, characteristic: string, data: string) => {
             if (!canProcessBluetoothData || service === "Device Information") return;
 
-            resetDataTimeout(localName, bluetooth);
+            resetDataTimeout(localName, bluetooth, false);
             const buffer = Buffer.from(data, "base64");
 
             switch (characteristic) {

@@ -468,11 +468,19 @@ async function processData(data: string, port: string) {
                 }
             }
 
+            let possibleTrackers = [];
             for (let [key, value] of trackerAssignment.entries()) {
                 if (value[1] === port && value[2] === portId) {
-                    trackerName = key;
-                    break;
+                    possibleTrackers.push(key);
                 }
+            }
+
+            // if we have multiple trackers on the same port/portId, prioritize ankle for legs data
+            if (possibleTrackers.length > 1 && identifier.startsWith("x") && portData && portData.length >= 40) {
+                trackerName =
+                    possibleTrackers.find((name) => name === "leftAnkle" || name === "rightAnkle") || possibleTrackers[0];
+            } else {
+                trackerName = possibleTrackers[0];
             }
         }
 
@@ -540,9 +548,9 @@ async function processData(data: string, port: string) {
             //if (remainingData.length > 0) log(`Remaining data: ${remainingData.toString("base64")}`);
 
             // emit data event for main "leg" tracker
-            main.emit("data", trackerName, port, portId, identifier, legData.toString("base64"));
+            main.emit("data", trackerName, port, portId, identifier, legData.toString("base64"), true);
             // emit data event for extension "thigh" tracker
-            main.emit("data", trackerNameThigh, port, portId, identifier, thighData.toString("base64"));
+            main.emit("data", trackerNameThigh, port, portId, identifier, thighData.toString("base64"), true);
             //log(`Processed HaritoraX2 legs data for ${trackerName}`);
             return;
         } else {
@@ -584,10 +592,10 @@ function setupHeartbeat(serial: SerialPortStream, port: string, trackerModel: st
  * Helper functions
  */
 
-function log(message: string) {
+function log(message: string, bypass = false) {
     const finalMessage = `(COM) ${message}`;
     console.log(finalMessage);
-    main.emit("log", finalMessage);
+    main.emit("log", finalMessage, bypass);
 }
 
 function error(message: string, exceptional = false) {
