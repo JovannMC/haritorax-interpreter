@@ -502,6 +502,24 @@ async function processData(data: string, port: string) {
             // HaritoraX 2 legs data
             const trackerNameThigh = trackerName === "leftAnkle" ? "leftKnee" : "rightKnee";
 
+            // ensure trackerAssignment for knee/ankle is the same (port/portId)
+            const ankleAssignment = trackerAssignment.get(trackerName);
+            const thighAssignment = trackerAssignment.get(trackerNameThigh);
+            if (
+                ankleAssignment &&
+                thighAssignment &&
+                (ankleAssignment[1] !== port ||
+                    ankleAssignment[2] !== portId ||
+                    thighAssignment[1] !== port ||
+                    thighAssignment[2] !== portId)
+            ) {
+                trackerAssignment.set(trackerName, [ankleAssignment[0], port, portId]);
+                trackerAssignment.set(trackerNameThigh, [thighAssignment[0], port, portId]);
+                log(
+                    `Synchronized tracker assignment for ${trackerName} and ${trackerNameThigh} to port ${port} with port ID ${portId}`
+                );
+            }
+
             const buffer = Buffer.from(portData, "base64");
             const legData = buffer.slice(0, 14);
             let thighData, remainingData;
