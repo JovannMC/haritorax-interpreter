@@ -138,14 +138,13 @@ export default class Bluetooth extends EventEmitter {
             log("Starting 5-second discovery scan...");
             isScanning = true;
             discoveredDevices.clear();
-
             const onDiscover = (peripheral: Peripheral) => {
                 const {
                     advertisement: { localName },
                 } = peripheral;
                 if (!localName || (!localName.startsWith("HaritoraX2") && !localName.startsWith("HaritoraXW-"))) return;
 
-                const deviceExists = activeDevices.some((device) => device[0] === localName);
+                const deviceExists = activeDevices.some((device) => device[0] === localName && device[1].state === "connected");
                 if (deviceExists) return;
 
                 if (!discoveredDevices.has(localName)) {
@@ -203,7 +202,7 @@ export default class Bluetooth extends EventEmitter {
                 await this.connectToDevice(localName, peripheral);
 
                 // add delay between connections to prevent overwhelming the adapter(?)
-                await new Promise((resolve) => setTimeout(resolve, 1000));
+                await new Promise((resolve) => setTimeout(resolve, 500));
             } catch (err) {
                 error(`Failed to connect to ${localName}: ${err}`);
             }
@@ -231,7 +230,7 @@ export default class Bluetooth extends EventEmitter {
             await Promise.race([connectPromise, timeoutPromise]);
             log(`Connected to ${localName}, starting service discovery...`);
 
-            await new Promise((resolve) => setTimeout(resolve, 1000));
+            await new Promise((resolve) => setTimeout(resolve, 500));
             const discoverPromise = peripheral.discoverAllServicesAndCharacteristicsAsync();
             const discoverTimeoutPromise = new Promise<never>((_, reject) =>
                 setTimeout(() => reject(new Error("Service discovery timeout")), 15000)
@@ -295,10 +294,10 @@ export default class Bluetooth extends EventEmitter {
     private scheduleNextDiscoveryCycle() {
         if (!allowReconnect) return;
 
-        // schedule next discovery cycle (5 seconds scan + 5 seconds buffer)
+        // schedule next discovery cycle (5 seconds scan + 2.5 seconds buffer)
         scanCycleTimeout = setTimeout(() => {
             this.startDiscoveryCycle();
-        }, 10000);
+        }, 7500);
     }
 
     stopConnection() {
