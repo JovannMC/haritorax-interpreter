@@ -28,10 +28,10 @@
         "interpreter"
     ],
     "dependencies": {
-        "@abandonware/noble": "^1.9.2-26",
         "@serialport/bindings-cpp": "^13.0.1",
         "@serialport/parser-readline": "^13.0.0",
         "@serialport/stream": "^13.0.0",
+        "@stoprocent/noble": "github:jovannmc/noble",
         "node-ble": "^1.13.0"
     },
     "devDependencies": {
