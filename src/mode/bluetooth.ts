@@ -9,6 +9,7 @@ let main: Bluetooth = undefined;
 type ActiveDevice = [string, Peripheral, Service[], Characteristic[]];
 let activeDevices: ActiveDevice[] = [];
 let allowReconnect = true;
+let connectingDevices: Set<string> = new Set();
 
 export default class Bluetooth extends EventEmitter {
     constructor() {
@@ -134,16 +135,14 @@ export default class Bluetooth extends EventEmitter {
     private async handleDeviceDiscovery(peripheral: Peripheral): Promise<void> {
         const { localName } = peripheral.advertisement;
 
-        // Filter for HaritoraX devices only
+        // filter for HaritoraX devices only
         if (!localName || (!localName.startsWith("HaritoraX2-") && !localName.startsWith("HaritoraXW-"))) {
             return;
         }
 
-        // Check if device is already connected
         const isAlreadyConnected = activeDevices.some((device) => device[0] === localName && device[1].state === "connected");
-        if (isAlreadyConnected) {
-            return;
-        }
+        const isCurrentlyConnecting = connectingDevices.has(localName);
+        if ((isAlreadyConnected || isCurrentlyConnecting) && isCurrentlyConnecting) return;
 
         log(`Discovered device: ${localName}`);
 
@@ -155,6 +154,8 @@ export default class Bluetooth extends EventEmitter {
     }
 
     private async connectToDevice(localName: string, peripheral: Peripheral): Promise<void> {
+        connectingDevices.add(localName);
+
         updateActiveDevices(localName, peripheral, [], []);
 
         try {
@@ -162,7 +163,7 @@ export default class Bluetooth extends EventEmitter {
             await peripheral.connectAsync();
             log(`Connected to ${localName}, discovering services...`);
 
-            // brief delay before service discovery
+            // Brief delay before service discovery
             await new Promise((resolve) => setTimeout(resolve, 1000));
 
             const { services, characteristics } = await peripheral.discoverAllServicesAndCharacteristicsAsync();
@@ -212,11 +213,14 @@ export default class Bluetooth extends EventEmitter {
                     }, 3000);
                 }
             });
-
             log(`Successfully connected to ${localName}`);
             this.emit("connect", localName);
+
+            connectingDevices.delete(localName);
         } catch (err) {
             error(`Error connecting to ${localName}: ${err}`);
+
+            connectingDevices.delete(localName);
 
             try {
                 if (peripheral.state === "connected" || peripheral.state === "connecting") {
@@ -234,12 +238,13 @@ export default class Bluetooth extends EventEmitter {
             throw err;
         }
     }
-
     async stopConnection(): Promise<void> {
         try {
             log("Stopping Bluetooth connection...");
 
             allowReconnect = false;
+
+            connectingDevices.clear();
 
             await noble.stopScanningAsync();
             noble.removeAllListeners("discover");
