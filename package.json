@@ -31,7 +31,7 @@
         "@serialport/bindings-cpp": "^13.0.1",
         "@serialport/parser-readline": "^13.0.0",
         "@serialport/stream": "^13.0.0",
-        "@stoprocent/noble": "github:jovannmc/noble",
+        "@stoprocent/noble": "^2.3.2",
         "node-ble": "^1.13.0"
     },
     "devDependencies": {
