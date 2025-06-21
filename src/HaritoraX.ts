@@ -696,17 +696,36 @@ export default class HaritoraX extends EventEmitter {
             // Attempt to read battery info for wireless BT trackers
             log(`Reading battery info for ${trackerName}...`);
             try {
-                const batteryLevelBuffer = await bluetooth.read(trackerName, batteryService, batteryLevelCharacteristic);
+                let batteryLevelBuffer = await bluetooth.read(trackerName, batteryService, batteryLevelCharacteristic);
                 if (!batteryLevelBuffer) error(`Tracker "${trackerName}" battery level not found`);
+                if (!(batteryLevelBuffer instanceof ArrayBuffer)) {
+                    // Assume Node.js Buffer, convert to ArrayBuffer
+                    batteryLevelBuffer = Buffer.from(batteryLevelBuffer).buffer.slice(
+                        Buffer.from(batteryLevelBuffer).byteOffset,
+                        Buffer.from(batteryLevelBuffer).byteOffset + Buffer.from(batteryLevelBuffer).byteLength
+                    );
+                }
                 batteryRemaining = new DataView(batteryLevelBuffer).getUint8(0);
 
-                const batteryVoltageBuffer = await bluetooth.read(trackerName, settingsService, batteryVoltageCharacteristic);
+                let batteryVoltageBuffer = await bluetooth.read(trackerName, settingsService, batteryVoltageCharacteristic);
                 if (!batteryVoltageBuffer) error(`Tracker "${trackerName}" battery voltage not found`);
+                if (!(batteryVoltageBuffer instanceof ArrayBuffer)) {
+                    batteryVoltageBuffer = Buffer.from(batteryVoltageBuffer).buffer.slice(
+                        Buffer.from(batteryVoltageBuffer).byteOffset,
+                        Buffer.from(batteryVoltageBuffer).byteOffset + Buffer.from(batteryVoltageBuffer).byteLength
+                    );
+                }
                 batteryVoltage = new DataView(batteryVoltageBuffer).getInt16(0, true);
 
-                const chargeStatusBuffer = await bluetooth.read(trackerName, settingsService, chargeStatusCharacteristic);
-                const chargeStatusHex = Buffer.from(chargeStatusBuffer).toString("hex");
+                let chargeStatusBuffer = await bluetooth.read(trackerName, settingsService, chargeStatusCharacteristic);
                 if (!chargeStatusBuffer) error(`Tracker "${trackerName}" charge status not found`);
+                if (!(chargeStatusBuffer instanceof ArrayBuffer)) {
+                    chargeStatusBuffer = Buffer.from(chargeStatusBuffer).buffer.slice(
+                        Buffer.from(chargeStatusBuffer).byteOffset,
+                        Buffer.from(chargeStatusBuffer).byteOffset + Buffer.from(chargeStatusBuffer).byteLength
+                    );
+                }
+                const chargeStatusHex = Buffer.from(chargeStatusBuffer).toString("hex");
                 switch (chargeStatusHex) {
                     case "00":
                         chargeStatus = "discharging";
