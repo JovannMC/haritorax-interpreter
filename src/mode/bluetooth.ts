@@ -142,7 +142,7 @@ export default class Bluetooth extends EventEmitter {
 
         const isAlreadyConnected = activeDevices.some((device) => device[0] === localName && device[1].state === "connected");
         const isCurrentlyConnecting = connectingDevices.has(localName);
-        if ((isAlreadyConnected || isCurrentlyConnecting) && isCurrentlyConnecting) return;
+        if (isAlreadyConnected || isCurrentlyConnecting) return;
 
         log(`Discovered device: ${localName}`);
 
@@ -238,6 +238,7 @@ export default class Bluetooth extends EventEmitter {
             throw err;
         }
     }
+
     async stopConnection(): Promise<void> {
         try {
             log("Stopping Bluetooth connection...");
@@ -330,10 +331,10 @@ function emitData(localName: string, serviceUuid: string, characteristicUuid: st
     main.emit("dataRaw", localName, serviceName, characteristicName, data);
 }
 
-function log(message: string): void {
+function log(message: string, bypass = false): void {
     const finalMessage = `(Bluetooth) ${message}`;
     console.log(finalMessage);
-    main.emit("log", finalMessage);
+    main.emit("log", finalMessage, bypass);
 }
 
 function error(message: string, exceptional = false): void {

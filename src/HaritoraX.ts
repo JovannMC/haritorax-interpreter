@@ -1254,8 +1254,8 @@ function listenToDeviceEvents() {
             }
         });
 
-        bluetooth.on("log", (message: string) => {
-            log(message);
+        bluetooth.on("log", (message: string, bypass = false) => {
+            log(message, bypass);
         });
 
         bluetooth.on("logError", ({ message, exceptional }) => {
