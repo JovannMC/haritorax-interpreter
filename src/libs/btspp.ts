@@ -83,7 +83,7 @@ export default class BTSPP extends EventEmitter {
                                 if (device) {
                                     device.comPort = comPort;
                                     log(
-                                        `Matched device - Name: ${device.name}, Address: ${device.address}, COM Port: ${comPort}`
+                                        `Matched device - Name: ${device.name}, Address: ${device.address}, COM Port: ${comPort}`,
                                     );
                                 }
                             } else {
@@ -93,7 +93,7 @@ export default class BTSPP extends EventEmitter {
 
                         resolve(devices);
                     });
-                }
+                },
             );
         });
     };
@@ -143,7 +143,7 @@ export default class BTSPP extends EventEmitter {
                             if (device) {
                                 device.comPort = `/dev/${comPort}`;
                                 log(
-                                    `Matched device - Name: ${device.name}, Address: ${device.address}, COM Port: /dev/${comPort}`
+                                    `Matched device - Name: ${device.name}, Address: ${device.address}, COM Port: /dev/${comPort}`,
                                 );
                             }
                         }
@@ -189,4 +189,3 @@ function error(message: string, exceptional = false) {
 }
 
 export { BluetoothDevice, BTSPP };
-

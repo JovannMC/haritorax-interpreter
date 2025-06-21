@@ -347,7 +347,7 @@ function updateActiveDevices(
     localName: string,
     peripheral: Peripheral,
     services: Service[],
-    characteristics: Characteristic[]
+    characteristics: Characteristic[],
 ): void {
     const deviceIndex = activeDevices.findIndex((device) => device[0] === localName);
     const deviceData: ActiveDevice = [localName, peripheral, services, characteristics];

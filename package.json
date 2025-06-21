@@ -37,6 +37,7 @@
     "devDependencies": {
         "eslint": "^9.27.0",
         "node-gyp-build": "^4.8.4",
+        "prettier": "^3.5.3",
         "ts-node": "^10.9.2",
         "typescript": "^5.8.3"
     }

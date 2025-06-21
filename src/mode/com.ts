@@ -120,7 +120,7 @@ export default class COM extends EventEmitter {
                         port.vendorId &&
                         port.productId &&
                         port.vendorId.toLowerCase() === deviceItem.vid.toLowerCase() &&
-                        port.productId.toLowerCase() === deviceItem.pid.toLowerCase()
+                        port.productId.toLowerCase() === deviceItem.pid.toLowerCase(),
                 );
                 return {
                     ...port,
@@ -290,7 +290,7 @@ export default class COM extends EventEmitter {
                 this.write(activePorts[port], command, (err: any) => {
                     error(`Error while pairing on port ${port}: ${err}`);
                 });
-            }, index * 1000)
+            }, index * 1000),
         );
 
         log(`Started pairing on port ${port} with port ID ${portId}`);
@@ -349,7 +349,7 @@ export default class COM extends EventEmitter {
                 this.write(activePorts[port], command, (err: any) => {
                     error(`Error while unpairing on port ${port}: ${err}`);
                 });
-            }, index * 1000)
+            }, index * 1000),
         );
 
         log(`Unpaired "${trackerName}" on port ${port} with port ID ${portId}`);
@@ -524,7 +524,7 @@ async function processData(data: string, port: string) {
                 trackerAssignment.set(trackerName, [ankleAssignment[0], port, portId]);
                 trackerAssignment.set(trackerNameThigh, [thighAssignment[0], port, portId]);
                 log(
-                    `Synchronized tracker assignment for ${trackerName} and ${trackerNameThigh} to port ${port} with port ID ${portId}`
+                    `Synchronized tracker assignment for ${trackerName} and ${trackerNameThigh} to port ${port} with port ID ${portId}`,
                 );
             }
 

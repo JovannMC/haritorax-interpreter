@@ -19,7 +19,7 @@ function formatUUID(uuid: string): string {
     }
     return `${cleanedUUID.slice(0, 8)}-${cleanedUUID.slice(8, 12)}-${cleanedUUID.slice(12, 16)}-${cleanedUUID.slice(
         16,
-        20
+        20,
     )}-${cleanedUUID.slice(20)}`;
 }
 

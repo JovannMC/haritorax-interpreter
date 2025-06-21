@@ -104,7 +104,7 @@ export default class BluetoothLinux extends EventEmitter {
                     activeDevices.push([deviceName, device]);
 
                     const timeout = new Promise<void>((_, reject) =>
-                        setTimeout(() => reject(new Error("Operation timed out")), 10000)
+                        setTimeout(() => reject(new Error("Operation timed out")), 10000),
                     );
 
                     const discoveryAndSubscription = (async () => {
@@ -328,7 +328,7 @@ function formatUUID(uuid: string): string {
 
     return `${cleanedUUID.slice(0, 8)}-${cleanedUUID.slice(8, 12)}-${cleanedUUID.slice(12, 16)}-${cleanedUUID.slice(
         16,
-        20
+        20,
     )}-${cleanedUUID.slice(20)}`;
 }
 
@@ -339,7 +339,7 @@ function emitData(localName: string, service: string, characteristic: string, da
         localName,
         services.get(service) || service,
         characteristics.get(characteristic) || characteristic,
-        data
+        data,
     );
 }
 
