@@ -9,6 +9,10 @@ interface BluetoothDevice {
     comPort?: string;
 }
 
+// auto detection for windows:
+// https://github.com/MicrosoftDocs/windows-driver-docs/blob/staging/windows-driver-docs-pr/install/devpkey-device-busreporteddevicedesc.md
+// https://stackoverflow.com/questions/69362886/get-devpkey-device-busreporteddevicedesc-from-win32-pnpentity-in-c-sharp
+
 export default class BTSPP extends EventEmitter {
     constructor() {
         super();

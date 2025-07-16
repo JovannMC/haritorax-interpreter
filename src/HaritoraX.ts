@@ -1333,12 +1333,14 @@ function processWiredData(identifier: string, data: string) {
             trackerNames.push("hip");
             break;
         case "e":
+            trackerNames.push("leftElbow", "rightElbow");
+            break;
         case "h":
             if (dataLength >= 18) trackerNames.push("leftElbow", "rightElbow");
+            else if (dataLength < 18) trackerNames.push("hip", "leftElbow", "rightElbow");
             break;
         case "g":
-        case "h":
-            if (dataLength < 18) trackerNames.push("hip", "leftElbow", "rightElbow");
+            trackerNames.push("hip", "leftElbow", "rightElbow");
             break;
     }
 
