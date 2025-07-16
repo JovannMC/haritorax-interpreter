@@ -1245,6 +1245,12 @@ function listenToDeviceEvents() {
                 case "Magnetometer":
                     processMagData(data, localName);
                     break;
+                case "Sensor2":
+                    // apparently there's another sensor char exclusive to HX2 (unless its cause this is an older firmware)
+                    // it's literally just the same thing but extra data, no idea what it is? probably extra mag data?
+                    // Received data from 00dbf1c690aa11eda1eb0242ac120002: Uw0w1s8MyywACD0AdAA=
+                    // Received data from 00dbc40090aa11eda1eb0242ac120002: Uw0w1s8MyywACD0AdAACAA==
+                    break;
                 default:
                     log(`Unknown data from ${localName}: ${data} - ${characteristic} - ${service}`);
                     log(`Data in utf-8: ${buffer.toString("utf-8")}`);

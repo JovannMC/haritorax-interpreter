@@ -41,6 +41,7 @@ addUUIDs(characteristics, "2a26", "FirmwareRevision");
 addUUIDs(characteristics, "2a28", "SoftwareRevision");
 addUUIDs(characteristics, "2a24", "ModelNumber");
 addUUIDs(characteristics, "00dbf1c690aa11eda1eb0242ac120002", "Sensor");
+addUUIDs(characteristics, "00dbc40090aa11eda1eb0242ac120002", "Sensor2");
 addUUIDs(characteristics, "00dbf07c90aa11eda1eb0242ac120002", "NumberOfImu");
 addUUIDs(characteristics, "00dbf30690aa11eda1eb0242ac120002", "Magnetometer");
 addUUIDs(characteristics, "00dbf45090aa11eda1eb0242ac120002", "MainButton");
