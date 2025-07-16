@@ -518,12 +518,6 @@ export default class HaritoraX extends EventEmitter {
                     error(`Error reading characteristic: ${err}`);
                 }
             } else {
-                try {
-                    await writeToPort(com.getTrackerPort(trackerName), `s${com.getTrackerPortId(trackerName)}:`, trackerName);
-                } catch (err) {
-                    error(`Error sending tracker settings: ${err}`);
-                }
-                await new Promise((resolve) => setTimeout(resolve, 500));
                 ({ sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection } = getTrackerSettingsFromMap(trackerName));
             }
         } else if (
