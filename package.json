@@ -35,9 +35,9 @@
         "node-ble": "^1.13.0"
     },
     "devDependencies": {
-        "eslint": "^9.27.0",
+        "eslint": "^9.31.0",
         "node-gyp-build": "^4.8.4",
-        "prettier": "^3.5.3",
+        "prettier": "^3.6.2",
         "ts-node": "^10.9.2",
         "typescript": "^5.8.3"
     }
