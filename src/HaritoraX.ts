@@ -954,7 +954,7 @@ export default class HaritoraX extends EventEmitter {
             log(`Switched communication mode of tracker "${trackerName}" to serial.`, true);
         } else if (!isWirelessBTTracker(trackerName) && mode === "bluetooth") {
             // is serial tracker and wants to switch to BT
-            const delay = 25;
+            const delay = 35;
 
             const trackerPort = com.getTrackerPort(trackerName);
             const trackerPortId = com.getTrackerPortId(trackerName);
