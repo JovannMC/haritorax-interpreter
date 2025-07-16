@@ -22,83 +22,131 @@ export default class BTSPP extends EventEmitter {
     // holy shit i don't know what i'm doing help
     getPairedDevicesWindows = (): Promise<BluetoothDevice[]> => {
         return new Promise((resolve, reject) => {
-            log("Executing PowerShell command to get paired Bluetooth devices...");
-            exec(
-                'powershell -Command "Get-PnpDevice -Class Bluetooth | Select-Object Name, DeviceID"',
-                (err, stdout, _stderr) => {
-                    if (err) {
-                        error(`Error executing PowerShell command: ${err.message}`, true);
-                        reject(err);
-                        return;
+            log("Executing PowerShell command to get serial ports with DEVPKEY_Device_BusReportedDeviceDesc...");
+
+            // PowerShell command to get serial ports and their bus reported device descriptions
+            const powershellCommand = `
+                $devices = Get-PnpDevice -Class "Ports" | Where-Object { $_.DeviceID -match "^BTHENUM" -or $_.DeviceID -match "^USB" } | ForEach-Object {
+                    $device = $_
+                    Write-Host "Processing device: $($device.FriendlyName)" -ForegroundColor Yellow
+                    $busReportedDesc = $null
+                    try {
+                        $busReportedDesc = (Get-PnpDeviceProperty -InputObject $device -KeyName "DEVPKEY_Device_BusReportedDeviceDesc").Data
+                        Write-Host "Bus reported desc: $busReportedDesc" -ForegroundColor Cyan
+                    } catch {
+                        Write-Host "Failed to get bus reported desc: $($_.Exception.Message)" -ForegroundColor Red
+                        $busReportedDesc = $null
                     }
+                    
+                    # Get COM port from friendly name
+                    $comPort = $null
+                    if ($device.FriendlyName -match "COM([0-9]+)") {
+                        $comPort = "COM" + $matches[1]
+                        Write-Host "Found COM port: $comPort" -ForegroundColor Green
+                    } else {
+                        Write-Host "No COM port found in: $($device.FriendlyName)" -ForegroundColor Magenta
+                        Write-Host "Testing regex on: '$($device.FriendlyName)'" -ForegroundColor Red
+                    }
+                    
+                    [PSCustomObject]@{
+                        FriendlyName = $device.FriendlyName
+                        DeviceID = $device.DeviceID
+                        BusReportedDesc = $busReportedDesc
+                        ComPort = $comPort
+                    }
+                }
+                Write-Host "Total devices found: $($devices.Count)" -ForegroundColor White
+                $filteredDevices = $devices | Where-Object { $_.ComPort -ne $null }
+                Write-Host "Devices with COM ports: $($filteredDevices.Count)" -ForegroundColor White
+                if ($filteredDevices.Count -gt 0) {
+                    $filteredDevices | ConvertTo-Json
+                } else {
+                    Write-Host "No devices with COM ports found" -ForegroundColor Red
+                    "[]"
+                }
+            `;
 
-                    log(`PowerShell command output: \r\n${stdout}`);
+            exec(`powershell -Command "${powershellCommand}"`, (err, stdout, stderr) => {
+                if (err) {
+                    error(`Error executing PowerShell command: ${err.message}`, true);
+                    reject(err);
+                    return;
+                }
 
-                    // Step 1: Parse the Bluetooth devices
+                if (stderr) {
+                    log(`PowerShell stderr: ${stderr}`);
+                }
+
+                log(`PowerShell command output: \r\n${stdout}`);
+
+                try {
                     const devices: BluetoothDevice[] = [];
-                    const lines = stdout
-                        .split("\n")
-                        .map((line) => line.replace(/[^\x20-\x7E]/g, "").trim()) // Sanitize and trim
-                        .filter((line) => line !== "" && !line.includes("Name")); // Exclude empty and header lines
+                    let parsedData;
 
-                    lines.forEach((line, index) => {
-                        log(`Processing line ${index}: "${line}"`);
-                        const match = line.match(/^(.+?)\s+(.+)$/);
-                        if (match) {
-                            const name = match[1].trim();
-                            const deviceId = match[2].trim();
-                            const deviceIdShort = deviceId.match(/(?:DEV_|BLUETOOTHDEVICE_)(\w+)/)?.[1];
-                            log(`Found device - Name: ${name}, DeviceID: ${deviceId}, ShortID: ${deviceIdShort}`);
-                            if (name.startsWith("Haritora") && deviceIdShort) {
-                                devices.push({ name, address: deviceIdShort });
-                                log(`Added device - Name: ${name}, Address: ${deviceIdShort}`);
-                            }
-                        } else {
-                            log(`No match for line ${index}: "${line}"`);
-                        }
-                    });
+                    // Handle both single object and array responses
+                    if (stdout.trim()) {
+                        // Extract JSON part (everything after the last colored output)
+                        const lines = stdout.split("\n");
+                        const jsonStart = lines.findIndex((line) => line.trim().startsWith("[") || line.trim().startsWith("{"));
+                        const jsonOutput = jsonStart >= 0 ? lines.slice(jsonStart).join("\n").trim() : stdout.trim();
 
-                    // Step 2: Match devices with COM ports
-                    log("Executing WMIC command to get serial ports...");
-                    exec("wmic path Win32_SerialPort get DeviceID,PNPDeviceID", (err, stdout, _stderr) => {
-                        if (err) {
-                            error(`Error executing WMIC command: ${err.message}`, true);
-                            reject(err);
+                        log(`Attempting to parse JSON: ${jsonOutput}`);
+
+                        if (jsonOutput === "[]" || jsonOutput === "") {
+                            log("No devices found or empty JSON array");
+                            resolve(devices);
                             return;
                         }
 
-                        log(`WMIC command output: \r\n${stdout}`);
+                        parsedData = JSON.parse(jsonOutput);
+                        if (!Array.isArray(parsedData)) {
+                            parsedData = [parsedData];
+                        }
+                    } else {
+                        log("No output from PowerShell command");
+                        parsedData = [];
+                    }
 
-                        const comPorts = stdout
-                            .split("\n")
-                            .map((line) => line.replace(/[^\x20-\x7E]/g, "").trim()) // Sanitize and trim
-                            .filter((line) => line !== "" && !line.includes("DeviceID")); // Exclude empty and header lines
+                    parsedData.forEach((device: any) => {
+                        log(
+                            `Processing device: ${device.FriendlyName}, COM: ${device.ComPort}, BusDesc: ${device.BusReportedDesc}`,
+                        );
 
-                        comPorts.forEach((line, index) => {
-                            log(`Processing COM port line ${index}: "${line}"`);
-                            const match = line.match(/^(\w+)\s+(.+)$/);
-                            if (match) {
-                                const comPort = match[1];
-                                const pnpDeviceId = match[2];
-                                const deviceIdShort = pnpDeviceId.match(/&(\w+)_C/)?.[1];
-                                log(`Extracted COM port: ${comPort}, PNPDeviceID: ${pnpDeviceId}, ShortID: ${deviceIdShort}`);
+                        // Check if this is a HaritoraX device based on bus reported description or friendly name
+                        const isHaritoraX =
+                            (device.BusReportedDesc &&
+                                (device.BusReportedDesc.includes("HaritoraX 1") ||
+                                    device.BusReportedDesc.startsWith("HaritoraX 1"))) ||
+                            (device.FriendlyName &&
+                                (device.FriendlyName.includes("HaritoraX 1") || device.FriendlyName.startsWith("HaritoraX 1")));
 
-                                const device = devices.find((d) => deviceIdShort && d.address === deviceIdShort);
-                                if (device) {
-                                    device.comPort = comPort;
-                                    log(
-                                        `Matched device - Name: ${device.name}, Address: ${device.address}, COM Port: ${comPort}`,
-                                    );
-                                }
-                            } else {
-                                log(`No match for COM port line ${index}: "${line}"`);
-                            }
-                        });
+                        if (isHaritoraX && device.ComPort) {
+                            const deviceName = device.BusReportedDesc || device.FriendlyName;
+                            const deviceId = device.DeviceID;
 
-                        resolve(devices);
+                            // Extract a unique identifier from the device ID
+                            const addressMatch =
+                                deviceId.match(/[&_]([A-F0-9]{12})[&_]/i) ||
+                                deviceId.match(/[&_]([A-F0-9]{8})[&_]/i) ||
+                                deviceId.match(/([A-F0-9]{8,12})/i);
+                            const address = addressMatch ? addressMatch[1] : deviceId.substring(deviceId.length - 8);
+
+                            devices.push({
+                                name: deviceName,
+                                address: address,
+                                comPort: device.ComPort,
+                            });
+
+                            log(`Added HaritoraX device - Name: ${deviceName}, Address: ${address}, COM Port: ${device.ComPort}`);
+                        }
                     });
-                },
-            );
+
+                    resolve(devices);
+                } catch (parseErr) {
+                    error(`Error parsing PowerShell output: ${parseErr}`, true);
+                    reject(parseErr);
+                }
+            });
         });
     };
 
@@ -163,14 +211,14 @@ export default class BTSPP extends EventEmitter {
         const platform = process.platform;
         switch (platform) {
             case "win32":
-                return this.getPairedDevicesWindows().catch((): Promise<BluetoothDevice[] | null> => {
-                    error("Bluetooth is not available on this system", false);
-                    return null;
+                return this.getPairedDevicesWindows().catch((err): Promise<BluetoothDevice[] | null> => {
+                    error(`Error getting paired devices on Windows: ${err.message}`, false);
+                    return Promise.resolve(null);
                 });
             case "linux":
-                return this.getPairedDevicesLinux().catch((): Promise<BluetoothDevice[] | null> => {
-                    error("Bluetooth is not available on this system", false);
-                    return null;
+                return this.getPairedDevicesLinux().catch((err): Promise<BluetoothDevice[] | null> => {
+                    error(`Error getting paired devices on Linux: ${err.message}`, false);
+                    return Promise.resolve(null);
                 });
             default:
                 return Promise.reject(new Error("Unsupported platform"));
