@@ -102,7 +102,10 @@ export default class COM extends EventEmitter {
             }
         }
 
-        if (gxDevicesFound) availableDeviceNames.add("HaritoraX Wireless");
+        if (gxDevicesFound) {
+            availableDeviceNames.add("HaritoraX 2");
+            availableDeviceNames.add("HaritoraX Wireless");
+        }
 
         return Array.from(availableDeviceNames);
     }
