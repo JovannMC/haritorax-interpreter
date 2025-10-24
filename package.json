@@ -31,14 +31,14 @@
         "@serialport/bindings-cpp": "^13.0.1",
         "@serialport/parser-readline": "^13.0.0",
         "@serialport/stream": "^13.0.0",
-        "@stoprocent/noble": "^2.3.2",
+        "@stoprocent/noble": "^2.3.6",
         "node-ble": "^1.13.0"
     },
     "devDependencies": {
-        "eslint": "^9.31.0",
+        "eslint": "^9.38.0",
         "node-gyp-build": "^4.8.4",
         "prettier": "^3.6.2",
         "ts-node": "^10.9.2",
-        "typescript": "^5.8.3"
+        "typescript": "^5.9.3"
     }
 }
