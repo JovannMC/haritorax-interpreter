@@ -453,7 +453,7 @@ export default class HaritoraX extends EventEmitter {
         try {
             if (trackerModelEnabled === "wired") {
                 await handleWiredSettings(sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
-            } else if (trackerModelEnabled === "wireless") {
+            } else if (trackerModelEnabled === "wireless" || trackerModelEnabled === "x2") {
                 handleWirelessSettings(sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
             }
             updateTrackerSettings(sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection);
@@ -521,7 +521,7 @@ export default class HaritoraX extends EventEmitter {
                 ({ sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection } = getTrackerSettingsFromMap(trackerName));
             }
         } else if (
-            trackerModelEnabled === "wireless" &&
+            (trackerModelEnabled === "wireless" || trackerModelEnabled === "x2") &&
             comEnabled &&
             !trackerName.startsWith("HaritoraXW") &&
             !trackerName.startsWith("HaritoraX2-")
@@ -1065,7 +1065,7 @@ function listenToDeviceEvents() {
 
                 resetDataTimeout(trackerName, com, hasExtension);
 
-                if (trackerModelEnabled === "wireless") {
+                if (trackerModelEnabled === "wireless" || trackerModelEnabled === "x2") {
                     switch (identifier[0]) {
                         case "x":
                             processIMUData(Buffer.from(portData, "base64"), trackerName);
@@ -1434,7 +1434,6 @@ function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) 
 const ROTATION_SCALAR = 0.01 / 180.0;
 const GRAVITY_SCALAR = 1 / 256.0;
 const GRAVITY_CONSTANT = 9.81;
-const GRAVITY_ADJUSTMENT = 1.2;
 
 function decodeIMUPacket(data: Buffer, trackerName: string) {
     if (!trackerName || data.length < 14) {
@@ -1460,7 +1459,7 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
         // TODO: check imu data for hx2, then compare to wireless
         // either: move mag (and ankle) data to specified place in line 1274 OR simply add HX2 as a different support option in haritorax-interpreter
 
-        if (trackerModelEnabled === "wireless") {
+        if (trackerModelEnabled === "wireless" || trackerModelEnabled === "x2") {
             const bufferData = data.toString("base64");
             ankle = bufferData.slice(-2) !== "==" ? data.readUint16LE(data.length - 2) : undefined;
 
@@ -1497,7 +1496,9 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
                 }
                 trackerMag.set(trackerName, magStatus);
             }
-        }
+        } //else if (trackerModelEnabled === "x2") {
+        //     TODO: fix leg mag data
+        // }
 
         const rotation = { x: rotationX, y: rotationY, z: rotationZ, w: rotationW };
 
@@ -1519,10 +1520,13 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
             hrp[0] * rc[3] + hrp[1] * rc[2] - hrp[2] * rc[1] + hrp[3] * rc[0],
         ];
 
+        // HX2 trackers do not need the 1.2 adjustment as they have better accelerometers
+        const gravityAdjustment = trackerModelEnabled === "x2" ? 1.0 : 1.2;
+
         const acceleration = {
-            x: gravityRawX - hFinal[1] * -GRAVITY_ADJUSTMENT,
-            y: gravityRawY - hFinal[2] * -GRAVITY_ADJUSTMENT,
-            z: gravityRawZ - hFinal[3] * GRAVITY_ADJUSTMENT,
+            x: gravityRawX - hFinal[1] * -gravityAdjustment,
+            y: gravityRawY - hFinal[2] * -gravityAdjustment,
+            z: gravityRawZ - hFinal[3] * gravityAdjustment,
         };
 
         return { rotation, acceleration, ankle, magStatus };
@@ -1585,7 +1589,7 @@ function processMagData(data: string, trackerName: string) {
     let magStatus: string;
     let magData;
 
-    if (trackerModelEnabled === "wireless") {
+    if (trackerModelEnabled === "wireless" || trackerModelEnabled === "x2") {
         try {
             const buffer = Buffer.from(data, "base64");
             magData = buffer.readUInt8(0);
@@ -1601,6 +1605,8 @@ function processMagData(data: string, trackerName: string) {
             error(`Error processing mag data for ${trackerName}: ${err}`);
             return null;
         }
+        // } else if (trackerModelEnabled === "x2") {
+        //      placeholder for x2 mag status
     } else if (trackerModelEnabled === "wired") {
         try {
             let trackerNames = ["chest", "leftKnee", "leftAnkle", "rightKnee", "rightAnkle", "hip", "leftElbow", "rightElbow"];
@@ -1657,7 +1663,7 @@ function processSettingsData(data: string, trackerName: string, characteristic?:
 
     try {
         if (
-            trackerModelEnabled === "wireless" &&
+            (trackerModelEnabled === "wireless" || trackerModelEnabled === "x2") &&
             !trackerName.startsWith("HaritoraXW") &&
             !trackerName.startsWith("HaritoraX2-")
         ) {
@@ -1774,7 +1780,7 @@ function processButtonData(data: string, trackerName: string, characteristic?: s
             result.buttonPressed = processWirelessBTTrackerData(characteristic, currentButtons);
         } else if (comEnabled) {
             result =
-                trackerModelEnabled === "wireless"
+                trackerModelEnabled === "wireless" || trackerModelEnabled === "x2"
                     ? processWirelessTrackerData(data, trackerName, currentButtons)
                     : processWiredTrackerData(data, trackerName, currentButtons);
         }
@@ -1967,7 +1973,7 @@ function error(message: string, exceptional = false) {
 
 function isWirelessBTTracker(trackerName: string) {
     return (
-        trackerModelEnabled === "wireless" &&
+        (trackerModelEnabled === "wireless" || trackerModelEnabled === "x2") &&
         bluetoothEnabled &&
         (trackerName.startsWith("HaritoraXW") || trackerName.startsWith("HaritoraX2"))
     );
@@ -2031,13 +2037,17 @@ async function readFromBluetooth(trackerName: string, characteristic: string) {
 }
 
 function parseBluetoothData(data: ArrayBufferLike | string) {
+    let arrayBuffer: ArrayBufferLike;
     if (typeof data === "string") {
-        data = Buffer.from(data, "base64");
+        const nodeBuffer = Buffer.from(data, "base64");
+        arrayBuffer = nodeBuffer.buffer.slice(nodeBuffer.byteOffset, nodeBuffer.byteOffset + nodeBuffer.byteLength);
+    } else if (typeof Buffer !== "undefined" && Buffer.isBuffer(data)) {
+        const buf: Buffer = data as Buffer;
+        arrayBuffer = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+    } else {
+        arrayBuffer = data;
     }
-    if (data instanceof Buffer) {
-        data = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
-    }
-    return new DataView(data as ArrayBufferLike).getInt8(0);
+    return new DataView(arrayBuffer).getInt8(0);
 }
 
 function logSettings(trackerName: string, settings: Object, rawHexData?: string) {
@@ -2052,7 +2062,10 @@ function logSettings(trackerName: string, settings: Object, rawHexData?: string)
  */
 
 function isConnectionModeSupported(connectionMode: string): boolean {
-    return connectionMode === "com" || (connectionMode === "bluetooth" && trackerModelEnabled === "wireless");
+    return (
+        connectionMode === "com" ||
+        (connectionMode === "bluetooth" && (trackerModelEnabled === "wireless" || trackerModelEnabled === "x2"))
+    );
 }
 
 function setupBluetoothServices(): boolean {

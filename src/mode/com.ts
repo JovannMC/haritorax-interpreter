@@ -452,7 +452,7 @@ async function processData(data: string, port: string) {
         identifier = splitData[0].toLowerCase();
         portData = splitData[1];
 
-        if (trackerModelEnabled === "wireless") {
+        if (trackerModelEnabled === "wireless" || trackerModelEnabled === "x2") {
             const match = identifier.match(/\d/);
             portId = match ? match[0] : "DONGLE";
 

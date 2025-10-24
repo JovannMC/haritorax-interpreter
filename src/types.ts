@@ -1,6 +1,7 @@
 export enum TrackerModel {
     Wireless = "wireless",
     Wired = "wired",
+    X2 = "x2",
 }
 
 // For COM trackers (wired/wireless with GX dongle)
