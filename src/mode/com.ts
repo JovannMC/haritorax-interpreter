@@ -528,29 +528,27 @@ async function processData(data: string, port: string) {
                 );
             }
 
+            // example: WSgd7VcpEhQACBUAUwA[DA]93trNpTJHggKQJp+FAB
+            // where "DA" = mag data (byte 15 and 16)
             const buffer = Buffer.from(portData, "base64");
             const legData = buffer.slice(0, 14);
-            let thighData, remainingData;
+            const thighData = buffer.slice(16, 30);
+            const legMagByte = buffer[14];
+            const thighMagByte = buffer[15];
 
-            if (dataLength === 40) {
-                thighData = buffer.slice(16, 30);
-                //remainingData = buffer.slice(30);
-            } else if (dataLength === 44) {
-                thighData = buffer.slice(18, 32);
-                //remainingData = buffer.slice(32);
-                // const extraBytes = buffer.slice(16, 18);
-                // log(`Extra bytes: ${extraBytes.toString("base64")}`);
-            }
-
-            // log(`Processing HaritoraX2 legs data for ${trackerName}`);
-            // log(`IMU data (leg): ${legData.toString("base64")}`);
-            // log(`IMU data (thigh): ${thighData.toString("base64")}`);
-            //if (remainingData.length > 0) log(`Remaining data: ${remainingData.toString("base64")}`);
-
-            // emit data event for main "leg" tracker
-            main.emit("data", trackerName, port, portId, identifier, legData.toString("base64"), true);
-            // emit data event for extension "thigh" tracker
-            main.emit("data", trackerNameThigh, port, portId, identifier, thighData.toString("base64"), true);
+            // emit data event for main "leg" tracker with mag data
+            main.emit("data", trackerName, port, portId, identifier, legData.toString("base64"), true, legMagByte.toString());
+            // emit data event for extension "thigh" tracker with mag data
+            main.emit(
+                "data",
+                trackerNameThigh,
+                port,
+                portId,
+                identifier,
+                thighData.toString("base64"),
+                true,
+                thighMagByte.toString(),
+            );
             //log(`Processed HaritoraX2 legs data for ${trackerName}`);
             return;
         } else {

@@ -1060,6 +1060,7 @@ function listenToDeviceEvents() {
                 identifier: string,
                 portData: string,
                 hasExtension?: boolean,
+                magData?: string,
             ) => {
                 if (!canProcessComData) return;
 
@@ -1068,7 +1069,7 @@ function listenToDeviceEvents() {
                 if (trackerModelEnabled === "wireless" || trackerModelEnabled === "x2") {
                     switch (identifier[0]) {
                         case "x":
-                            processIMUData(Buffer.from(portData, "base64"), trackerName);
+                            processIMUData(Buffer.from(portData, "base64"), trackerName, undefined, magData);
                             break;
                         case "a":
                             processTrackerData(portData, trackerName);
@@ -1373,11 +1374,12 @@ function processWiredData(identifier: string, data: string) {
  * @param {string} data - The data to process.
  * @param {string} trackerName - The name of the tracker.
  * @param {number} [ankleValue] - The ankle value (processed before running, for wired).
+ * @param {string} [magData] - The magnetometer data character (for HX2 leg trackers).
  * @fires haritora#imu
  * @fires haritora#connect
  * @fires haritora#mag
  **/
-function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) {
+function processIMUData(data: Buffer, trackerName: string, ankleValue?: number, magData?: string) {
     if (!trackerName || !data) return;
 
     // console.log(`Processing for tracker: ${trackerName}`)
@@ -1404,7 +1406,7 @@ function processIMUData(data: Buffer, trackerName: string, ankleValue?: number) 
 
     // Decode and log the data
     try {
-        const { rotation, acceleration, ankle, magStatus } = decodeIMUPacket(data, trackerName);
+        const { rotation, acceleration, ankle, magStatus } = decodeIMUPacket(data, trackerName, magData);
 
         if (printIMU) {
             const { x: rX, y: rY, z: rZ, w: rW } = rotation;
@@ -1435,7 +1437,7 @@ const ROTATION_SCALAR = 0.01 / 180.0;
 const GRAVITY_SCALAR = 1 / 256.0;
 const GRAVITY_CONSTANT = 9.81;
 
-function decodeIMUPacket(data: Buffer, trackerName: string) {
+function decodeIMUPacket(data: Buffer, trackerName: string, hx2MagData?: string) {
     if (!trackerName || data.length < 14) {
         error(
             `Invalid data for IMU packet: ${!trackerName ? "no tracker name" : `insufficient data length (${data.length})`}`,
@@ -1456,38 +1458,23 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
 
         let ankle, magStatus;
 
-        // TODO: check imu data for hx2, then compare to wireless
-        // either: move mag (and ankle) data to specified place in line 1274 OR simply add HX2 as a different support option in haritorax-interpreter
-
-        if (trackerModelEnabled === "wireless" || trackerModelEnabled === "x2") {
+        // HX2 leg trackers have mag data passed separately as numeric byte value
+        if (trackerModelEnabled === "x2" && hx2MagData) {
+            const magValue = parseInt(hx2MagData); // like bluetooth
+            magStatus = getMagStatus(magValue);
+            trackerMag.set(trackerName, magStatus);
+        } else if (trackerModelEnabled === "wireless" || trackerModelEnabled === "x2") {
             const bufferData = data.toString("base64");
             ankle = bufferData.slice(-2) !== "==" ? data.readUint16LE(data.length - 2) : undefined;
 
             if (!trackerName.startsWith("HaritoraXW") && !trackerName.startsWith("HaritoraX2-")) {
                 const magnetometerData = bufferData.charAt(bufferData.length - 5);
-                // A-E for HXW, everything else for HX2 (i assume due to new mag)
-                // seriously wtf is up with hx2 lmfao, why they all mixed. it even includes lower case letters now bruh (i've seen 'u')
                 magStatus =
                     {
                         A: MagStatus.VERY_BAD,
-                        E: MagStatus.VERY_BAD,
-                        I: MagStatus.VERY_BAD,
-                        M: MagStatus.VERY_BAD,
-
                         B: MagStatus.BAD,
-                        F: MagStatus.BAD,
-                        J: MagStatus.BAD,
-                        N: MagStatus.BAD,
-
                         C: MagStatus.OKAY,
-                        G: MagStatus.OKAY,
-                        K: MagStatus.OKAY,
-                        O: MagStatus.OKAY,
-
                         D: MagStatus.GREAT,
-                        H: MagStatus.GREAT,
-                        L: MagStatus.GREAT,
-                        P: MagStatus.GREAT,
                     }[magnetometerData] || MagStatus.Unknown;
 
                 if (magStatus === MagStatus.Unknown) {
@@ -1496,9 +1483,7 @@ function decodeIMUPacket(data: Buffer, trackerName: string) {
                 }
                 trackerMag.set(trackerName, magStatus);
             }
-        } //else if (trackerModelEnabled === "x2") {
-        //     TODO: fix leg mag data
-        // }
+        }
 
         const rotation = { x: rotationX, y: rotationY, z: rotationZ, w: rotationW };
 
