@@ -276,7 +276,8 @@ export default class Bluetooth extends EventEmitter {
         const serviceInstance = getService(device, service);
         const characteristicInstance = getCharacteristic(serviceInstance, characteristic);
 
-        return await characteristicInstance.readAsync();
+        const buffer: Buffer = await characteristicInstance.readAsync();
+        return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
     }
 
     async write(localName: string, service: string, characteristic: string, data: any): Promise<void> {
