@@ -1469,12 +1469,30 @@ function decodeIMUPacket(data: Buffer, trackerName: string, hx2MagData?: string)
 
             if (!trackerName.startsWith("HaritoraXW") && !trackerName.startsWith("HaritoraX2-")) {
                 const magnetometerData = bufferData.charAt(bufferData.length - 5);
+                // A-D for HXW, everything else for HX2 (i assume due to new mag)
+                // seriously wtf is up with hx2 lmfao, why they all mixed. it even includes lower case letters now bruh (i've seen 'u')
+                // update: it's *probably* because we're supposed to be reading the byte value, not the base64 char lmao
                 magStatus =
                     {
                         A: MagStatus.VERY_BAD,
+                        E: MagStatus.VERY_BAD,
+                        I: MagStatus.VERY_BAD,
+                        M: MagStatus.VERY_BAD,
+
                         B: MagStatus.BAD,
+                        F: MagStatus.BAD,
+                        J: MagStatus.BAD,
+                        N: MagStatus.BAD,
+
                         C: MagStatus.OKAY,
+                        G: MagStatus.OKAY,
+                        K: MagStatus.OKAY,
+                        O: MagStatus.OKAY,
+
                         D: MagStatus.GREAT,
+                        H: MagStatus.GREAT,
+                        L: MagStatus.GREAT,
+                        P: MagStatus.GREAT,
                     }[magnetometerData] || MagStatus.Unknown;
 
                 if (magStatus === MagStatus.Unknown) {
