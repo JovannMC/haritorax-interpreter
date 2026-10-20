@@ -54,46 +54,19 @@ echo '<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-BUS Bus Configuration 1.
 
 | Device             | Supported | Elbow/Hip support | Additional trackers | Extensions |
 |--------------------|-----------|-------------------|---------------------|------------|
-| HaritoraX 2        |     Y     |         Y         |         Y           |     Y      |
-| HaritoraX Wireless |     Y     |         Y         |         Y           |     N      |
-| HaritoraX 1.1B     |     Y     |         Y         |         N           |     N      |
-| HaritoraX 1.1      |     Y     |         Y         |         N           |     N      |
-| HaritoraX 1.0      |     Y     |         Y         |         N           |     N      |
+| HaritoraX 2        |     N     |         N         |         N           |     N      |
+| HaritoraX Wireless |     N     |         N         |         N           |     N      |
+| HaritoraX 1.1B     |     N     |         N         |         N           |     N      |
+| HaritoraX 1.1      |     N     |         N         |         N           |     N      |
+| HaritoraX 1.0      |     N     |         N         |         N           |     N      |
 | Haritora           |     ?     |         ?         |         N           |     N      |
 
 | Communication mode        | Supported |
 |---------------------------|-----------|
-| Bluetooth (Low Energy)    |     Y     |
-| Bluetooth Classic (serial)|     Y     |
-| GX6 Communication Dongle  |     Y     |
-| GX2 Communication Dongle  |     Y     |
-
-## Example
-```js
-import { HaritoraX } from "haritorax-interpreter";
-
-// connect to haritorax wireless, enable debug logs, allow printing of processIMUData() logs (lots of spam), print raw unprocessed data (more spam!)
-let device = new HaritoraX("wireless", true, true, true);
-// start connecting to dongles via GX dongles (COM connection), with the ports COM4, COM5, COM6, and COM7
-device.startConnection("com", ["COM4", "COM5", "COM6", "COM7"]);
-
-device.on("imu", (trackerName, rotation, gravity, ankle) => {
-    // IMU data received, do stuff
-});
-
-setTimeout(() => {
-    // apply the following settings to the rightAnkle tracker:
-    // sensor mode: 1 (magnetometer enabled)
-    // posture data transfer rate: 100FPS
-    // sensor auto correction mode: accelerometer and gyroscope
-    // ankle motion detection: enabled
-    device.setTrackerSettings("rightAnkle", 1, 100, ['accel', 'gyro'], true);
-}, 2000)
-
-setTimeout(() => {
-    device.stopConnection("com");
-}, 10000)
-```
+| Bluetooth (Low Energy)    |     N     |
+| Bluetooth Classic (serial)|     N     |
+| GX6 Communication Dongle  |     N     |
+| GX2 Communication Dongle  |     N     |
 
 ## Projects using package
 

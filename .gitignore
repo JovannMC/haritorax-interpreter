@@ -128,3 +128,9 @@ dist
 .pnp.*
 
 data.txt
+
+*.tsbuildinfo
+
+# reverse-engineering captures and local traces
+testing
+.coverage

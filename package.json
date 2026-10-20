@@ -1,6 +1,6 @@
 {
     "name": "haritorax-interpreter",
-    "version": "3.5.1",
+    "version": "4.0.0-dev.0",
     "homepage": "https://github.com/JovannMC/haritorax-interpreter",
     "repository": {
         "type": "git",
@@ -11,10 +11,38 @@
         "email": "contact@femboyfurry.net"
     },
     "description": "Communicate with the HaritoraX trackers",
+    "type": "module",
     "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "react-native": "./dist/index.js",
+            "import": "./dist/index.js",
+            "default": "./dist/index.js"
+        },
+        "./connections/contract": {
+            "types": "./dist/connections/contract.d.ts",
+            "default": "./dist/connections/contract.js"
+        },
+        "./package.json": "./package.json"
+    },
+    "files": [
+        "dist",
+        "README.md",
+        "LICENSE"
+    ],
+    "engines": {
+        "node": ">=20.19.0"
+    },
     "scripts": {
-        "start": "npm run build && node ./test/test.js",
-        "build": "tsc && tsc -d"
+        "build": "npm run clean && tsc -p tsconfig.json",
+        "clean": "rm -rf dist",
+        "typecheck": "tsc -p tsconfig.json --noEmit",
+        "lint": "eslint .",
+        "lint:fix": "eslint . --fix",
+        "format": "prettier --write \"src/**/*.ts\"",
+        "format:check": "prettier --check \"src/**/*.ts\""
     },
     "author": "JovannMC <jovannmc@femboyfurry.net> (https://femboyfurry.net)",
     "license": "MIT",
@@ -27,18 +55,31 @@
         "bluetooth",
         "interpreter"
     ],
-    "dependencies": {
+    "peerDependencies": {
         "@serialport/bindings-cpp": "^13.0.1",
-        "@serialport/parser-readline": "^13.0.0",
-        "@serialport/stream": "^13.0.0",
         "@stoprocent/noble": "^2.3.6",
         "node-ble": "^1.13.0"
     },
+    "peerDependenciesMeta": {
+        "@serialport/bindings-cpp": {
+            "optional": true
+        },
+        "@stoprocent/noble": {
+            "optional": true
+        },
+        "node-ble": {
+            "optional": true
+        }
+    },
     "devDependencies": {
+        "@eslint/js": "^9.38.0",
+        "@serialport/bindings-cpp": "^13.0.1",
+        "@stoprocent/noble": "^2.3.6",
+        "@types/node": "^22.10.0",
         "eslint": "^9.38.0",
-        "node-gyp-build": "^4.8.4",
+        "node-ble": "^1.13.0",
         "prettier": "^3.6.2",
-        "ts-node": "^10.9.2",
-        "typescript": "^5.9.3"
+        "typescript": "^5.9.3",
+        "typescript-eslint": "^8.20.0"
     }
 }
