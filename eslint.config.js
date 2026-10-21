@@ -33,7 +33,7 @@ export default tseslint.config(
         },
     },
     {
-        files: ["src/transports/**/*.ts"],
+        files: ["src/connections/**/*.ts"],
         rules: {
             "no-restricted-globals": "off",
             "no-restricted-imports": "off",
@@ -42,5 +42,13 @@ export default tseslint.config(
     {
         files: ["**/*.js", "**/*.mjs"],
         extends: [tseslint.configs.disableTypeChecked],
+    },
+    {
+        // node:test awaits the promise returned by it()/describe() itself, so a
+        // top-level call there is not a floating promise.
+        files: ["test/**/*.ts"],
+        rules: {
+            "@typescript-eslint/no-floating-promises": "off",
+        },
     },
 );

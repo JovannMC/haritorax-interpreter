@@ -25,6 +25,10 @@
             "types": "./dist/connections/contract.d.ts",
             "default": "./dist/connections/contract.js"
         },
+        "./connections/serial": {
+            "types": "./dist/connections/serial-node.d.ts",
+            "default": "./dist/connections/serial-node.js"
+        },
         "./package.json": "./package.json"
     },
     "files": [
@@ -41,8 +45,9 @@
         "typecheck": "tsc -p tsconfig.json --noEmit",
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
-        "format": "prettier --write \"src/**/*.ts\"",
-        "format:check": "prettier --check \"src/**/*.ts\""
+        "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+        "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
+        "test": "npm run build && node --test \"test/**/*.test.ts\""
     },
     "author": "JovannMC <jovannmc@femboyfurry.net> (https://femboyfurry.net)",
     "license": "MIT",
@@ -57,11 +62,15 @@
     ],
     "peerDependencies": {
         "@serialport/bindings-cpp": "^13.0.1",
+        "@serialport/stream": "^13.0.0",
         "@stoprocent/noble": "^2.3.6",
         "node-ble": "^1.13.0"
     },
     "peerDependenciesMeta": {
         "@serialport/bindings-cpp": {
+            "optional": true
+        },
+        "@serialport/stream": {
             "optional": true
         },
         "@stoprocent/noble": {
@@ -72,14 +81,15 @@
         }
     },
     "devDependencies": {
-        "@eslint/js": "^9.38.0",
+        "@eslint/js": "^10.0.1",
         "@serialport/bindings-cpp": "^13.0.1",
+        "@serialport/stream": "^13.0.0",
         "@stoprocent/noble": "^2.3.6",
-        "@types/node": "^22.10.0",
-        "eslint": "^9.38.0",
+        "@types/node": "^26.6.5",
+        "eslint": "^10.13.0",
         "node-ble": "^1.13.0",
         "prettier": "^3.6.2",
-        "typescript": "^5.9.3",
-        "typescript-eslint": "^8.20.0"
+        "typescript": "^6.0.3",
+        "typescript-eslint": "^8.72.0"
     }
 }

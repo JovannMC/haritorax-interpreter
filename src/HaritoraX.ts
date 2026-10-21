@@ -1,17 +1,14 @@
+import { HaritoraXError } from "./errors.js";
 import { Logger, type LogSink } from "./logging.js";
 import { Emitter } from "./emitter.js";
-import type { Connection } from "./connections/contract.js";
+import { parseLine } from "./protocol/framing.js";
+import type { Connection, Frame, ListOptions } from "./connections/contract.js";
 import type {
-    BatteryInfo,
-    BodyPart,
     DeviceDescriptor,
-    DeviceInfo,
+    DisconnectReason,
     EventHandler,
     Events,
-    ImuRole,
     LogLevel,
-    MagStatus,
-    TrackerSettings,
     TrackerSnapshot,
     Unsubscribe,
 } from "./types.js";
@@ -26,7 +23,14 @@ export class HaritoraX {
     readonly #emitter = new Emitter();
     readonly #log: Logger;
     readonly #connections: Connection[];
-    #disposed = false;
+
+    #endpoints: DeviceDescriptor[] = [];
+    readonly #endpointOwners = new Map<string, Connection>();
+    readonly #open = new Set<string>();
+    readonly #devices = new Map<string, TrackerSnapshot>();
+    readonly #subscriptions: Unsubscribe[] = [];
+
+    #discovery: AbortController | undefined;
 
     constructor(options: HaritoraXOptions = {}) {
         this.#connections = options.connections ?? [];
@@ -37,86 +41,119 @@ export class HaritoraX {
         this.#emitter.setErrorHandler((event, error) =>
             this.#log.error(`Listener for "${event}" threw`, { error: String(error) }),
         );
+
+        for (const connection of this.#connections) {
+            this.#subscriptions.push(connection.onData((frame) => this.#onFrame(frame)));
+            this.#subscriptions.push(connection.onLost((endpointId, reason) => this.#onLost(endpointId, reason)));
+        }
     }
 
     /*
      * device discovery and connection
      */
 
-    discover(): Promise<void> {
-        return this.#todo("discover");
+    // check what endpoints every connection can see, serial ports and BLE peripherals
+    async discover(options?: ListOptions): Promise<DeviceDescriptor[]> {
+        this.#discovery?.abort();
+        const controller = new AbortController();
+        this.#discovery = controller;
+
+        const results = await Promise.all(
+            this.#connections.map(async (connection) => {
+                try {
+                    return { connection, found: await connection.list({ ...options, signal: controller.signal }) };
+                } catch (error) {
+                    this.#log.error(`Discovery failed for "${connection.kind}"`, { error: String(error) });
+                    this.#emitter.emit("error", { error: toError(error) });
+                    return { connection, found: [] as DeviceDescriptor[] };
+                }
+            }),
+        );
+
+        const merged = new Map<string, DeviceDescriptor>();
+        this.#endpointOwners.clear();
+
+        for (const { connection, found } of results) {
+            for (const descriptor of found) {
+                merged.set(descriptor.id, descriptor);
+                this.#endpointOwners.set(descriptor.id, connection);
+            }
+        }
+
+        this.#endpoints = [...merged.values()];
+
+        this.#log.info(`Discovered ${this.#endpoints.length} endpoint(s)`, {
+            ids: this.#endpoints.map((descriptor) => descriptor.id).join(","),
+        });
+
+        return this.#endpoints;
     }
 
     stopDiscovery(): Promise<void> {
-        return this.#todo("stopDiscovery");
+        this.#discovery?.abort();
+        this.#discovery = undefined;
+        return Promise.resolve();
+    }
+
+    getEndpoints(): DeviceDescriptor[] {
+        return [...this.#endpoints];
     }
 
     getDevices(): TrackerSnapshot[] {
-        return [];
+        return [...this.#devices.values()];
     }
 
     getDevice(deviceId: string): TrackerSnapshot | undefined {
-        return this.getDevices().find((device) => device.deviceId === deviceId);
+        return this.#devices.get(deviceId);
     }
 
-    connect(_deviceId: string): Promise<void> {
-        return this.#todo("connect");
+    async connect(endpointId: string): Promise<void> {
+        const connection = this.#endpointOwners.get(endpointId);
+        if (!connection) {
+            throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown endpoint "${endpointId}", call discover() first`);
+        }
+
+        if (this.#open.has(endpointId)) return;
+
+        await connection.open(endpointId);
+        this.#open.add(endpointId);
+        this.#emitter.emit("device:connected", { deviceId: endpointId });
+        this.#log.info(`Connected ${endpointId}`);
     }
 
-    disconnect(_deviceId: string): Promise<void> {
-        return this.#todo("disconnect");
-    }
+    async disconnect(endpointId: string): Promise<void> {
+        if (!this.#open.delete(endpointId)) return;
 
-    /*
-     * device information and settings
-     */
-
-    readInfo(_deviceId: string): Promise<DeviceInfo> {
-        return this.#todo("readInfo");
-    }
-
-    readBattery(_deviceId: string): Promise<BatteryInfo> {
-        return this.#todo("readBattery");
-    }
-
-    readMag(_deviceId: string): Promise<MagStatus> {
-        return this.#todo("readMag");
-    }
-
-    readSettings(_deviceId: string): Promise<TrackerSettings> {
-        return this.#todo("readSettings");
-    }
-
-    writeSettings(_deviceId: string, _settings: TrackerSettings): Promise<void> {
-        return this.#todo("writeSettings");
-    }
-
-    powerOff(_deviceId: string): Promise<void> {
-        return this.#todo("powerOff");
-    }
-
-    assignBodyPart(_deviceId: string, _bodyPart: BodyPart, _role?: ImuRole): void {
-        this.#log.error("assignBodyPart() is not implemented yet");
+        await this.#endpointOwners.get(endpointId)?.close(endpointId);
+        this.#emitter.emit("device:disconnected", { deviceId: endpointId, reason: "requested" });
+        this.#log.info(`Disconnected ${endpointId}`);
     }
 
     /*
      * listeners and disposal
      */
 
-    dispose(): Promise<void> {
-        if (this.#disposed) return Promise.resolve();
-        this.#disposed = true;
-        this.#emitter.removeAllListeners();
+    async dispose(): Promise<void> {
+        this.#discovery?.abort();
+        this.#discovery = undefined;
 
-        const pending = this.#connections.map((connection) =>
-            connection.dispose().catch((error: unknown) => {
-                this.#log.error(`Connection "${connection.kind}" failed to dispose`, { error: String(error) });
-            }),
+        for (const unsubscribe of this.#subscriptions) unsubscribe();
+        this.#subscriptions.length = 0;
+
+        await Promise.all(
+            this.#connections.map((connection) =>
+                connection.dispose().catch((error: unknown) => {
+                    this.#log.error(`Connection "${connection.kind}" failed to dispose`, { error: String(error) });
+                }),
+            ),
         );
 
-        return Promise.all(pending).then(() => {
-            this.#log.info("Disposed");
-        });
+        this.#emitter.removeAllListeners();
+        this.#open.clear();
+        this.#endpoints = [];
+        this.#endpointOwners.clear();
+        this.#devices.clear();
+        this.#log.info("Disposed");
     }
 
     on<E extends keyof Events>(event: E, handler: EventHandler<E>): Unsubscribe {
@@ -127,8 +164,20 @@ export class HaritoraX {
      * internal stuff
      */
 
-    #todo(method: string): Promise<never> {
-        return Promise.reject(new Error(`${method}() is not implemented yet`));
+    #onFrame(frame: Frame): void {
+        if (!this.#log.enabled("debug")) return;
+
+        const { identifier, payload } = parseLine(frame.data);
+        this.#log.debug(`Frame ${identifier || "(none)"} from ${frame.endpointId}`, {
+            bytes: frame.data.length,
+            payload: payload.length > 120 ? `${payload.slice(0, 120)}…` : payload,
+        });
+    }
+
+    #onLost(endpointId: string, reason: DisconnectReason): void {
+        if (!this.#open.delete(endpointId)) return;
+
+        this.#emitter.emit("device:disconnected", { deviceId: endpointId, reason });
     }
 }
 
@@ -136,4 +185,6 @@ export function createHaritoraX(options?: HaritoraXOptions): HaritoraX {
     return new HaritoraX(options);
 }
 
-export type { DeviceDescriptor };
+function toError(value: unknown): Error {
+    return value instanceof Error ? value : new Error(String(value));
+}
