@@ -1,6 +1,6 @@
 // ngl i can only really kinda understand what the ai did here, it apparently is needed to fix bugs that was on v3 so guh
 // i'll probably rewrite this or actually try to understand wtf its doing later, but for now it works so i guess its fine
-import type { EventHandler, Events, Unsubscribe } from "./types.js";
+import type { EventHandler, Events, Unsubscribe } from "../types.js";
 
 /**
  * Typed emitter. Two behaviours are load-bearing and are the reason this is not

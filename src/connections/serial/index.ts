@@ -1,8 +1,8 @@
-import { HaritoraXError } from "../errors.js";
-import { Logger } from "../logging.js";
-import { asciiDecode, asciiEncode, splitLines } from "../protocol/framing.js";
-import type { Connection, Frame, ListOptions } from "./contract.js";
-import type { DeviceDescriptor, DisconnectReason, Unsubscribe } from "../types.js";
+import { HaritoraXError } from "../../lib/errors.js";
+import { Logger } from "../../lib/logging.js";
+import { asciiDecode, asciiEncode, splitLines } from "../../protocol/framing.js";
+import type { Connection, Frame, ListOptions } from "../contract.js";
+import type { DeviceDescriptor, DisconnectReason, Unsubscribe } from "../../types.js";
 
 export interface SerialPort {
     readonly isOpen: boolean;

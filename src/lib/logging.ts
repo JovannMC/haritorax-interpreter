@@ -1,4 +1,4 @@
-import type { LogEntry, LogLevel } from "./types.js";
+import type { LogEntry, LogLevel } from "../types.js";
 
 const ORDER: Readonly<Record<Exclude<LogLevel, "silent">, number>> = Object.freeze({
     error: 1,

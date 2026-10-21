@@ -1,6 +1,6 @@
-import { HaritoraXError } from "./errors.js";
-import { Logger, type LogSink } from "./logging.js";
-import { Emitter } from "./emitter.js";
+import { HaritoraXError } from "./lib/errors.js";
+import { Logger, type LogSink } from "./lib/logging.js";
+import { Emitter } from "./lib/emitter.js";
 import { parseLine } from "./protocol/framing.js";
 import type { Connection, Frame, ListOptions } from "./connections/contract.js";
 import type {

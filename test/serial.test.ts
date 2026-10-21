@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { createSerialConnection } from "../dist/connections/serial-node.js";
-import type { PortSummary, SerialBackend, SerialPort } from "../dist/connections/serial-node.js";
+import { createSerialConnection } from "../dist/connections/serial/serial-node.js";
+import type { PortSummary, SerialBackend, SerialPort } from "../dist/connections/serial/serial-node.js";
 import type { Frame } from "../dist/connections/contract.js";
 import type { DisconnectReason } from "../dist/types.js";
 

@@ -1,8 +1,8 @@
 import { autoDetect } from "@serialport/bindings-cpp";
 import { SerialPortStream } from "@serialport/stream";
-import { SerialConnection } from "./serial.js";
-import type { SerialBackend, SerialOptions } from "./serial.js";
-import type { Connection } from "./contract.js";
+import { SerialConnection } from "./index.js";
+import type { SerialBackend, SerialOptions } from "./index.js";
+import type { Connection } from "../contract.js";
 
 // from haritora_setting.json in HaritoraConfigurator
 const BAUD_RATE = 500_000;
@@ -24,4 +24,4 @@ function createNodeBackend(): SerialBackend {
     };
 }
 
-export type { PortSummary, SerialBackend, SerialOptions, SerialPort } from "./serial.js";
+export type { PortSummary, SerialBackend, SerialOptions, SerialPort } from "./index.js";
