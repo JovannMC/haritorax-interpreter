@@ -6,7 +6,9 @@ export type ErrorCode =
     | "WRITE_FAILED"
     | "READ_FAILED"
     | "DECODE_FAILED"
-    | "NOT_SUPPORTED";
+    | "NOT_SUPPORTED"
+    | "BUSY"
+    | "TIMEOUT";
 
 export class HaritoraXError extends Error {
     readonly code: ErrorCode;

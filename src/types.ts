@@ -1,7 +1,20 @@
 export type TrackerModel = "wireless" | "x2" | "wired";
 
 export type BodyPart =
-    "chest" | "hip" | "leftKnee" | "leftAnkle" | "rightKnee" | "rightAnkle" | "leftElbow" | "rightElbow" | "unassigned";
+    | "chest"
+    | "hip"
+    | "leftKnee"
+    | "leftAnkle"
+    | "rightKnee"
+    | "rightAnkle"
+    | "leftElbow"
+    | "rightElbow"
+    | "leftWrist"
+    | "rightWrist"
+    | "head"
+    | "leftFoot"
+    | "rightFoot"
+    | "unassigned";
 
 export type ImuRole = "ankle" | "knee";
 
@@ -70,6 +83,7 @@ export interface EndpointDescriptor {
     model?: TrackerModel;
     rssi?: number;
     dongle?: "GX6" | "GX2";
+    channel?: number;
 }
 
 export interface DeviceSnapshot {
@@ -80,6 +94,8 @@ export interface DeviceSnapshot {
     model: TrackerModel;
     connection: ConnectionKind;
     connected: boolean;
+    // tracker id maps to the body part that it is assigned to (which isn't necessary for SlimeTora)
+    trackerId?: string;
     battery?: BatteryInfo;
     mag?: MagStatus;
     settings?: TrackerSettings;
@@ -110,6 +126,10 @@ export interface Events {
     mag: { deviceId: string; status: MagStatus };
     info: DeviceInfo;
     settings: { deviceId: string; settings: TrackerSettings };
+    channel: { endpointId: string; channel: number };
+    identified: { deviceId: string; trackerId: string; bodyPart: BodyPart };
+    paired: { endpointId: string; slot: string; deviceId: string };
+    unpaired: { endpointId: string; slot: string; deviceId: string };
     button: { deviceId: string; button: "main" | "sub" | "sub2" };
 }
 
