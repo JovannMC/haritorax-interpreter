@@ -63,7 +63,7 @@ export type ConnectionKind = "bluetooth-le" | "serial";
 export type DisconnectReason = "requested" | "timeout" | "remote" | "error";
 
 // port or peripheral we can talk to
-export interface DeviceDescriptor {
+export interface EndpointDescriptor {
     id: string;
     connection: ConnectionKind;
     displayName: string;
@@ -72,7 +72,7 @@ export interface DeviceDescriptor {
     dongle?: "GX6" | "GX2";
 }
 
-export interface TrackerSnapshot {
+export interface DeviceSnapshot {
     deviceId: string;
     // one entry per IMU
     bodyParts: BodyPart[];
@@ -102,7 +102,7 @@ export interface LogEntry {
 export interface Events {
     error: { error: Error };
     log: LogEntry;
-    devices: { devices: TrackerSnapshot[] };
+    devices: { devices: DeviceSnapshot[] };
     "device:connected": { deviceId: string };
     "device:disconnected": { deviceId: string; reason: DisconnectReason };
     imu: ImuSample;

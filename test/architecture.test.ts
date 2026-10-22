@@ -126,7 +126,7 @@ describe("architecture gates", () => {
         assert.deepEqual(offenders, []);
     });
 
-    it("keeps Buffer and base64 codecs out of protocol, class and types", async () => {
+    it("keeps Buffer and ad-hoc base64 codecs out of everything but the wire layers", async () => {
         const offenders: string[] = [];
         const patterns: [RegExp, string][] = [
             [/\bBuffer\b/, "Buffer"],
@@ -134,13 +134,15 @@ describe("architecture gates", () => {
             [/\b(?:atob|btoa)\b|toString\(\s*["']base64["']\s*\)/, "base64 codec"],
         ];
 
+        // Connections own the arriving bytes; everything above them must not
+        // hand-roll conversions. Base64 itself comes from `base64-js`.
         for (const file of await sourceFiles(SRC)) {
-            // Connections own the arriving bytes; everything above them must not.
-            if (path.relative(SRC, file).startsWith(`connections${path.sep}`)) continue;
+            const relative = path.relative(SRC, file);
+            if (relative.startsWith(`connections${path.sep}`)) continue;
 
             const text = await readFile(file, "utf8");
             for (const [pattern, label] of patterns) {
-                if (pattern.test(text)) offenders.push(`${path.relative(SRC, file)} uses ${label}`);
+                if (pattern.test(text)) offenders.push(`${relative} uses ${label}`);
             }
         }
 

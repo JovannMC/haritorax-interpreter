@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createHaritoraX } from "../dist/index.js";
 import type { Connection, Frame, ListOptions } from "../dist/connections/contract.js";
-import type { DeviceDescriptor, DisconnectReason, Unsubscribe } from "../dist/types.js";
+import { fromByteArray as encodeBase64, toByteArray as decodeBase64 } from "base64-js";
+import type { BatteryInfo, DeviceDescriptor, DisconnectReason, Unsubscribe } from "../dist/types.js";
 
 /** In-memory connection: the reference implementation of the contract. */
 function memoryConnection(endpoints: string[] = ["COM4"]) {
@@ -248,5 +249,148 @@ describe("class contract", () => {
 
         await a.dispose();
         assert.deepEqual(b.getDevices(), []);
+    });
+});
+
+describe("protocol dispatch", () => {
+    async function connected() {
+        const serial = memoryConnection(["COM4"]);
+        const app = createHaritoraX({ connections: [serial], logLevel: "silent" });
+        await app.discover();
+        await app.connect("COM4");
+        return { app, serial };
+    }
+
+    it("creates a device from i0 and emits info", async () => {
+        const { app, serial } = await connected();
+
+        const infos: Array<{ deviceId: string; serialNumber: string; model: string }> = [];
+        app.on("info", (info) => infos.push(info));
+
+        serial.emitFrame("COM4", 'i0:{"version":"1.0.22","model":"mc3s","serial no":"A2E987"}');
+
+        const device = app.getDevice("COM4:0");
+        assert.ok(device);
+        assert.equal(device.imuCount, 1);
+        assert.deepEqual(device.bodyParts, ["unassigned"]);
+        assert.equal(device.connection, "serial");
+        assert.equal(infos[0]?.serialNumber, "A2E987");
+        assert.equal(infos[0]?.model, "mc3s");
+    });
+
+    it("marks a dual-IMU device from imu_num", async () => {
+        const { app, serial } = await connected();
+
+        serial.emitFrame("COM4", 'i0:{"version":"0.0.1","model":"mc4b","imu_num":2,"serial no":"A2E987"}');
+
+        const device = app.getDevice("COM4:0");
+        assert.equal(device?.imuCount, 2);
+        assert.equal(device?.bodyParts.length, 2);
+        assert.equal(device?.model, "x2");
+    });
+
+    it("identifies HX2 from the firmware model, even with one IMU", async () => {
+        // Live hardware: HX2 reports mc4b, HaritoraX Wireless reports mc3s.
+        const { app, serial } = await connected();
+
+        serial.emitFrame("COM4", 'i0:{"version":"1.0.5","model":"mc4b","imu_num":1,"serial no":"C1MGN3"}');
+        serial.emitFrame("COM4", 'i1:{"version":"1.0.22","model":"mc3s","imu_num":1,"serial no":"A2E987"}');
+
+        assert.equal(app.getDevice("COM4:0")?.model, "x2");
+        assert.equal(app.getDevice("COM4:1")?.model, "wireless");
+    });
+
+    it("ignores the placeholder reply from an empty slot", async () => {
+        // Empty slots answer with serial A00000 / version 0.0.1, which never
+        // belongs to real hardware. Battery and settings frames arrive for them
+        // too and must not create a device either.
+        const { app, serial } = await connected();
+
+        serial.emitFrame("COM4", 'i1:{"version":"0.0.1","model":"mc3s","imu_num":1,"serial no":"A00000"}');
+        serial.emitFrame("COM4", 'v1:{"battery voltage":3000,"battery remaining":0,"charge status":"Unknown"}');
+        serial.emitFrame("COM4", "o1:00000100101000");
+
+        assert.equal(app.getDevice("COM4:1"), undefined);
+        assert.deepEqual(app.getDevices(), []);
+    });
+
+    it("emits one imu sample per single-IMU packet", async () => {
+        const { app, serial } = await connected();
+
+        const samples: Array<{ deviceId: string; role: string; rotation: { x: number }; magStatus?: string }> = [];
+        app.on("imu", (sample) => samples.push(sample));
+        const mags: string[] = [];
+        app.on("mag", ({ status }) => mags.push(status));
+
+        serial.emitFrame("COM4", "x0:QAV1/Is6EBngAaf/bAkCAA==");
+
+        assert.equal(samples.length, 1);
+        assert.equal(samples[0]?.deviceId, "COM4:0");
+        assert.equal(samples[0]?.role, "ankle");
+        assert.ok(Math.abs((samples[0]?.rotation.x ?? 0) - 0.07466666666666667) < 1e-12);
+        assert.deepEqual(mags, ["okay"]);
+    });
+
+    it("splits a leg combo into ankle and knee samples", async () => {
+        const { app, serial } = await connected();
+
+        serial.emitFrame("COM4", 'i0:{"version":"0.0.1","model":"mc3s","imu_num":2,"serial no":"A2E987"}');
+
+        const leg = decodeBase64("QAV1/Is6EBngAaf/bAkCAA==");
+        const combo = new Uint8Array(30);
+        combo.set(leg.slice(0, 14), 0);
+        combo[14] = 3; // leg mag
+        combo[15] = 1; // thigh mag
+        combo.set(leg.slice(0, 14), 16);
+
+        const samples: Array<{ role: string; bodyPart: string }> = [];
+        app.on("imu", (sample) => samples.push(sample));
+
+        serial.emitFrame("COM4", `x0:${encodeBase64(combo)}`);
+
+        assert.deepEqual(
+            samples.map((sample) => sample.role),
+            ["ankle", "knee"],
+        );
+        assert.equal(samples[0]?.deviceId, "COM4:0");
+    });
+
+    it("updates battery and settings", async () => {
+        const { app, serial } = await connected();
+
+        const batteries: BatteryInfo[] = [];
+        app.on("battery", (battery) => batteries.push(battery));
+
+        serial.emitFrame("COM4", 'i0:{"version":"1.0.22","model":"mc3s","serial no":"A2E987"}');
+        serial.emitFrame("COM4", 'v0:{"battery voltage":4105,"battery remaining":94,"charge status":"Discharging"}');
+        serial.emitFrame("COM4", "o0:00000110101000");
+
+        assert.equal(batteries[0]?.deviceId, "COM4:0");
+        assert.equal(batteries[0]?.level, 94);
+        assert.equal(batteries[0]?.voltage, 4105);
+        assert.equal(batteries[0]?.chargeStatus, "discharging");
+        assert.deepEqual(app.getDevice("COM4:0")?.settings, {
+            sensorMode: 1,
+            fpsMode: 100,
+            sensorAutoCorrection: ["accel"],
+            ankleMotionDetection: false,
+        });
+    });
+
+    it("drops devices when the endpoint disconnects", async () => {
+        const { app, serial } = await connected();
+
+        serial.emitFrame("COM4", 'i0:{"model":"mc3s","serial no":"A2E987"}');
+        assert.equal(app.getDevices().length, 1);
+
+        await app.disconnect("COM4");
+        assert.deepEqual(app.getDevices(), []);
+    });
+
+    it("survives a malformed packet without throwing", async () => {
+        const { app, serial } = await connected();
+
+        serial.emitFrame("COM4", "x0:not-valid-base64!!");
+        assert.deepEqual(app.getDevices(), []);
     });
 });

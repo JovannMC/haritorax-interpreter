@@ -1,4 +1,4 @@
-import type { ConnectionKind, DeviceDescriptor, DisconnectReason, Unsubscribe } from "../types.js";
+import type { ConnectionKind, EndpointDescriptor, DisconnectReason, Unsubscribe } from "../types.js";
 
 export interface Frame {
     // the endpoint the bytes came from - a BLE local name or a serial path
@@ -15,7 +15,7 @@ export interface Connection {
     readonly kind: ConnectionKind;
 
     // what this connection can see (connected or not) - BLE peripherals or serial ports
-    list(options?: ListOptions): Promise<DeviceDescriptor[]>;
+    list(options?: ListOptions): Promise<EndpointDescriptor[]>;
 
     open(endpointId: string): Promise<void>;
     close(endpointId: string): Promise<void>;

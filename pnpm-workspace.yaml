@@ -1,0 +1,6 @@
+allowBuilds:
+  '@serialport/bindings-cpp': true
+  '@stoprocent/bluetooth-hci-socket': true
+  '@stoprocent/noble': true
+  usb: true
+  usocket: true

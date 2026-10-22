@@ -134,3 +134,4 @@ data.txt
 # reverse-engineering captures and local traces
 testing
 .coverage
+rawdata-*.log

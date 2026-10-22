@@ -2,7 +2,7 @@ import { HaritoraXError } from "../../lib/errors.js";
 import { Logger } from "../../lib/logging.js";
 import { asciiDecode, asciiEncode, splitLines } from "../../protocol/framing.js";
 import type { Connection, Frame, ListOptions } from "../contract.js";
-import type { DeviceDescriptor, DisconnectReason, Unsubscribe } from "../../types.js";
+import type { EndpointDescriptor, DisconnectReason, Unsubscribe } from "../../types.js";
 
 export interface SerialPort {
     readonly isOpen: boolean;
@@ -69,7 +69,7 @@ export class SerialConnection implements Connection {
         this.#heartbeatMs = options.heartbeatIntervalMs ?? HEARTBEAT_MS;
     }
 
-    async list(options?: ListOptions): Promise<DeviceDescriptor[]> {
+    async list(options?: ListOptions): Promise<EndpointDescriptor[]> {
         if (options?.signal?.aborted) return [];
 
         const ports = await this.#backend.list().catch((error: unknown) => {
