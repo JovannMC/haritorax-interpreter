@@ -13,6 +13,7 @@ import {
     parsePairingResult,
     parseTrackerId,
     setChannelCommand,
+    splitDongleImu,
     unpairCommands,
 } from "../dist/protocol/dongle.js";
 
@@ -122,6 +123,41 @@ describe("dongle protocol", () => {
         assert.equal(parseTrackerId("110070200000"), "7");
         assert.equal(parseTrackerId("110080200100"), "8");
         assert.equal(parseTrackerId("110000200000"), undefined);
+    });
+
+    it("splits a dongle IMU payload into one or two slices", () => {
+        const single = "QAV1/Is6EBngAaf/bAkCAA==";
+        assert.deepEqual(splitDongleImu(single, 1), [{ payload: single, role: "ankle", index: 0 }]);
+
+        const leg = decodeBase64(single);
+        const combo = new Uint8Array(30);
+        combo.set(leg.slice(0, 14), 0);
+        combo[14] = 3;
+        combo[15] = 1;
+        combo.set(leg.slice(0, 14), 16);
+        const payload = encodeBase64(combo);
+
+        // a 30-byte payload on a 1-tracker device stays whole (v3 behaviour)
+        assert.deepEqual(splitDongleImu(payload, 1), [{ payload, role: "ankle", index: 0 }]);
+
+        const slices = splitDongleImu(payload, 2);
+        assert.equal(slices.length, 2);
+        assert.deepEqual(
+            slices.map((slice) => slice.role),
+            ["ankle", "knee"],
+        );
+        assert.deepEqual(
+            slices.map((slice) => slice.index),
+            [0, 1],
+        );
+        assert.deepEqual(
+            slices.map((slice) => slice.magByte),
+            [3, 1],
+        );
+
+        const [first] = slices;
+        assert.ok(first);
+        assert.equal(decodeBase64(first.payload).length, 14);
     });
 
     it("maps tracker ids to body parts", () => {
@@ -276,7 +312,7 @@ describe("tracker lifecycle", () => {
     it("times out a tracker after 10 s without data", async () => {
         const { app, serial } = await connected();
 
-        mock.timers.enable({ apis: ["setTimeout"] });
+        mock.timers.enable({ apis: ["setTimeout", "Date"] });
         try {
             serial.emitFrame(INFO);
 
@@ -296,7 +332,7 @@ describe("tracker lifecycle", () => {
     it("reconnects a timed-out tracker on the next sample", async () => {
         const { app, serial } = await connected();
 
-        mock.timers.enable({ apis: ["setTimeout"] });
+        mock.timers.enable({ apis: ["setTimeout", "Date"] });
         try {
             serial.emitFrame(INFO);
             mock.timers.tick(10_000);

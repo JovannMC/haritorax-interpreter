@@ -1,4 +1,5 @@
-import type { BatteryInfo, FpsMode, SensorAutoCorrection, SensorMode, TrackerSettings } from "../types.js";
+import { HaritoraXError } from "../lib/errors.js";
+import type { BatteryInfo, FpsMode, SensorAutoCorrection, SensorMode, TrackerModel, TrackerSettings } from "../types.js";
 
 export interface ParsedInfo {
     version: string;
@@ -58,4 +59,11 @@ export function decodeSettings(payload: string): TrackerSettings | undefined {
     );
 
     return { sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection };
+}
+
+export function modelFromFirmware(model: string): TrackerModel {
+    if (model === "mc2") return "wired";
+    else if (model === "mc3s") return "wireless";
+    else if (model === "mc4b") return "x2";
+    else throw new HaritoraXError("DECODE_FAILED", `Unknown firmware model "${model}"`);
 }

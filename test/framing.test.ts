@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { asciiDecode, parseLine } from "../dist/protocol/framing.js";
+import { asciiDecode, parseIdentifier, parseLine } from "../dist/protocol/framing.js";
 
 describe("serial framing", () => {
     it("splits identifier from payload", () => {
@@ -36,6 +36,13 @@ describe("serial framing", () => {
 
     it("extracts the dongle slot from an identifier", () => {
         assert.equal(parseLine(asciiEncode("X1:AA")).identifier, "x1");
+    });
+
+    it("splits an identifier into name and slot", () => {
+        assert.deepEqual(parseIdentifier("x1"), { name: "x", slot: "1" });
+        assert.deepEqual(parseIdentifier("i"), { name: "i", slot: undefined });
+        assert.equal(parseIdentifier("x1y"), undefined);
+        assert.equal(parseIdentifier(""), undefined);
     });
 
     it("decodes ASCII without TextDecoder", () => {

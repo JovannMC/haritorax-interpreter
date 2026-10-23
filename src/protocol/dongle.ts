@@ -1,4 +1,5 @@
-import type { BodyPart } from "../types.js";
+import { fromByteArray as encodeBase64, toByteArray as decodeBase64 } from "base64-js";
+import type { BodyPart, ImuRole } from "../types.js";
 
 const TRACKER_PARTS: Readonly<Record<string, BodyPart>> = Object.freeze({
     "1": "chest",
@@ -47,6 +48,27 @@ export function parsePairingResult(payload: string): boolean {
 export function parseTrackerId(payload: string): string | undefined {
     const id = payload.charAt(4).toLowerCase();
     return id !== "" && id !== "0" ? id : undefined;
+}
+
+export interface DongleImuSlice {
+    payload: string;
+    role: ImuRole;
+    index: number;
+    magByte?: number;
+}
+
+// one 14-byte IMU packet or a 30-byte packet carrying two IMUs (leg + thigh)
+export function splitDongleImu(payload: string, trackerCount: number): DongleImuSlice[] {
+    const bytes = decodeBase64(payload);
+
+    if (bytes.length >= 30 && trackerCount >= 2) {
+        return [
+            { payload: encodeBase64(bytes.slice(0, 14)), role: "ankle", index: 0, magByte: bytes[14] },
+            { payload: encodeBase64(bytes.slice(16, 30)), role: "knee", index: 1, magByte: bytes[15] },
+        ];
+    }
+
+    return [{ payload, role: "ankle", index: 0 }];
 }
 
 export function bodyPartOfTracker(trackerId: string): BodyPart | undefined {

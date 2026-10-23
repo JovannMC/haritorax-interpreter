@@ -27,6 +27,21 @@ export function parseLine(bytes: Uint8Array): LineFrame {
     };
 }
 
+export interface ParsedIdentifier {
+    name: string;
+    slot: string | undefined;
+}
+
+// e.g. x1 -> { name: "x", slot: "1" }
+export function parseIdentifier(identifier: string): ParsedIdentifier | undefined {
+    const match = /^([a-z]+)(\d*)$/.exec(identifier);
+    const name = match?.[1];
+    if (!name) return undefined;
+
+    const slot = match?.[2];
+    return { name, slot: slot ? slot : undefined };
+}
+
 const LF = 0x0a;
 const CR = 0x0d;
 
