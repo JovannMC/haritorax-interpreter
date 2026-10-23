@@ -192,6 +192,7 @@ export class DeviceRegistry {
     setSettings(deviceId: string, settings: TrackerSettings): void {
         const device = this.#devices.get(deviceId);
         if (!device) return;
+        if (device.settings && settingsEqual(device.settings, settings)) return;
 
         device.settings = settings;
         this.#emitter.emit("settings", { deviceId, settings });
@@ -361,6 +362,23 @@ export class DeviceRegistry {
 
 export function endpointSlotKey(endpointId: string, slot: string): string {
     return `${endpointId}:${slot}`;
+}
+
+function settingsEqual(a: TrackerSettings, b: TrackerSettings): boolean {
+    return (
+        a.sensorMode === b.sensorMode &&
+        a.fpsMode === b.fpsMode &&
+        a.ankleMotionDetection === b.ankleMotionDetection &&
+        correctionBits(a) === correctionBits(b)
+    );
+}
+
+function correctionBits(settings: TrackerSettings): number {
+    let bits = 0;
+    if (settings.sensorAutoCorrection.includes("accel")) bits |= 1;
+    if (settings.sensorAutoCorrection.includes("gyro")) bits |= 2;
+    if (settings.sensorAutoCorrection.includes("mag")) bits |= 4;
+    return bits;
 }
 
 function clearTrackerTimeout(state: TrackerState): void {

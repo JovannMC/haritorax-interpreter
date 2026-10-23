@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { decodeImu } from "../dist/protocol/imu.js";
+import { decodeImu, magStatusFromByte } from "../dist/protocol/imu.js";
 import { fromByteArray as encodeBase64, toByteArray as decodeBase64 } from "base64-js";
-import { decodeSettings, parseBattery, parseInfo } from "../dist/protocol/messages.js";
+import { decodeSettings, modelFromFirmware, parseBattery, parseInfo } from "../dist/protocol/messages.js";
 
 interface Fixture {
     model: "wireless" | "x2" | "wired";
@@ -72,6 +72,18 @@ describe("IMU packet quirks", () => {
         assert.equal(decodeImu(payload, "x2", 0)?.magStatus, "veryBad");
         assert.equal(decodeImu(payload, "x2", 9)?.magStatus, "unknown");
     });
+
+    it("maps wired mag bytes", () => {
+        assert.equal(magStatusFromByte(0), "veryBad");
+        assert.equal(magStatusFromByte(1), "bad");
+        assert.equal(magStatusFromByte(2), "okay");
+        assert.equal(magStatusFromByte(3), "great");
+        assert.equal(magStatusFromByte(9), "unknown");
+    });
+
+    it("does not derive wired mag from the packet", () => {
+        assert.equal(decodeImu("QAV1/Is6EBngAaf/bAkCAA==", "wired")?.magStatus, undefined);
+    });
 });
 
 describe("base64", () => {
@@ -107,6 +119,16 @@ describe("messages", () => {
     it("returns undefined for malformed info", () => {
         assert.equal(parseInfo("not json"), undefined);
         assert.equal(parseInfo('{"version":"1.0.0"}'), undefined);
+    });
+
+    it("maps firmware models case-insensitively", () => {
+        assert.equal(modelFromFirmware("MC1"), "wired");
+        assert.equal(modelFromFirmware("mc2"), "wired");
+        assert.equal(modelFromFirmware("MC2"), "wired");
+        assert.equal(modelFromFirmware("MC2B"), "wired");
+        assert.equal(modelFromFirmware("mc3s"), "wireless");
+        assert.equal(modelFromFirmware("MC4B"), "x2");
+        assert.throws(() => modelFromFirmware("nope"), /Unknown firmware model/);
     });
 
     it("parses battery and normalises the charge status", () => {

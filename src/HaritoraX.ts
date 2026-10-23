@@ -3,10 +3,13 @@ import { Logger, type LogSink } from "./lib/logging.js";
 import { Emitter } from "./lib/emitter.js";
 import { DeviceRegistry } from "./core/device-registry.js";
 import { DongleController } from "./core/dongle-controller.js";
+import { WiredController } from "./core/wired-controller.js";
+import type { ProtocolHandler } from "./core/protocol-handler.js";
 import { asciiEncode, parseIdentifier, parseLine } from "./protocol/framing.js";
 import type { Connection, Frame, ListOptions } from "./connections/contract.js";
 import type {
     BodyPart,
+    ConnectionKind,
     EndpointDescriptor,
     DisconnectReason,
     EventHandler,
@@ -14,6 +17,7 @@ import type {
     LogLevel,
     DeviceSnapshot,
     TrackerSnapshot,
+    TrackerSettings,
     Unsubscribe,
 } from "./types.js";
 
@@ -23,6 +27,8 @@ export class HaritoraX {
     readonly #connections: Connection[];
     readonly #registry: DeviceRegistry;
     readonly #dongle: DongleController;
+    readonly #wired: WiredController;
+    readonly #handlers = new Map<string, ProtocolHandler>();
 
     #endpoints: EndpointDescriptor[] = [];
     readonly #endpointOwners = new Map<string, Connection>();
@@ -44,15 +50,24 @@ export class HaritoraX {
             this.#log.error(`Listener for "${event}" threw`, { error: String(error) });
         });
 
+        const connectionKind = (endpointId: string): ConnectionKind => this.#endpointOwners.get(endpointId)?.kind ?? "serial";
+
         this.#registry = new DeviceRegistry({ emitter: this.#emitter, log: this.#log });
         this.#dongle = new DongleController({
             emitter: this.#emitter,
             log: this.#log,
             registry: this.#registry,
             isOpen: (endpointId) => this.#open.has(endpointId),
-            connectionKind: (endpointId) => this.#endpointOwners.get(endpointId)?.kind ?? "serial",
+            connectionKind,
             write: (endpointId, command) => this.#writeCommand(endpointId, command),
             onChannel: (endpointId, channel) => this.#applyChannel(endpointId, channel),
+        });
+        this.#wired = new WiredController({
+            emitter: this.#emitter,
+            log: this.#log,
+            registry: this.#registry,
+            connectionKind,
+            write: (endpointId, command) => this.#writeCommand(endpointId, command),
         });
 
         for (const connection of this.#connections) {
@@ -85,11 +100,13 @@ export class HaritoraX {
 
         const merged = new Map<string, EndpointDescriptor>();
         this.#endpointOwners.clear();
+        this.#handlers.clear();
 
         for (const { connection, found } of results) {
             for (const descriptor of found) {
                 merged.set(descriptor.id, descriptor);
                 this.#endpointOwners.set(descriptor.id, connection);
+                this.#handlers.set(descriptor.id, descriptor.model === "wired" ? this.#wired : this.#dongle);
             }
         }
 
@@ -130,6 +147,28 @@ export class HaritoraX {
 
     getBodyPart(trackerId: string): BodyPart | undefined {
         return this.#registry.getBodyPart(trackerId);
+    }
+
+    /*
+     * device control
+     */
+
+    async setSettings(deviceId: string, settings: TrackerSettings): Promise<void> {
+        const device = this.#registry.getDevice(deviceId);
+        if (!device) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown device "${deviceId}"`);
+        if (!this.#open.has(device.endpointId))
+            throw new HaritoraXError("NOT_CONNECTED", `${device.endpointId} is not connected`);
+
+        if (device.model === "wired") {
+            const endpointIds = this.#endpoints
+                .filter((endpoint) => endpoint.model === "wired" && this.#open.has(endpoint.id))
+                .map((endpoint) => endpoint.id);
+
+            await this.#wired.setSettings(endpointIds, settings);
+            return;
+        }
+
+        await this.#dongle.setSettings(device.endpointId, device.slot, settings);
     }
 
     /*
@@ -188,6 +227,7 @@ export class HaritoraX {
         this.#discovery?.abort();
         this.#discovery = undefined;
         this.#dongle.dispose();
+        this.#wired.dispose();
 
         for (const unsubscribe of this.#subscriptions) unsubscribe();
         this.#subscriptions.length = 0;
@@ -204,6 +244,7 @@ export class HaritoraX {
         this.#open.clear();
         this.#endpoints = [];
         this.#endpointOwners.clear();
+        this.#handlers.clear();
         this.#registry.dispose();
         this.#log.info("Disposed");
     }
@@ -234,7 +275,8 @@ export class HaritoraX {
             const parsed = parseIdentifier(identifier);
             if (!parsed) return;
 
-            this.#dongle.handleFrame(frame.endpointId, parsed.name, parsed.slot, payload);
+            const handler = this.#handlers.get(frame.endpointId) ?? this.#dongle;
+            handler.handleFrame(frame.endpointId, parsed.name, parsed.slot, payload);
         } catch (error) {
             this.#log.warn(`Failed to handle "${identifier || "(unknown)"}" from ${frame.endpointId}`, {
                 error: String(error),
@@ -259,7 +301,8 @@ export class HaritoraX {
 
     #dropEndpoint(endpointId: string, reason: DisconnectReason): void {
         this.#registry.removeDevicesAtEndpoint(endpointId, reason);
-        this.#dongle.forgetEndpoint(endpointId);
+        const handler = this.#handlers.get(endpointId) ?? this.#dongle;
+        handler.forgetEndpoint(endpointId);
         this.#emitter.emit("endpoint:disconnected", { endpointId, reason });
     }
 

@@ -1,5 +1,5 @@
 import { fromByteArray as encodeBase64, toByteArray as decodeBase64 } from "base64-js";
-import type { BodyPart, ImuRole } from "../types.js";
+import type { BodyPart, ImuRole, TrackerSettings } from "../types.js";
 
 const TRACKER_PARTS: Readonly<Record<string, BodyPart>> = Object.freeze({
     "1": "chest",
@@ -110,4 +110,20 @@ export function unpairCommands(channel: number, slot: "0" | "1"): readonly strin
     if (slot === "0") return Object.freeze([`o:30${channel.toString(16)}1`, setChannelCommand(channel)]);
 
     return Object.freeze([`o:30${channel.toString(16)}2`, setChannelCommand(channel)]);
+}
+
+// sending "o(x):00000" + fps + sensor mode + "010" + auto-correction + "00" + ankle motion detection
+// e.g. "o0:0000010100000" for 100fps, sensor mode 1, no auto-correction, no ankle motion detection, for slot 0
+// yea this is just how settings are lol
+export function dongleSettingsCommand(slot: string, settings: TrackerSettings): string {
+    let correctionBits = 0;
+    if (settings.sensorAutoCorrection.includes("accel")) correctionBits |= 1;
+    if (settings.sensorAutoCorrection.includes("gyro")) correctionBits |= 2;
+    if (settings.sensorAutoCorrection.includes("mag")) correctionBits |= 4;
+
+    const fpsBit = settings.fpsMode === 100 ? 1 : 0;
+    const sensorBit = settings.sensorMode === 1 ? 1 : 0;
+    const ankleBit = settings.ankleMotionDetection ? 1 : 0;
+
+    return `o${slot}:00000${fpsBit}${sensorBit}010${correctionBits}00${ankleBit}`;
 }

@@ -62,8 +62,9 @@ export function decodeSettings(payload: string): TrackerSettings | undefined {
 }
 
 export function modelFromFirmware(model: string): TrackerModel {
-    if (model === "mc2") return "wired";
-    else if (model === "mc3s") return "wireless";
-    else if (model === "mc4b") return "x2";
+    const firmware = model.toLowerCase();
+    if (firmware === "mc1" || firmware === "mc2" || firmware === "mc2b") return "wired";
+    else if (firmware === "mc3s") return "wireless";
+    else if (firmware === "mc4b") return "x2";
     else throw new HaritoraXError("DECODE_FAILED", `Unknown firmware model "${model}"`);
 }

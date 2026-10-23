@@ -16,7 +16,7 @@ export type BodyPart =
     | "rightFoot"
     | "unassigned";
 
-export type ImuRole = "ankle" | "knee";
+export type ImuRole = "ankle" | "knee" | "single";
 
 export interface Vector {
     x: number;
@@ -160,7 +160,7 @@ export interface Events {
     identified: { trackerId: string; deviceId: string; bodyPart: BodyPart };
     paired: { endpointId: string; slot: string };
     unpaired: { endpointId: string; slot: string };
-    button: { trackerId: string; deviceId: string; button: "main" | "sub" | "sub2" };
+    button: { deviceId: string; trackerId?: string; button: "main" | "sub" | "sub2" };
 }
 
 export type Unsubscribe = () => void;

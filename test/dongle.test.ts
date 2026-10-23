@@ -3,10 +3,11 @@ import { describe, it, mock } from "node:test";
 import { fromByteArray as encodeBase64, toByteArray as decodeBase64 } from "base64-js";
 import { createHaritoraX } from "../dist/index.js";
 import type { Frame, ListOptions } from "../dist/connections/contract.js";
-import type { DisconnectReason, Unsubscribe } from "../dist/types.js";
+import type { DisconnectReason, TrackerSettings, Unsubscribe } from "../dist/types.js";
 import {
     bodyPartOfTracker,
     bodyPartsFor,
+    dongleSettingsCommand,
     isDongleSlot,
     pairCommands,
     parseChannel,
@@ -102,6 +103,7 @@ async function connected() {
 
 const INFO = 'i0:{"version":"1.0.22","model":"mc3s","imu_num":1,"serial no":"A2E987"}';
 const INFO_DUAL = 'i0:{"version":"1.0.5","model":"mc4b","imu_num":2,"serial no":"C1MGN3"}';
+const INFO_SLOT_1 = 'i1:{"version":"1.0.22","model":"mc3s","imu_num":1,"serial no":"B3F001"}';
 
 describe("dongle protocol", () => {
     it("reads the RF channel from o:", () => {
@@ -192,6 +194,28 @@ describe("dongle protocol", () => {
         assert.deepEqual(unpairCommands(4, "0"), ["o:3041", "o:3040"]);
         assert.deepEqual(unpairCommands(10, "1"), ["o:30a2", "o:30a0"]);
     });
+
+    it("builds the v3 settings bitstring", () => {
+        assert.equal(
+            dongleSettingsCommand("0", {
+                sensorMode: 1,
+                fpsMode: 100,
+                sensorAutoCorrection: ["accel", "gyro"],
+                ankleMotionDetection: true,
+            }),
+            "o0:00000110103001",
+        );
+
+        assert.equal(
+            dongleSettingsCommand("1", {
+                sensorMode: 2,
+                fpsMode: 50,
+                sensorAutoCorrection: [],
+                ankleMotionDetection: false,
+            }),
+            "o1:00000000100000",
+        );
+    });
 });
 
 describe("dongle channel", () => {
@@ -223,6 +247,57 @@ describe("dongle channel", () => {
         const error = await app.setChannel("COM4", 11).catch((err: unknown) => err);
 
         assert.equal((error as { code?: string }).code, "NOT_SUPPORTED");
+    });
+});
+
+describe("settings writing", () => {
+    it("writes the v3 bitstring to the device's slot", async () => {
+        const { app, serial } = await connected();
+        serial.emitFrame(INFO);
+        serial.emitFrame(INFO_SLOT_1);
+
+        const first: TrackerSettings = {
+            sensorMode: 1,
+            fpsMode: 100,
+            sensorAutoCorrection: ["accel", "gyro"],
+            ankleMotionDetection: true,
+        };
+        const second: TrackerSettings = {
+            sensorMode: 2,
+            fpsMode: 50,
+            sensorAutoCorrection: [],
+            ankleMotionDetection: false,
+        };
+
+        const events: TrackerSettings[] = [];
+        app.on("settings", (event) => events.push(event.settings));
+
+        await app.setSettings("A2E987", first);
+        await app.setSettings("B3F001", second);
+
+        // the dongle echoes the applied settings; unchanged values must not emit again
+        serial.emitFrame("o0:00000110103001");
+        serial.emitFrame("o1:00000000100000");
+
+        assert.deepEqual(serial.writes, ["COM4:o0:00000110103001", "COM4:o1:00000000100000"]);
+        assert.deepEqual(app.getDevice("A2E987")?.settings, first);
+        assert.deepEqual(app.getDevice("B3F001")?.settings, second);
+        assert.deepEqual(events, [first, second]);
+    });
+
+    it("rejects settings for an unknown device", async () => {
+        const { app } = await connected();
+
+        const error = await app
+            .setSettings("missing", {
+                sensorMode: 1,
+                fpsMode: 100,
+                sensorAutoCorrection: [],
+                ankleMotionDetection: false,
+            })
+            .catch((err: unknown) => err);
+
+        assert.equal((error as { code?: string }).code, "DEVICE_NOT_FOUND");
     });
 });
 

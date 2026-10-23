@@ -33,6 +33,10 @@ const MAG_BY_BYTE: Readonly<Record<number, MagStatus>> = Object.freeze({
     3: "great",
 });
 
+export function magStatusFromByte(value: number): MagStatus {
+    return MAG_BY_BYTE[value] ?? "unknown";
+}
+
 export interface DecodedImu {
     rotation: Quaternion;
     acceleration: Vector;
@@ -61,8 +65,10 @@ export function decodeImu(base64: string, model: TrackerModel, magByte?: number)
     const ankleAngle = base64.slice(-2) === "==" ? undefined : view.getUint16(bytes.length - 2, true);
     const magStatus =
         magByte !== undefined
-            ? (MAG_BY_BYTE[magByte] ?? "unknown")
-            : (MAG_BY_CHAR[base64.charAt(base64.length - 5)] ?? "veryBad");
+            ? magStatusFromByte(magByte)
+            : model === "wired"
+              ? undefined
+              : (MAG_BY_CHAR[base64.charAt(base64.length - 5)] ?? "veryBad");
 
     const rc = [rotation.w, rotation.x, rotation.y, rotation.z] as const;
     const r = [rc[0], -rc[1], -rc[2], -rc[3]] as const;

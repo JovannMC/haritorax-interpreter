@@ -6,6 +6,7 @@ import { PairingTracker } from "./pairing.js";
 import {
     bodyPartOfTracker,
     bodyPartsFor,
+    dongleSettingsCommand,
     isDongleSlot,
     isValidChannel,
     pairCommands,
@@ -18,7 +19,7 @@ import {
 } from "../protocol/dongle.js";
 import { decodeImu } from "../protocol/imu.js";
 import { decodeSettings, modelFromFirmware, parseBattery, parseInfo } from "../protocol/messages.js";
-import type { BodyPart, ConnectionKind, DeviceSnapshot, ImuRole } from "../types.js";
+import type { BodyPart, ConnectionKind, DeviceSnapshot, ImuRole, TrackerSettings } from "../types.js";
 
 const PLACEHOLDER_SERIAL = "A00000";
 const PAIRING_COMMAND_DELAY_MS = 1_000;
@@ -118,6 +119,19 @@ export class DongleController {
 
         await this.#write(endpointId, setChannelCommand(channel));
         this.#updateChannel(endpointId, channel);
+    }
+
+    async setSettings(endpointId: string, slot: string, settings: TrackerSettings): Promise<void> {
+        if (!this.#isOpen(endpointId)) {
+            throw new HaritoraXError("NOT_CONNECTED", `${endpointId} is not connected`);
+        }
+
+        await this.#write(endpointId, dongleSettingsCommand(slot, settings));
+
+        const device = this.#registry.deviceAt(endpointId, slot);
+        if (device) this.#registry.setSettings(device.deviceId, settings);
+
+        this.#log.info(`Applied settings to ${endpointId}:${slot}`);
     }
 
     /*

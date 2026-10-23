@@ -18,6 +18,9 @@ export interface PortSummary {
     path: string;
     vendorId?: string | null;
     productId?: string | null;
+    manufacturer?: string | null;
+    pnpId?: string | null;
+    serialNumber?: string | null;
 }
 
 export interface SerialBackend {
@@ -28,6 +31,7 @@ export interface SerialBackend {
 export interface SerialOptions {
     logger?: Logger;
     heartbeatIntervalMs?: number;
+    includeWired?: boolean;
 }
 
 const DONGLE_IDS: Readonly<Record<string, "GX6" | "GX2">> = Object.freeze({
@@ -39,7 +43,8 @@ const OPEN_COMMANDS = Object.freeze(["r0:", "r1:", "r:", "o:"]);
 const DELAYED_COMMANDS = Object.freeze(["i:", "i0:", "i1:", "o0:", "o1:", "v0:", "v1:"]);
 const DELAYED_MS = 1_500;
 
-const HEARTBEAT = Object.freeze(["i:"]);
+const DONGLE_HEARTBEAT = Object.freeze(["i:"]);
+const WIRED_HEARTBEAT = Object.freeze(["report send info\nblt send info"]);
 const HEARTBEAT_MS = 5_000;
 
 const MAX_PENDING_BYTES = 64 * 1024;
@@ -58,8 +63,10 @@ export class SerialConnection implements Connection {
     readonly #backend: SerialBackend;
     readonly #log: Logger;
     readonly #heartbeatMs: number;
+    readonly #includeWired: boolean;
 
     readonly #ports = new Map<string, OpenPort>();
+    readonly #wiredEndpoints = new Set<string>();
     readonly #dataHandlers = new Set<(frame: Frame) => void>();
     readonly #lostHandlers = new Set<(endpointId: string, reason: DisconnectReason) => void>();
 
@@ -67,6 +74,7 @@ export class SerialConnection implements Connection {
         this.#backend = backend;
         this.#log = options.logger ?? new Logger("silent");
         this.#heartbeatMs = options.heartbeatIntervalMs ?? HEARTBEAT_MS;
+        this.#includeWired = options.includeWired ?? false;
     }
 
     async list(options?: ListOptions): Promise<EndpointDescriptor[]> {
@@ -77,11 +85,25 @@ export class SerialConnection implements Connection {
             throw new HaritoraXError("LINK_UNAVAILABLE", "Failed to enumerate serial ports", { cause: error });
         });
 
-        return ports.flatMap((port) => {
+        return ports.flatMap((port): EndpointDescriptor[] => {
             const dongle = DONGLE_IDS[`${port.vendorId}:${port.productId}`.toLowerCase()];
-            if (!dongle) return [];
+            if (dongle) {
+                return [{ id: port.path, connection: this.kind, displayName: `${dongle} (${port.path})`, dongle }];
+            }
 
-            return [{ id: port.path, connection: this.kind, displayName: `${dongle} (${port.path})`, dongle }];
+            if (this.#includeWired && isWiredPort(port)) {
+                this.#wiredEndpoints.add(port.path);
+                return [
+                    {
+                        id: port.path,
+                        connection: this.kind,
+                        displayName: `HaritoraX Wired (${port.path})`,
+                        model: "wired" as const,
+                    },
+                ];
+            }
+
+            return [];
         });
     }
 
@@ -104,7 +126,8 @@ export class SerialConnection implements Connection {
         entry.timers.push(setTimeout(() => this.#send(endpointId, DELAYED_COMMANDS), DELAYED_MS));
 
         if (this.#heartbeatMs > 0) {
-            entry.timers.push(setInterval(() => this.#send(endpointId, HEARTBEAT), this.#heartbeatMs));
+            const heartbeat = this.#wiredEndpoints.has(endpointId) ? WIRED_HEARTBEAT : DONGLE_HEARTBEAT;
+            entry.timers.push(setInterval(() => this.#send(endpointId, heartbeat), this.#heartbeatMs));
         }
     }
 
@@ -194,4 +217,14 @@ export class SerialConnection implements Connection {
         this.#log.warn(`Lost ${endpointId}`);
         for (const handler of [...this.#lostHandlers]) handler(endpointId, "remote");
     }
+}
+
+// TODO: ts likely isnt it lol, i need to collect real data again
+// letting the AI do this for now while i need to collect real data unhmgsgklnmm
+function isWiredPort(port: PortSummary): boolean {
+    const path = port.path.toLowerCase();
+    if (path.startsWith("/dev/rfcomm") || path.includes("haritora")) return true;
+
+    const name = `${port.manufacturer ?? ""} ${port.pnpId ?? ""} ${port.serialNumber ?? ""}`.toLowerCase();
+    return name.includes("haritora");
 }

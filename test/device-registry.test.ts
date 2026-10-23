@@ -3,6 +3,7 @@ import { describe, it, mock } from "node:test";
 import { DeviceRegistry, type DeviceRegistration } from "../dist/core/device-registry.js";
 import { Emitter } from "../dist/lib/emitter.js";
 import { Logger } from "../dist/lib/logging.js";
+import type { TrackerSettings } from "../dist/types.js";
 
 function create() {
     const emitter = new Emitter();
@@ -118,5 +119,29 @@ describe("device registry", () => {
         } finally {
             mock.timers.reset();
         }
+    });
+
+    it("emits settings only when they change", () => {
+        const { emitter, registry } = create();
+        registry.register(registration());
+
+        const events: TrackerSettings[] = [];
+        emitter.on("settings", ({ settings }) => events.push(settings));
+
+        const settings: TrackerSettings = {
+            sensorMode: 1,
+            fpsMode: 100,
+            sensorAutoCorrection: ["accel", "gyro"],
+            ankleMotionDetection: true,
+        };
+
+        registry.setSettings("A2E987", settings);
+        // same values, different array order
+        registry.setSettings("A2E987", { ...settings, sensorAutoCorrection: ["gyro", "accel"] });
+        registry.setSettings("A2E987", { ...settings, fpsMode: 50 });
+
+        assert.equal(events.length, 2);
+        assert.deepEqual(events[0], settings);
+        assert.equal(events[1]?.fpsMode, 50);
     });
 });

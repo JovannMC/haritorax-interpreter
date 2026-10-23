@@ -87,6 +87,33 @@ describe("serial connection", () => {
         assert.equal(found[0]?.displayName, "GX6 (COM3)");
     });
 
+    it("lists wired SPP ports when includeWired is enabled", async () => {
+        const ports: PortSummary[] = [
+            { path: "/dev/rfcomm0" },
+            { path: "COM7", manufacturer: "HaritoraX" },
+            { path: "COM8", manufacturer: "Other" },
+            { path: "COM9", serialNumber: "HaritoraX-0506200" },
+        ];
+
+        const without = createSerialConnection({ backend: backendWith(ports) });
+        assert.deepEqual(
+            (await without.list()).map((descriptor) => descriptor.id),
+            [],
+        );
+
+        const withWired = createSerialConnection({ backend: backendWith(ports), includeWired: true });
+        const found = await withWired.list();
+
+        assert.deepEqual(
+            found.map((descriptor) => [descriptor.id, descriptor.model]),
+            [
+                ["/dev/rfcomm0", "wired"],
+                ["COM7", "wired"],
+                ["COM9", "wired"],
+            ],
+        );
+    });
+
     it("honours an already-aborted signal", async () => {
         const controller = new AbortController();
         controller.abort();
@@ -246,6 +273,24 @@ describe("serial connection", () => {
 
         // The interval must not survive close; v3 leaked exactly this.
         assert.equal(port.written.length, afterClose);
+    });
+
+    it("uses the wired heartbeat for wired endpoints", async () => {
+        const port = new FakePort();
+        const connection = createSerialConnection({
+            backend: backendWith([{ path: "/dev/rfcomm0" }], port),
+            includeWired: true,
+            heartbeatIntervalMs: 20,
+        });
+
+        const found = await connection.list();
+        assert.equal(found[0]?.model, "wired");
+
+        await connection.open("/dev/rfcomm0");
+        await new Promise((resolve) => setTimeout(resolve, 70));
+        assert.ok(port.written.filter((line) => line === "\nreport send info\nblt send info\n").length >= 2);
+
+        await connection.close("/dev/rfcomm0");
     });
 });
 
