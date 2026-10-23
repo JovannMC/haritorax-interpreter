@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it, mock } from "node:test";
 import { fromByteArray as encodeBase64, toByteArray as decodeBase64 } from "base64-js";
 import { createHaritoraX } from "../dist/index.js";
 import type { Frame, ListOptions } from "../dist/connections/contract.js";
@@ -200,9 +200,9 @@ describe("tracker identity", () => {
         serial.emitFrame(INFO);
         serial.emitFrame("r0:110070200000");
 
-        assert.equal(app.getDevice("COM4:0")?.trackerId, "7");
-        assert.deepEqual(app.getDevice("COM4:0")?.bodyParts, ["leftElbow"]);
-        assert.deepEqual(identified, [{ deviceId: "COM4:0", trackerId: "7", bodyPart: "leftElbow" }]);
+        assert.equal(app.getDevice("A2E987")?.trackers[0]?.bodyPart, "leftElbow");
+        assert.equal(app.getBodyPart("A2E987:0"), "leftElbow");
+        assert.deepEqual(identified, [{ trackerId: "A2E987:0", deviceId: "A2E987", bodyPart: "leftElbow" }]);
     });
 
     it("keeps an identity that arrived before info", async () => {
@@ -210,11 +210,11 @@ describe("tracker identity", () => {
 
         // Identity alone does not create a device.
         serial.emitFrame("r0:110030200000");
-        assert.equal(app.getDevice("COM4:0"), undefined);
+        assert.deepEqual(app.getDevices(), []);
 
         serial.emitFrame(INFO);
-        assert.deepEqual(app.getDevice("COM4:0")?.bodyParts, ["leftAnkle"]);
-        assert.equal(app.getDevice("COM4:0")?.trackerId, "3");
+        assert.equal(app.getBodyPart("A2E987:0"), "leftAnkle");
+        assert.equal(app.getDevice("A2E987")?.trackers[0]?.trackerId, "A2E987:0");
     });
 
     it("assigns both slots on one endpoint independently", async () => {
@@ -225,9 +225,15 @@ describe("tracker identity", () => {
         serial.emitFrame("r0:110070200000");
         serial.emitFrame("r1:110080200100");
 
-        assert.deepEqual(app.getDevice("COM4:0")?.bodyParts, ["leftElbow"]);
-        assert.deepEqual(app.getDevice("COM4:1")?.bodyParts, ["rightElbow"]);
-        assert.notEqual(app.getDevice("COM4:0")?.trackerId, app.getDevice("COM4:1")?.trackerId);
+        assert.equal(app.getBodyPart("A2E987:0"), "leftElbow");
+        assert.equal(app.getBodyPart("A2KUN8:0"), "rightElbow");
+        assert.deepEqual(
+            app
+                .getDevices()
+                .map((device) => device.deviceId)
+                .sort(),
+            ["A2E987", "A2KUN8"],
+        );
     });
 
     it("expands a dual-IMU ankle into ankle + knee samples", async () => {
@@ -236,7 +242,8 @@ describe("tracker identity", () => {
         serial.emitFrame(INFO_DUAL);
         serial.emitFrame("r0:110030200000");
 
-        assert.deepEqual(app.getDevice("COM4:0")?.bodyParts, ["leftAnkle", "leftKnee"]);
+        assert.equal(app.getBodyPart("C1MGN3:0"), "leftAnkle");
+        assert.equal(app.getBodyPart("C1MGN3:1"), "leftKnee");
 
         const leg = decodeBase64("QAV1/Is6EBngAaf/bAkCAA==");
         const combo = new Uint8Array(30);
@@ -245,7 +252,7 @@ describe("tracker identity", () => {
         combo[15] = 1;
         combo.set(leg.slice(0, 14), 16);
 
-        const samples: Array<{ bodyPart: string; role: string }> = [];
+        const samples: Array<{ trackerId: string; bodyPart: string; role: string }> = [];
         app.on("imu", (sample) => samples.push(sample));
 
         serial.emitFrame(`x0:${encodeBase64(combo)}`);
@@ -255,9 +262,70 @@ describe("tracker identity", () => {
             ["leftAnkle", "leftKnee"],
         );
         assert.deepEqual(
+            samples.map((sample) => sample.trackerId),
+            ["C1MGN3:0", "C1MGN3:1"],
+        );
+        assert.deepEqual(
             samples.map((sample) => sample.role),
             ["ankle", "knee"],
         );
+    });
+});
+
+describe("tracker lifecycle", () => {
+    it("times out a tracker after 10 s without data", async () => {
+        const { app, serial } = await connected();
+
+        mock.timers.enable({ apis: ["setTimeout"] });
+        try {
+            serial.emitFrame(INFO);
+
+            const disconnected: Array<{ trackerId: string; deviceId: string; reason: string }> = [];
+            app.on("tracker:disconnected", (event) => disconnected.push(event));
+
+            mock.timers.tick(10_000);
+
+            assert.deepEqual(disconnected, [{ trackerId: "A2E987:0", deviceId: "A2E987", reason: "timeout" }]);
+            assert.equal(app.getTracker("A2E987:0")?.connected, false);
+            assert.equal(app.getDevices().length, 1);
+        } finally {
+            mock.timers.reset();
+        }
+    });
+
+    it("reconnects a timed-out tracker on the next sample", async () => {
+        const { app, serial } = await connected();
+
+        mock.timers.enable({ apis: ["setTimeout"] });
+        try {
+            serial.emitFrame(INFO);
+            mock.timers.tick(10_000);
+
+            const connectedAgain: string[] = [];
+            app.on("tracker:connected", ({ trackerId }) => connectedAgain.push(trackerId));
+
+            serial.emitFrame("x0:QAV1/Is6EBngAaf/bAkCAA==");
+
+            assert.deepEqual(connectedAgain, ["A2E987:0"]);
+            assert.equal(app.getTracker("A2E987:0")?.connected, true);
+        } finally {
+            mock.timers.reset();
+        }
+    });
+
+    it("emits tracker, device and endpoint disconnects in order", async () => {
+        const { app, serial } = await connected();
+        serial.emitFrame(INFO);
+
+        const events: string[] = [];
+        app.on("tracker:disconnected", () => events.push("tracker"));
+        app.on("device:disconnected", () => events.push("device"));
+        app.on("endpoint:disconnected", () => events.push("endpoint"));
+
+        await app.disconnect("COM4");
+
+        assert.deepEqual(events, ["tracker", "device", "endpoint"]);
+        assert.equal(app.getTracker("A2E987:0"), undefined);
     });
 });
 
@@ -266,7 +334,7 @@ describe("pairing", () => {
         const { app, serial } = await connected();
         serial.emitFrame("o:3040");
 
-        const paired: Array<{ endpointId: string; slot: string; deviceId: string }> = [];
+        const paired: Array<{ endpointId: string; slot: string }> = [];
         app.on("paired", (event) => paired.push(event));
 
         const pending = app.pair("COM4", 0);
@@ -274,7 +342,7 @@ describe("pairing", () => {
         await pending;
 
         assert.deepEqual(serial.writes, ["COM4:o:1140", "COM4:o:1040", "COM4:o:3040", "COM4:o:3040", "COM4:r0:"]);
-        assert.deepEqual(paired, [{ endpointId: "COM4", slot: "0", deviceId: "COM4:0" }]);
+        assert.deepEqual(paired, [{ endpointId: "COM4", slot: "0" }]);
     });
 
     it("refuses to pair without a known channel", async () => {
@@ -291,14 +359,13 @@ describe("pairing", () => {
         serial.emitFrame("r0:110070200000");
         serial.emitFrame("o:3040");
 
-        const unpaired: Array<{ endpointId: string; slot: string; deviceId: string }> = [];
+        const unpaired: Array<{ endpointId: string; slot: string }> = [];
         app.on("unpaired", (event) => unpaired.push(event));
 
         await app.unpair("COM4", 0);
 
         assert.deepEqual(serial.writes, ["COM4:o:3041", "COM4:o:3040"]);
-        assert.deepEqual(app.getDevice("COM4:0")?.bodyParts, ["unassigned"]);
-        assert.equal(app.getDevice("COM4:0")?.trackerId, undefined);
-        assert.deepEqual(unpaired, [{ endpointId: "COM4", slot: "0", deviceId: "COM4:0" }]);
+        assert.equal(app.getBodyPart("A2E987:0"), "unassigned");
+        assert.deepEqual(unpaired, [{ endpointId: "COM4", slot: "0" }]);
     });
 });

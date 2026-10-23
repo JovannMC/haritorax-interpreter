@@ -54,7 +54,7 @@ export function decodeSettings(payload: string): TrackerSettings | undefined {
     if (Number.isNaN(correctionBits)) return undefined;
 
     const sensorAutoCorrection: SensorAutoCorrection[] = (["accel", "gyro", "mag"] as const).filter(
-        (_, index) => correctionBits & (1 << index),
+        (_, i) => correctionBits & (1 << i),
     );
 
     return { sensorMode, fpsMode, sensorAutoCorrection, ankleMotionDetection };

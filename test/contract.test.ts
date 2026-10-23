@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { createHaritoraX } from "../dist/index.js";
 import type { Connection, Frame, ListOptions } from "../dist/connections/contract.js";
 import { fromByteArray as encodeBase64, toByteArray as decodeBase64 } from "base64-js";
-import type { BatteryInfo, DeviceDescriptor, DisconnectReason, Unsubscribe } from "../dist/types.js";
+import type { BatteryInfo, EndpointDescriptor, DisconnectReason, Unsubscribe } from "../dist/types.js";
 
 /** In-memory connection: the reference implementation of the contract. */
 function memoryConnection(endpoints: string[] = ["COM4"]) {
@@ -15,7 +15,7 @@ function memoryConnection(endpoints: string[] = ["COM4"]) {
         kind: "serial" as const,
         opened,
 
-        list(_options?: ListOptions): Promise<DeviceDescriptor[]> {
+        list(_options?: ListOptions): Promise<EndpointDescriptor[]> {
             return Promise.resolve(
                 endpoints.map((id) => ({ id, connection: "serial" as const, displayName: id, dongle: "GX6" as const })),
             );
@@ -80,6 +80,17 @@ describe("connection contract", () => {
         const app = createHaritoraX({ logLevel: "silent" });
         assert.deepEqual(app.getDevices(), []);
     });
+
+    it("emits log events alongside the onLog sink", async () => {
+        const logs: string[] = [];
+        const app = createHaritoraX({ connections: [memoryConnection()], logLevel: "info", onLog: () => {} });
+        app.on("log", (entry) => logs.push(entry.message));
+
+        await app.discover();
+        await app.dispose();
+
+        assert.ok(logs.some((message) => message.startsWith("Discovered")));
+    });
 });
 
 describe("container discovery and connection", () => {
@@ -132,7 +143,7 @@ describe("container discovery and connection", () => {
         const app = createHaritoraX({ connections: [serial], logLevel: "silent" });
 
         const connected: string[] = [];
-        app.on("device:connected", ({ deviceId }) => connected.push(deviceId));
+        app.on("endpoint:connected", ({ endpointId }) => connected.push(endpointId));
 
         await app.discover();
         await app.connect("COM4");
@@ -154,14 +165,14 @@ describe("container discovery and connection", () => {
         const serial = memoryConnection(["COM4"]);
         const app = createHaritoraX({ connections: [serial], logLevel: "silent" });
 
-        const disconnects: Array<{ deviceId: string; reason: string }> = [];
-        app.on("device:disconnected", (event) => disconnects.push(event));
+        const disconnects: Array<{ endpointId: string; reason: string }> = [];
+        app.on("endpoint:disconnected", (event) => disconnects.push(event));
 
         await app.discover();
         await app.connect("COM4");
         await app.disconnect("COM4");
 
-        assert.deepEqual(disconnects, [{ deviceId: "COM4", reason: "requested" }]);
+        assert.deepEqual(disconnects, [{ endpointId: "COM4", reason: "requested" }]);
         assert.equal(serial.opened.size, 0);
     });
 
@@ -169,14 +180,14 @@ describe("container discovery and connection", () => {
         const serial = memoryConnection(["COM4"]);
         const app = createHaritoraX({ connections: [serial], logLevel: "silent" });
 
-        const disconnects: Array<{ deviceId: string; reason: string }> = [];
-        app.on("device:disconnected", (event) => disconnects.push(event));
+        const disconnects: Array<{ endpointId: string; reason: string }> = [];
+        app.on("endpoint:disconnected", (event) => disconnects.push(event));
 
         await app.discover();
         await app.connect("COM4");
         serial.emitLost("COM4", "remote");
 
-        assert.deepEqual(disconnects, [{ deviceId: "COM4", reason: "remote" }]);
+        assert.deepEqual(disconnects, [{ endpointId: "COM4", reason: "remote" }]);
     });
 
     it("cancels discovery through stopDiscovery()", async () => {
@@ -261,7 +272,7 @@ describe("protocol dispatch", () => {
         return { app, serial };
     }
 
-    it("creates a device from i0 and emits info", async () => {
+    it("creates a serial-keyed device from i0 and emits info", async () => {
         const { app, serial } = await connected();
 
         const infos: Array<{ deviceId: string; serialNumber: string; model: string }> = [];
@@ -269,11 +280,18 @@ describe("protocol dispatch", () => {
 
         serial.emitFrame("COM4", 'i0:{"version":"1.0.22","model":"mc3s","serial no":"A2E987"}');
 
-        const device = app.getDevice("COM4:0");
+        const device = app.getDevice("A2E987");
         assert.ok(device);
+        assert.equal(device.endpointId, "COM4");
+        assert.equal(device.slot, "0");
         assert.equal(device.imuCount, 1);
-        assert.deepEqual(device.bodyParts, ["unassigned"]);
+        assert.deepEqual(
+            device.trackers.map((tracker) => tracker.trackerId),
+            ["A2E987:0"],
+        );
+        assert.equal(device.trackers[0]?.bodyPart, "unassigned");
         assert.equal(device.connection, "serial");
+        assert.equal(infos[0]?.deviceId, "A2E987");
         assert.equal(infos[0]?.serialNumber, "A2E987");
         assert.equal(infos[0]?.model, "mc3s");
     });
@@ -283,9 +301,12 @@ describe("protocol dispatch", () => {
 
         serial.emitFrame("COM4", 'i0:{"version":"0.0.1","model":"mc4b","imu_num":2,"serial no":"A2E987"}');
 
-        const device = app.getDevice("COM4:0");
+        const device = app.getDevice("A2E987");
         assert.equal(device?.imuCount, 2);
-        assert.equal(device?.bodyParts.length, 2);
+        assert.deepEqual(
+            device?.trackers.map((tracker) => tracker.trackerId),
+            ["A2E987:0", "A2E987:1"],
+        );
         assert.equal(device?.model, "x2");
     });
 
@@ -296,8 +317,8 @@ describe("protocol dispatch", () => {
         serial.emitFrame("COM4", 'i0:{"version":"1.0.5","model":"mc4b","imu_num":1,"serial no":"C1MGN3"}');
         serial.emitFrame("COM4", 'i1:{"version":"1.0.22","model":"mc3s","imu_num":1,"serial no":"A2E987"}');
 
-        assert.equal(app.getDevice("COM4:0")?.model, "x2");
-        assert.equal(app.getDevice("COM4:1")?.model, "wireless");
+        assert.equal(app.getDevice("C1MGN3")?.model, "x2");
+        assert.equal(app.getDevice("A2E987")?.model, "wireless");
     });
 
     it("ignores the placeholder reply from an empty slot", async () => {
@@ -310,25 +331,39 @@ describe("protocol dispatch", () => {
         serial.emitFrame("COM4", 'v1:{"battery voltage":3000,"battery remaining":0,"charge status":"Unknown"}');
         serial.emitFrame("COM4", "o1:00000100101000");
 
-        assert.equal(app.getDevice("COM4:1"), undefined);
         assert.deepEqual(app.getDevices(), []);
     });
 
-    it("emits one imu sample per single-IMU packet", async () => {
+    it("drops IMU frames that arrive before info", async () => {
         const { app, serial } = await connected();
 
-        const samples: Array<{ deviceId: string; role: string; rotation: { x: number }; magStatus?: string }> = [];
+        const samples: string[] = [];
+        app.on("imu", (sample) => samples.push(sample.trackerId));
+
+        serial.emitFrame("COM4", "x0:QAV1/Is6EBngAaf/bAkCAA==");
+
+        assert.deepEqual(samples, []);
+        assert.deepEqual(app.getDevices(), []);
+    });
+
+    it("emits tracker-scoped IMU samples", async () => {
+        const { app, serial } = await connected();
+
+        serial.emitFrame("COM4", 'i0:{"version":"1.0.22","model":"mc3s","serial no":"A2E987"}');
+
+        const samples: Array<{ trackerId: string; deviceId: string; role: string; rotation: { x: number } }> = [];
         app.on("imu", (sample) => samples.push(sample));
-        const mags: string[] = [];
-        app.on("mag", ({ status }) => mags.push(status));
+        const mags: Array<{ trackerId: string }> = [];
+        app.on("mag", (event) => mags.push(event));
 
         serial.emitFrame("COM4", "x0:QAV1/Is6EBngAaf/bAkCAA==");
 
         assert.equal(samples.length, 1);
-        assert.equal(samples[0]?.deviceId, "COM4:0");
+        assert.equal(samples[0]?.trackerId, "A2E987:0");
+        assert.equal(samples[0]?.deviceId, "A2E987");
         assert.equal(samples[0]?.role, "ankle");
         assert.ok(Math.abs((samples[0]?.rotation.x ?? 0) - 0.07466666666666667) < 1e-12);
-        assert.deepEqual(mags, ["okay"]);
+        assert.deepEqual(mags, [{ trackerId: "A2E987:0", deviceId: "A2E987", status: "okay" }]);
     });
 
     it("splits a leg combo into ankle and knee samples", async () => {
@@ -343,7 +378,7 @@ describe("protocol dispatch", () => {
         combo[15] = 1; // thigh mag
         combo.set(leg.slice(0, 14), 16);
 
-        const samples: Array<{ role: string; bodyPart: string }> = [];
+        const samples: Array<{ trackerId: string; role: string; bodyPart: string }> = [];
         app.on("imu", (sample) => samples.push(sample));
 
         serial.emitFrame("COM4", `x0:${encodeBase64(combo)}`);
@@ -352,7 +387,11 @@ describe("protocol dispatch", () => {
             samples.map((sample) => sample.role),
             ["ankle", "knee"],
         );
-        assert.equal(samples[0]?.deviceId, "COM4:0");
+        assert.deepEqual(
+            samples.map((sample) => sample.trackerId),
+            ["A2E987:0", "A2E987:1"],
+        );
+        assert.equal(samples[0]?.bodyPart, "unassigned");
     });
 
     it("updates battery and settings", async () => {
@@ -365,11 +404,11 @@ describe("protocol dispatch", () => {
         serial.emitFrame("COM4", 'v0:{"battery voltage":4105,"battery remaining":94,"charge status":"Discharging"}');
         serial.emitFrame("COM4", "o0:00000110101000");
 
-        assert.equal(batteries[0]?.deviceId, "COM4:0");
+        assert.equal(batteries[0]?.deviceId, "A2E987");
         assert.equal(batteries[0]?.level, 94);
         assert.equal(batteries[0]?.voltage, 4105);
         assert.equal(batteries[0]?.chargeStatus, "discharging");
-        assert.deepEqual(app.getDevice("COM4:0")?.settings, {
+        assert.deepEqual(app.getDevice("A2E987")?.settings, {
             sensorMode: 1,
             fpsMode: 100,
             sensorAutoCorrection: ["accel"],
@@ -390,7 +429,8 @@ describe("protocol dispatch", () => {
     it("survives a malformed packet without throwing", async () => {
         const { app, serial } = await connected();
 
+        serial.emitFrame("COM4", 'i0:{"model":"mc3s","serial no":"A2E987"}');
         serial.emitFrame("COM4", "x0:not-valid-base64!!");
-        assert.deepEqual(app.getDevices(), []);
+        assert.equal(app.getDevices().length, 1);
     });
 });

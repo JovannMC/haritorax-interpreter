@@ -21,7 +21,6 @@ import type { Connection, Frame, ListOptions } from "./connections/contract.js";
 import type {
     BodyPart,
     EndpointDescriptor,
-    DeviceInfo,
     DisconnectReason,
     EventHandler,
     Events,
@@ -30,12 +29,14 @@ import type {
     MagStatus,
     TrackerModel,
     DeviceSnapshot,
+    TrackerSnapshot,
     Unsubscribe,
 } from "./types.js";
 
 const PLACEHOLDER_SERIAL = "A00000";
 const PAIRING_COMMAND_DELAY_MS = 1_000;
 const PAIRING_TIMEOUT_MS = 10_000;
+const TRACKER_TIMEOUT_MS = 10_000;
 
 export class HaritoraX {
     readonly #emitter = new Emitter();
@@ -45,7 +46,11 @@ export class HaritoraX {
     #endpoints: EndpointDescriptor[] = [];
     readonly #endpointOwners = new Map<string, Connection>();
     readonly #open = new Set<string>();
+    // deviceId is the device serial number
     readonly #devices = new Map<string, DeviceSnapshot>();
+    readonly #deviceByEndpointSlot = new Map<string, string>();
+    readonly #trackers = new Map<string, TrackerState>();
+    // pending/current dongle identity, keyed by endpointId:slot
     readonly #identities = new Map<string, TrackerIdentity>();
     readonly #channels = new Map<string, number>();
     readonly #pairings = new Map<string, PendingPairing>();
@@ -55,13 +60,16 @@ export class HaritoraX {
 
     constructor(options: HaritoraXOptions = {}) {
         this.#connections = options.connections ?? [];
-        this.#log = new Logger(
-            options.logLevel ?? "info",
-            options.onLog ?? ((entry) => console.log(`[${entry.level}] ${entry.message}`)),
-        );
-        this.#emitter.setErrorHandler((event, error) =>
-            this.#log.error(`Listener for "${event}" threw`, { error: String(error) }),
-        );
+        this.#log = new Logger(options.logLevel ?? "info", (entry) => {
+            if (options.onLog) options.onLog(entry);
+            else console.log(`[${entry.level}] ${entry.message}`);
+            this.#emitter.emit("log", entry);
+        });
+        this.#emitter.setErrorHandler((event, error) => {
+            // Logging from a throwing "log" listener would recurse forever.
+            if (event === "log") return;
+            this.#log.error(`Listener for "${event}" threw`, { error: String(error) });
+        });
 
         for (const connection of this.#connections) {
             this.#subscriptions.push(connection.onData((frame) => this.#onFrame(frame)));
@@ -128,6 +136,18 @@ export class HaritoraX {
         return this.#devices.get(deviceId);
     }
 
+    getTrackers(): TrackerSnapshot[] {
+        return [...this.#trackers.values()].map((tracker) => tracker.snapshot);
+    }
+
+    getTracker(trackerId: string): TrackerSnapshot | undefined {
+        return this.#trackers.get(trackerId)?.snapshot;
+    }
+
+    getBodyPart(trackerId: string): BodyPart | undefined {
+        return this.#trackers.get(trackerId)?.snapshot.bodyPart;
+    }
+
     /*
      * dongle control
      */
@@ -178,9 +198,8 @@ export class HaritoraX {
         await this.#writeCommand(endpointId, setChannelCommand(channel));
         await this.#writeCommand(endpointId, `r${portId}:`);
 
-        const deviceId = deviceIdOf(endpointId, portId);
-        this.#emitter.emit("paired", { endpointId, slot: portId, deviceId });
-        this.#log.info(`Paired ${deviceId}`);
+        this.#emitter.emit("paired", { endpointId, slot: portId });
+        this.#log.info(`Paired ${endpointId}:${portId}`);
     }
 
     async unpair(endpointId: string, slot: string | number): Promise<void> {
@@ -188,10 +207,9 @@ export class HaritoraX {
 
         await this.#writeSequence(endpointId, unpairCommands(channel, portId));
 
-        const deviceId = deviceIdOf(endpointId, portId);
-        this.#forgetIdentity(deviceId);
-        this.#emitter.emit("unpaired", { endpointId, slot: portId, deviceId });
-        this.#log.info(`Unpaired ${deviceId}`);
+        this.#forgetIdentity(endpointId, portId);
+        this.#emitter.emit("unpaired", { endpointId, slot: portId });
+        this.#log.info(`Unpaired ${endpointId}:${portId}`);
     }
 
     #pairingSlot(endpointId: string, slot: string | number): { portId: "0" | "1"; channel: number } {
@@ -222,7 +240,13 @@ export class HaritoraX {
 
         await connection.open(endpointId);
         this.#open.add(endpointId);
-        this.#emitter.emit("device:connected", { deviceId: endpointId });
+
+        const descriptor = this.#endpoints.find((endpoint) => endpoint.id === endpointId);
+        this.#emitter.emit("endpoint:connected", {
+            endpointId,
+            connection: connection.kind,
+            displayName: descriptor?.displayName ?? endpointId,
+        });
         this.#log.info(`Connected ${endpointId}`);
     }
 
@@ -230,9 +254,9 @@ export class HaritoraX {
         if (!this.#open.delete(endpointId)) return;
 
         await this.#endpointOwners.get(endpointId)?.close(endpointId);
+        this.#dropDevices(endpointId, "requested");
         this.#forgetEndpoint(endpointId);
-        this.#dropDevices(endpointId);
-        this.#emitter.emit("device:disconnected", { deviceId: endpointId, reason: "requested" });
+        this.#emitter.emit("endpoint:disconnected", { endpointId, reason: "requested" });
         this.#log.info(`Disconnected ${endpointId}`);
     }
 
@@ -266,6 +290,9 @@ export class HaritoraX {
         this.#endpoints = [];
         this.#endpointOwners.clear();
         this.#devices.clear();
+        this.#deviceByEndpointSlot.clear();
+        for (const tracker of this.#trackers.values()) clearTrackerTimer(tracker);
+        this.#trackers.clear();
         this.#identities.clear();
         this.#channels.clear();
         this.#log.info("Disposed");
@@ -334,43 +361,37 @@ export class HaritoraX {
         }
     }
 
-    // "r0:"/"r1:" replies identify the tracker currently paired to that slot.
+    // "r0:"/"r1:" replies identify the tracker currently paired to that slot
     #onIdentity(endpointId: string, slot: string, payload: string): void {
-        const trackerId = parseTrackerId(payload);
-        if (!trackerId) return;
+        const dongleId = parseTrackerId(payload);
+        if (!dongleId) return;
 
-        const bodyPart = bodyPartOfTracker(trackerId);
+        const bodyPart = bodyPartOfTracker(dongleId);
         if (!bodyPart) {
-            this.#log.debug(`Unknown tracker id "${trackerId}" on ${endpointId}:${slot}`);
+            this.#log.debug(`Unknown tracker id "${dongleId}" on ${endpointId}:${slot}`);
             return;
         }
 
-        const deviceId = deviceIdOf(endpointId, slot);
-        const previous = this.#identities.get(deviceId);
-        if (previous?.trackerId === trackerId && previous.bodyPart === bodyPart) return;
+        const key = endpointSlotKey(endpointId, slot);
+        const previous = this.#identities.get(key);
+        if (previous?.dongleId === dongleId && previous.bodyPart === bodyPart) return;
 
-        this.#identities.set(deviceId, { trackerId, bodyPart });
-        this.#log.info(`Identified ${deviceId} as ${bodyPart} (tracker ${trackerId})`);
+        this.#identities.set(key, { dongleId, bodyPart });
+        this.#log.info(`Identified ${endpointId}:${slot} as ${bodyPart} (tracker ${dongleId})`);
 
-        const device = this.#devices.get(deviceId);
-        if (device) this.#applyIdentity(deviceId, device);
+        const device = this.#deviceAt(endpointId, slot);
+        if (!device) return;
 
-        this.#emitter.emit("identified", { deviceId, trackerId, bodyPart });
-    }
+        // update bodyPart of trackers
+        const parts = bodyPartsFor(bodyPart, device.imuCount);
+        for (const [i, tracker] of device.trackers.entries()) {
+            const next = parts[i] ?? "unassigned";
+            if (tracker.bodyPart === next) continue;
 
-    #applyIdentity(deviceId: string, device: DeviceSnapshot): void {
-        const tracker = this.#identities.get(deviceId);
-        if (!tracker) return;
+            tracker.bodyPart = next;
+            this.#emitter.emit("identified", { trackerId: tracker.trackerId, deviceId: device.deviceId, bodyPart: next });
+        }
 
-        const bodyParts = bodyPartsFor(tracker.bodyPart, device.imuCount);
-        const unchanged =
-            device.trackerId === tracker.trackerId &&
-            device.bodyParts.length === bodyParts.length &&
-            device.bodyParts.every((part, index) => part === bodyParts[index]);
-
-        if (unchanged) return;
-
-        this.#devices.set(deviceId, { ...device, trackerId: tracker.trackerId, bodyParts });
         this.#emitDevices();
     }
 
@@ -378,30 +399,165 @@ export class HaritoraX {
         const parsed = parseInfo(payload);
         if (!parsed) return;
 
-        if (parsed.serialNumber === PLACEHOLDER_SERIAL) return;
+        const serial = parsed.serialNumber;
+        if (serial === PLACEHOLDER_SERIAL) return;
 
         const imuCount = parsed.imuCount ?? 1;
         const model = modelFromFirmware(parsed.model);
+        const key = endpointSlotKey(endpointId, slot);
+        const previousSerial = this.#deviceByEndpointSlot.get(key);
 
-        const device = this.#getOrCreateDevice(endpointId, slot, { imuCount, model });
+        // if a different serial is on this endpoint/slot, disconnect and replace it
+        // e.g. different dongle, different device paired to same slot
+        if (previousSerial !== undefined && previousSerial !== serial) {
+            this.#log.warn(`Replacing device "${previousSerial}" on ${key} with "${serial}"`);
 
-        const info: DeviceInfo = {
-            deviceId: device.deviceId,
+            const previous = this.#devices.get(previousSerial);
+            if (previous) {
+                for (const tracker of previous.trackers) this.#disconnectTracker(tracker, "requested");
+                this.#devices.delete(previousSerial);
+                this.#emitter.emit("device:disconnected", {
+                    deviceId: previous.deviceId,
+                    endpointId: previous.endpointId,
+                    reason: "requested",
+                });
+            }
+        }
+
+        const existing = this.#devices.get(serial);
+
+        // we know the serial number but it might have moved to a different endpoint/slot (e.g. reused USB path)
+        if (existing) {
+            const oldKey = endpointSlotKey(existing.endpointId, existing.slot);
+
+            // ..so update the endpoint/slot mapping if it changed
+            if (oldKey !== key) {
+                this.#deviceByEndpointSlot.delete(oldKey);
+                this.#deviceByEndpointSlot.set(key, serial);
+                existing.endpointId = endpointId;
+                existing.slot = slot;
+                for (const tracker of existing.trackers) tracker.endpointId = endpointId;
+            }
+
+            existing.model = model;
+            this.#emitInfo(serial, parsed);
+            this.#emitDevices();
+            return;
+        }
+
+        const connection = this.#endpointOwners.get(endpointId)?.kind ?? "serial";
+
+        const device: DeviceSnapshot = {
+            deviceId: serial,
+            endpointId,
+            slot,
+            imuCount,
+            model,
+            connection,
+            trackers: this.#createTrackers(serial, endpointId, imuCount, this.#identities.get(key)),
+        };
+
+        this.#devices.set(serial, device);
+        this.#deviceByEndpointSlot.set(key, serial);
+
+        this.#emitter.emit("device:connected", { deviceId: serial, endpointId, slot, connection, model, imuCount });
+        this.#emitInfo(serial, parsed);
+
+        for (const tracker of device.trackers) this.#connectTracker(tracker);
+        this.#emitDevices();
+    }
+
+    #emitInfo(deviceId: string, parsed: NonNullable<ReturnType<typeof parseInfo>>): void {
+        this.#emitter.emit("info", {
+            deviceId,
             version: parsed.version,
             model: parsed.model,
             serialNumber: parsed.serialNumber,
             imuCount: parsed.imuCount,
             timestamp: Date.now(),
-        };
+        });
+    }
 
-        this.#emitter.emit("info", info);
+    #createTrackers(
+        deviceId: string,
+        endpointId: string,
+        imuCount: number,
+        identity: TrackerIdentity | undefined,
+    ): TrackerSnapshot[] {
+        const parts = identity ? bodyPartsFor(identity.bodyPart, imuCount) : unassignedParts(imuCount);
+
+        return parts.map((bodyPart, i) => {
+            const tracker: TrackerSnapshot = {
+                // stable tracker id used everywhere as "serialNumber:imuIndex" (e.g. A00000:1)
+                // imuIndex identifies multiple IMUs (like HX2 leg/thigh combo)
+                trackerId: `${deviceId}:${i}`,
+                deviceId,
+                endpointId,
+                bodyPart,
+                connected: false,
+            };
+
+            this.#trackers.set(tracker.trackerId, { snapshot: tracker });
+            return tracker;
+        });
+    }
+
+    #connectTracker(tracker: TrackerSnapshot): void {
+        const state = this.#trackers.get(tracker.trackerId);
+        if (!state) return;
+
+        tracker.connected = true;
+        this.#emitter.emit("tracker:connected", {
+            trackerId: tracker.trackerId,
+            deviceId: tracker.deviceId,
+            endpointId: tracker.endpointId,
+            bodyPart: tracker.bodyPart,
+        });
+        this.#startTrackerTimer(state);
+    }
+
+    #disconnectTracker(tracker: TrackerSnapshot, reason: DisconnectReason): void {
+        const state = this.#trackers.get(tracker.trackerId);
+        if (state) {
+            clearTrackerTimer(state);
+            this.#trackers.delete(tracker.trackerId);
+        }
+
+        if (!tracker.connected) return;
+
+        tracker.connected = false;
+        this.#emitter.emit("tracker:disconnected", {
+            trackerId: tracker.trackerId,
+            deviceId: tracker.deviceId,
+            reason,
+        });
+    }
+
+    #startTrackerTimer(state: TrackerState): void {
+        clearTrackerTimer(state);
+        const timer = setTimeout(() => {
+            state.timer = undefined;
+            if (!state.snapshot.connected) return;
+
+            state.snapshot.connected = false;
+            this.#emitter.emit("tracker:disconnected", {
+                trackerId: state.snapshot.trackerId,
+                deviceId: state.snapshot.deviceId,
+                reason: "timeout",
+            });
+            this.#emitDevices();
+        }, TRACKER_TIMEOUT_MS);
+
+        // unref() so that the timer doesn't keep the process alive if nothing else is running
+        if (typeof timer === "object" && "unref" in timer) timer.unref();
+        state.timer = timer;
     }
 
     #onBattery(endpointId: string, slot: string, payload: string): void {
         const parsed = parseBattery(payload);
         if (!parsed) return;
 
-        const device = this.#devices.get(deviceIdOf(endpointId, slot));
+        const device = this.#deviceAt(endpointId, slot);
         if (!device) return;
 
         const battery = {
@@ -412,7 +568,7 @@ export class HaritoraX {
             timestamp: Date.now(),
         };
 
-        this.#devices.set(device.deviceId, { ...device, battery });
+        device.battery = battery;
         this.#emitter.emit("battery", battery);
         this.#emitDevices();
     }
@@ -421,20 +577,22 @@ export class HaritoraX {
         const settings = decodeSettings(payload);
         if (!settings) return;
 
-        const device = this.#devices.get(deviceIdOf(endpointId, slot));
+        const device = this.#deviceAt(endpointId, slot);
         if (!device) return;
 
-        this.#devices.set(device.deviceId, { ...device, settings });
+        device.settings = settings;
         this.#emitter.emit("settings", { deviceId: device.deviceId, settings });
         this.#emitDevices();
     }
 
     // TODO: double check data if they are what they are meant to be lol, v3 is kinda hell
     #onImu(endpointId: string, slot: string, payload: string): void {
-        const bytes = decodeBase64(payload);
-        const device = this.#getOrCreateDevice(endpointId, slot);
+        const device = this.#deviceAt(endpointId, slot);
+        if (!device) return; // drop packet if device is unidentified still
 
-        if (bytes.length >= 30) {
+        const bytes = decodeBase64(payload);
+
+        if (bytes.length >= 30 && device.trackers.length >= 2) {
             const leg = decodeImu(encodeBase64(bytes.slice(0, 14)), device.model, bytes[14]);
             const thigh = decodeImu(encodeBase64(bytes.slice(16, 30)), device.model, bytes[15]);
 
@@ -449,9 +607,23 @@ export class HaritoraX {
     #emitSample(device: DeviceSnapshot, imuIndex: number, role: ImuRole, decoded: ReturnType<typeof decodeImu>): void {
         if (!decoded) return;
 
+        const tracker = device.trackers[imuIndex];
+        if (!tracker) return;
+
+        const state = this.#trackers.get(tracker.trackerId);
+        if (!state) return;
+
+        state.snapshot.lastSeen = Date.now();
+        if (state.snapshot.connected) this.#startTrackerTimer(state);
+        else {
+            this.#connectTracker(state.snapshot);
+            this.#emitDevices();
+        }
+
         this.#emitter.emit("imu", {
+            trackerId: tracker.trackerId,
             deviceId: device.deviceId,
-            bodyPart: device.bodyParts[imuIndex] ?? "unassigned",
+            bodyPart: tracker.bodyPart,
             role,
             rotation: decoded.rotation,
             acceleration: decoded.acceleration,
@@ -459,60 +631,16 @@ export class HaritoraX {
             timestamp: Date.now(),
         });
 
-        if (decoded.magStatus) this.#setMag(device.deviceId, decoded.magStatus);
+        if (decoded.magStatus) this.#setMag(tracker, decoded.magStatus);
     }
 
     // magnetometer data is reported every IMU packet (on most devices), just emit on change
-    #setMag(deviceId: string, status: MagStatus): void {
-        const device = this.#devices.get(deviceId);
-        if (!device || device.mag === status) return;
+    #setMag(tracker: TrackerSnapshot, status: MagStatus): void {
+        if (tracker.mag === status) return;
 
-        this.#devices.set(deviceId, { ...device, mag: status });
-        this.#emitter.emit("mag", { deviceId, status });
+        tracker.mag = status;
+        this.#emitter.emit("mag", { trackerId: tracker.trackerId, deviceId: tracker.deviceId, status });
         this.#emitDevices();
-    }
-
-    // gets or creates a device snapshot, updating model and IMU count if info is provided
-    #getOrCreateDevice(endpointId: string, slot: string, identity?: DeviceIdentity): DeviceSnapshot {
-        const deviceId = deviceIdOf(endpointId, slot);
-        const existing = this.#devices.get(deviceId);
-        const tracker = this.#identities.get(deviceId);
-
-        if (existing) {
-            if (!identity) return existing;
-
-            const updated: DeviceSnapshot = {
-                ...existing,
-                model: identity.model,
-                imuCount: identity.imuCount,
-                bodyParts:
-                    tracker !== undefined
-                        ? bodyPartsFor(tracker.bodyPart, identity.imuCount)
-                        : identity.imuCount === existing.imuCount
-                          ? existing.bodyParts
-                          : unassignedParts(identity.imuCount),
-                ...(tracker ? { trackerId: tracker.trackerId } : {}),
-            };
-
-            this.#devices.set(deviceId, updated);
-            this.#emitDevices();
-            return updated;
-        }
-
-        const imuCount = identity?.imuCount ?? 1;
-        const device: DeviceSnapshot = {
-            deviceId,
-            bodyParts: tracker !== undefined ? bodyPartsFor(tracker.bodyPart, imuCount) : unassignedParts(imuCount),
-            imuCount,
-            model: identity?.model ?? "wireless",
-            connection: this.#endpointOwners.get(endpointId)?.kind ?? "serial",
-            connected: true,
-            ...(tracker ? { trackerId: tracker.trackerId } : {}),
-        };
-
-        this.#devices.set(deviceId, device);
-        this.#emitDevices();
-        return device;
     }
 
     #updateChannel(endpointId: string, channel: number): void {
@@ -526,15 +654,28 @@ export class HaritoraX {
         this.#emitter.emit("channel", { endpointId, channel });
     }
 
-    #forgetIdentity(deviceId: string): void {
-        this.#identities.delete(deviceId);
+    #deviceAt(endpointId: string, slot: string): DeviceSnapshot | undefined {
+        const deviceId = this.#deviceByEndpointSlot.get(endpointSlotKey(endpointId, slot));
+        return deviceId === undefined ? undefined : this.#devices.get(deviceId);
+    }
 
-        const device = this.#devices.get(deviceId);
+    #forgetIdentity(endpointId: string, slot: string): void {
+        this.#identities.delete(endpointSlotKey(endpointId, slot));
+
+        const device = this.#deviceAt(endpointId, slot);
         if (!device) return;
 
-        const updated: DeviceSnapshot = { ...device, bodyParts: unassignedParts(device.imuCount) };
-        delete updated.trackerId;
-        this.#devices.set(deviceId, updated);
+        for (const tracker of device.trackers) {
+            if (tracker.bodyPart === "unassigned") continue;
+
+            tracker.bodyPart = "unassigned";
+            this.#emitter.emit("identified", {
+                trackerId: tracker.trackerId,
+                deviceId: device.deviceId,
+                bodyPart: "unassigned",
+            });
+        }
+
         this.#emitDevices();
     }
 
@@ -548,8 +689,8 @@ export class HaritoraX {
     }
 
     async #writeSequence(endpointId: string, commands: readonly string[]): Promise<void> {
-        for (const [index, command] of commands.entries()) {
-            if (index > 0) await delay(PAIRING_COMMAND_DELAY_MS);
+        for (const [i, command] of commands.entries()) {
+            if (i > 0) await delay(PAIRING_COMMAND_DELAY_MS);
             await this.#writeCommand(endpointId, command);
         }
     }
@@ -593,18 +734,25 @@ export class HaritoraX {
         }
     }
 
-    #dropDevices(endpointId: string): void {
-        const prefix = `${endpointId}:`;
-        let changed = false;
+    #dropDevices(endpointId: string, reason: DisconnectReason): void {
+        const devices = [...this.#devices.values()].filter((device) => device.endpointId === endpointId);
+        if (devices.length === 0) return;
 
-        for (const deviceId of [...this.#devices.keys()]) {
-            if (!deviceId.startsWith(prefix)) continue;
-
-            this.#devices.delete(deviceId);
-            changed = true;
+        for (const device of devices) {
+            for (const tracker of device.trackers) this.#disconnectTracker(tracker, reason);
         }
 
-        if (changed) this.#emitDevices();
+        for (const device of devices) {
+            this.#devices.delete(device.deviceId);
+            this.#deviceByEndpointSlot.delete(endpointSlotKey(device.endpointId, device.slot));
+            this.#emitter.emit("device:disconnected", {
+                deviceId: device.deviceId,
+                endpointId: device.endpointId,
+                reason,
+            });
+        }
+
+        this.#emitDevices();
     }
 
     #emitDevices(): void {
@@ -614,9 +762,9 @@ export class HaritoraX {
     #onLost(endpointId: string, reason: DisconnectReason): void {
         if (!this.#open.delete(endpointId)) return;
 
+        this.#dropDevices(endpointId, reason);
         this.#forgetEndpoint(endpointId);
-        this.#dropDevices(endpointId);
-        this.#emitter.emit("device:disconnected", { deviceId: endpointId, reason });
+        this.#emitter.emit("endpoint:disconnected", { endpointId, reason });
     }
 }
 
@@ -635,12 +783,18 @@ function modelFromFirmware(model: string): TrackerModel {
     else throw new HaritoraXError("DECODE_FAILED", `Unknown firmware model "${model}"`);
 }
 
-function deviceIdOf(endpointId: string, slot: string): string {
+function endpointSlotKey(endpointId: string, slot: string): string {
     return `${endpointId}:${slot}`;
 }
 
 function unassignedParts(count: number): BodyPart[] {
     return Array.from({ length: count }, () => "unassigned");
+}
+
+function clearTrackerTimer(tracker: TrackerState): void {
+    if (tracker.timer === undefined) return;
+    clearTimeout(tracker.timer);
+    tracker.timer = undefined;
 }
 
 function delay(ms: number): Promise<void> {
@@ -657,16 +811,15 @@ export interface HaritoraXOptions {
     onLog?: LogSink;
 }
 
-// what the "i(x):" (info) messages tell us about the device
-interface DeviceIdentity {
-    model: TrackerModel;
-    imuCount: number;
-}
-
 // what the per-slot "r(x):" messages tell us about the tracker
 interface TrackerIdentity {
-    trackerId: string;
+    dongleId: string;
     bodyPart: BodyPart;
+}
+
+interface TrackerState {
+    snapshot: TrackerSnapshot;
+    timer?: ReturnType<typeof setTimeout>;
 }
 
 type PairingResult = "paired" | "cancelled" | "timeout";

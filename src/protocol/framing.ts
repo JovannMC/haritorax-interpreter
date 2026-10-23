@@ -11,7 +11,7 @@ export function asciiDecode(bytes: Uint8Array): string {
 
 export function asciiEncode(text: string): Uint8Array {
     const bytes = new Uint8Array(text.length);
-    for (let index = 0; index < text.length; index++) bytes[index] = text.charCodeAt(index) & 0xff;
+    for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i) & 0xff;
     return bytes;
 }
 

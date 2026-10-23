@@ -32,6 +32,7 @@ export interface Quaternion {
 }
 
 export interface ImuSample {
+    trackerId: string;
     deviceId: string;
     bodyPart: BodyPart;
     role: ImuRole;
@@ -86,18 +87,27 @@ export interface EndpointDescriptor {
     channel?: number;
 }
 
-export interface DeviceSnapshot {
+export interface TrackerSnapshot {
+    // `serialNumber:imuIndex` (e.g. A00000:1)
+    trackerId: string;
     deviceId: string;
-    // one entry per IMU
-    bodyParts: BodyPart[];
+    endpointId: string;
+    bodyPart: BodyPart;
+    connected: boolean;
+    lastSeen?: number;
+    mag?: MagStatus;
+}
+
+export interface DeviceSnapshot {
+    // serial number, e.g. "A2E987"
+    deviceId: string;
+    endpointId: string;
+    slot: string;
     imuCount: number;
     model: TrackerModel;
     connection: ConnectionKind;
-    connected: boolean;
-    // tracker id maps to the body part that it is assigned to (which isn't necessary for SlimeTora)
-    trackerId?: string;
+    trackers: TrackerSnapshot[];
     battery?: BatteryInfo;
-    mag?: MagStatus;
     settings?: TrackerSettings;
 }
 
@@ -119,18 +129,38 @@ export interface Events {
     error: { error: Error };
     log: LogEntry;
     devices: { devices: DeviceSnapshot[] };
-    "device:connected": { deviceId: string };
-    "device:disconnected": { deviceId: string; reason: DisconnectReason };
+
+    // "endpoint" is the port/peripheral being talked to
+    // for example, a single port from the GX dongle or single BLE peripheral
+    "endpoint:connected": { endpointId: string; connection: ConnectionKind; displayName: string };
+    "endpoint:disconnected": { endpointId: string; reason: DisconnectReason };
+
+    // "device" is a physical device connected to an endpoint
+    // it might have multiple IMUs like the HX2 leg/thigh combo (2 "tracker"s)
+    "device:connected": {
+        deviceId: string;
+        endpointId: string;
+        slot: string;
+        connection: ConnectionKind;
+        model: TrackerModel;
+        imuCount: number;
+    };
+    "device:disconnected": { deviceId: string; endpointId: string; reason: DisconnectReason };
+
+    // "tracker" is an individual IMU of a device
+    "tracker:connected": { trackerId: string; deviceId: string; endpointId: string; bodyPart: BodyPart };
+    "tracker:disconnected": { trackerId: string; deviceId: string; reason: DisconnectReason };
+
     imu: ImuSample;
     battery: BatteryInfo;
-    mag: { deviceId: string; status: MagStatus };
+    mag: { trackerId: string; deviceId: string; status: MagStatus };
     info: DeviceInfo;
     settings: { deviceId: string; settings: TrackerSettings };
     channel: { endpointId: string; channel: number };
-    identified: { deviceId: string; trackerId: string; bodyPart: BodyPart };
-    paired: { endpointId: string; slot: string; deviceId: string };
-    unpaired: { endpointId: string; slot: string; deviceId: string };
-    button: { deviceId: string; button: "main" | "sub" | "sub2" };
+    identified: { trackerId: string; deviceId: string; bodyPart: BodyPart };
+    paired: { endpointId: string; slot: string };
+    unpaired: { endpointId: string; slot: string };
+    button: { trackerId: string; deviceId: string; button: "main" | "sub" | "sub2" };
 }
 
 export type Unsubscribe = () => void;
