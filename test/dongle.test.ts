@@ -7,8 +7,10 @@ import type { DisconnectReason, TrackerSettings, Unsubscribe } from "../dist/typ
 import {
     bodyPartOfTracker,
     bodyPartsFor,
+    decodeTrackerRssi,
     dongleSettingsCommand,
     isDongleSlot,
+    isRssiLost,
     pairCommands,
     parseChannel,
     parsePairingResult,
@@ -125,6 +127,21 @@ describe("dongle protocol", () => {
         assert.equal(parseTrackerId("110070200000"), "7");
         assert.equal(parseTrackerId("110080200100"), "8");
         assert.equal(parseTrackerId("110000200000"), undefined);
+    });
+
+    it("recognises a lost-tracker a: frame", () => {
+        assert.equal(isRssiLost("7f7f7f7f7f7f"), true);
+        assert.equal(isRssiLost("7F7F7F7F7F7F"), true);
+        assert.equal(isRssiLost("284128442f30"), false);
+        assert.equal(isRssiLost(""), false);
+    });
+
+    it("decodes the first byte of an a: frame as negative dBm", () => {
+        // Real lines from testing/HaritoraX Wireless.txt (first byte 0x28..0x37)
+        assert.equal(decodeTrackerRssi("284128442f30"), -0x28);
+        assert.equal(decodeTrackerRssi("374237423b3b"), -0x37);
+        assert.equal(decodeTrackerRssi(""), undefined);
+        assert.equal(decodeTrackerRssi("004128442f30"), undefined); // zero magnitude
     });
 
     it("splits a dongle IMU payload into one or two slices", () => {
@@ -380,6 +397,47 @@ describe("tracker identity", () => {
             samples.map((sample) => sample.role),
             ["ankle", "knee"],
         );
+    });
+
+    it("updates RSSI from an a0: frame and emits on change", async () => {
+        const { app, serial } = await connected();
+
+        serial.emitFrame(INFO);
+
+        const rssiEvents: Array<{ trackerId: string; rssi: number }> = [];
+        app.on("rssi", (event) => rssiEvents.push(event));
+
+        serial.emitFrame("a0:284128442f30");
+        serial.emitFrame("a0:284128442f30"); // unchanged — no second event
+        serial.emitFrame("a0:374237423b3b");
+
+        assert.equal(app.getTracker("A2E987:0")?.rssi, -0x37);
+        assert.deepEqual(rssiEvents, [
+            { trackerId: "A2E987:0", deviceId: "A2E987", rssi: -0x28 },
+            { trackerId: "A2E987:0", deviceId: "A2E987", rssi: -0x37 },
+        ]);
+    });
+
+    it("marks a tracker lost on 7f7f… and reconnects on the next frame", async () => {
+        const { app, serial } = await connected();
+
+        serial.emitFrame(INFO);
+        serial.emitFrame("a0:284128442f30");
+        assert.equal(app.getTracker("A2E987:0")?.connected, true);
+
+        const disconnected: Array<{ trackerId: string; reason: string }> = [];
+        const reconnected: string[] = [];
+        app.on("tracker:disconnected", (event) => disconnected.push({ trackerId: event.trackerId, reason: event.reason }));
+        app.on("tracker:connected", (event) => reconnected.push(event.trackerId));
+
+        serial.emitFrame("a0:7f7f7f7f7f7f");
+        assert.equal(app.getTracker("A2E987:0")?.connected, false);
+        assert.equal(app.getTracker("A2E987:0")?.rssi, undefined);
+        assert.deepEqual(disconnected, [{ trackerId: "A2E987:0", reason: "remote" }]);
+
+        serial.emitFrame("a0:284128442f30");
+        assert.equal(app.getTracker("A2E987:0")?.connected, true);
+        assert.ok(reconnected.includes("A2E987:0"));
     });
 });
 

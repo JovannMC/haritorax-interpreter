@@ -20,12 +20,14 @@ export interface BleBackend {
     write(peripheralId: string, characteristic: BleCharacteristic, data: Uint8Array): Promise<void>;
     onData(handler: BleDataHandler): Unsubscribe;
     onLost(handler: (peripheralId: string, reason: DisconnectReason) => void): Unsubscribe;
+    onRssi(handler: (peripheralId: string, rssi: number) => void): Unsubscribe;
     dispose(): Promise<void>;
 }
 
 export interface BleConnectionOptions {
     scanTimeoutMs?: number;
     logger?: Logger;
+    rssiPollMs?: number;
 }
 
 const DEFAULT_SCAN_TIMEOUT_MS = 5_000;
@@ -40,6 +42,7 @@ export class BleConnection implements Connection {
     readonly #open = new Set<string>();
     readonly #dataHandlers = new Set<(frame: Frame) => void>();
     readonly #lostHandlers = new Set<(endpointId: string, reason: DisconnectReason) => void>();
+    readonly #rssiHandlers = new Set<(endpointId: string, rssi: number) => void>();
     readonly #subscriptions: Unsubscribe[] = [];
 
     constructor(backend: BleBackend, options: BleConnectionOptions = {}) {
@@ -55,6 +58,9 @@ export class BleConnection implements Connection {
             backend.onLost((peripheralId, reason) => {
                 this.#open.delete(peripheralId);
                 for (const handler of [...this.#lostHandlers]) handler(peripheralId, reason);
+            }),
+            backend.onRssi((peripheralId, rssi) => {
+                for (const handler of [...this.#rssiHandlers]) handler(peripheralId, rssi);
             }),
         );
     }
@@ -114,12 +120,18 @@ export class BleConnection implements Connection {
         return () => this.#lostHandlers.delete(handler);
     }
 
+    onRssi(handler: (endpointId: string, rssi: number) => void): Unsubscribe {
+        this.#rssiHandlers.add(handler);
+        return () => this.#rssiHandlers.delete(handler);
+    }
+
     async dispose(): Promise<void> {
         for (const unsubscribe of this.#subscriptions) unsubscribe();
         this.#subscriptions.length = 0;
 
         this.#dataHandlers.clear();
         this.#lostHandlers.clear();
+        this.#rssiHandlers.clear();
 
         await this.#backend.dispose().catch((error: unknown) => {
             this.#log?.error("Failed to dispose the BLE backend", { error: String(error) });

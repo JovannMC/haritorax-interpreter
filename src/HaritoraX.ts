@@ -22,6 +22,7 @@ import type {
     TrackerSettings,
     Unsubscribe,
 } from "./types.js";
+import type { BleConnection } from "./connections/ble/index.js";
 
 export class HaritoraX {
     readonly #emitter = new Emitter();
@@ -82,6 +83,13 @@ export class HaritoraX {
         for (const connection of this.#connections) {
             this.#subscriptions.push(connection.onData((frame) => this.#onFrame(frame)));
             this.#subscriptions.push(connection.onLost((endpointId, reason) => this.#onLost(endpointId, reason)));
+            if (connection.kind === "ble") {
+                this.#subscriptions.push(
+                    (connection as BleConnection).onRssi((endpointId, rssi) => {
+                        this.#onBleRssi(endpointId, rssi);
+                    }),
+                );
+            }
         }
     }
 
@@ -396,6 +404,15 @@ export class HaritoraX {
     #onLost(endpointId: string, reason: DisconnectReason): void {
         if (!this.#open.delete(endpointId)) return;
         this.#dropEndpoint(endpointId, reason);
+    }
+
+    #onBleRssi(endpointId: string, rssi: number): void {
+        const device = this.#open.has(endpointId) ? this.#registry.deviceAt(endpointId, "0") : undefined;
+        if (!device) return;
+
+        this.#registry.setRssi(`${device.deviceId}:0`, rssi);
+
+        this.#log.debug(`BLE RSSI update for ${device.deviceId}: ${rssi} dBm`);
     }
 }
 

@@ -94,6 +94,10 @@ export interface TrackerSnapshot {
     bodyPart: BodyPart;
     connected: boolean;
     lastSeen?: number;
+    // dongle RSSI (dongle hearing tracker) OR ble RSSI (dongle hearing peripheral, i think)
+    rssi?: number;
+    // sensor RSSI (tracker hearing dongle)
+    sensorRssi?: number;
     mag?: MagStatus;
 }
 
@@ -153,6 +157,12 @@ export interface Events {
     imu: ImuSample;
     battery: BatteryInfo;
     mag: { trackerId: string; deviceId: string; status: MagStatus };
+    rssi: {
+        trackerId: string;
+        deviceId: string;
+        rssi: number;
+        sensorRssi?: number;
+    };
     info: DeviceInfo;
     settings: { deviceId: string; settings: TrackerSettings };
     channel: { endpointId: string; channel: number };

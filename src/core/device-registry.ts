@@ -187,7 +187,6 @@ export class DeviceRegistry {
 
         device.battery = battery;
         this.#emitter.emit("battery", battery);
-        this.#emitDevices();
     }
 
     setSettings(deviceId: string, settings: TrackerSettings): void {
@@ -246,6 +245,36 @@ export class DeviceRegistry {
 
         state.snapshot.mag = status;
         this.#emitter.emit("mag", { trackerId, deviceId: state.snapshot.deviceId, status });
+    }
+
+    setRssi(trackerId: string, dongleRssi: number, sensorRssi?: number): void {
+        const state = this.#trackers.get(trackerId);
+        if (!state || state.snapshot.rssi === dongleRssi) return;
+
+        state.snapshot.rssi = dongleRssi;
+        state.snapshot.sensorRssi = sensorRssi;
+        this.#emitter.emit("rssi", {
+            trackerId,
+            deviceId: state.snapshot.deviceId,
+            rssi: dongleRssi,
+            ...(sensorRssi === undefined ? {} : { sensorRssi }),
+        });
+    }
+
+    markTrackerLost(trackerId: string, reason: DisconnectReason): void {
+        const state = this.#trackers.get(trackerId);
+        if (!state || !state.snapshot.connected) return;
+
+        clearTrackerTimeout(state);
+        state.snapshot.connected = false;
+        state.snapshot.rssi = undefined;
+        state.snapshot.sensorRssi = undefined;
+
+        this.#emitter.emit("tracker:disconnected", {
+            trackerId: state.snapshot.trackerId,
+            deviceId: state.snapshot.deviceId,
+            reason,
+        });
         this.#emitDevices();
     }
 

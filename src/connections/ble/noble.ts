@@ -41,15 +41,20 @@ export function createBleConnection(options: NobleBleOptions = {}): BleConnectio
 class NobleBleBackend implements BleBackend {
     readonly #noble: Noble;
     readonly #log: Logger | undefined;
+    readonly #rssiPollMs: number;
 
     readonly #peripherals = new Map<string, Peripheral>();
     readonly #open = new Map<string, OpenPeripheral>();
 
     readonly #dataHandlers = new Set<(peripheralId: string, characteristic: BleCharacteristic, data: Uint8Array) => void>();
     readonly #lostHandlers = new Set<(peripheralId: string, reason: DisconnectReason) => void>();
+    readonly #rssiHandlers = new Set<(peripheralId: string, rssi: number) => void>();
 
-    constructor(noble: Noble, log: Logger | undefined) {
+    readonly #rssiTimers = new Map<string, ReturnType<typeof setInterval>>();
+
+    constructor(noble: Noble, rssiPollMs: number, log: Logger | undefined) {
         this.#noble = noble;
+        this.#rssiPollMs = rssiPollMs;
         this.#log = log;
     }
 
@@ -107,11 +112,17 @@ class NobleBleBackend implements BleBackend {
 
             this.#log?.warn(`Lost BLE peripheral ${peripheralId}`, { reason: String(reason) });
             this.#open.delete(peripheralId);
+            this.#stopRssiPolling(peripheralId);
             for (const handler of [...this.#lostHandlers]) handler(peripheralId, "remote");
+        };
+
+        entry.onRssiUpdate = (rssi: number): void => {
+            for (const handler of [...this.#rssiHandlers]) handler(peripheralId, rssi);
         };
 
         this.#open.set(peripheralId, entry);
         peripheral.on("disconnect", entry.onDisconnect);
+        peripheral.on("rssiUpdate", entry.onRssiUpdate);
 
         try {
             if (peripheral.state !== "connected") await peripheral.connectAsync();
@@ -124,6 +135,7 @@ class NobleBleBackend implements BleBackend {
 
             await this.#readInitial(peripheralId, entry);
             await this.#subscribe(peripheralId, entry);
+            this.#startRssiPolling(peripheralId, entry);
         } catch (error) {
             await this.#cleanupConnection(peripheralId, entry);
             throw new HaritoraXError("CONNECTION_FAILED", `Failed to open BLE peripheral "${peripheralId}"`, {
@@ -169,20 +181,67 @@ class NobleBleBackend implements BleBackend {
         return () => this.#dataHandlers.delete(handler);
     }
 
+    onRssi(handler: (peripheralId: string, rssi: number) => void): Unsubscribe {
+        this.#rssiHandlers.add(handler);
+        return () => this.#rssiHandlers.delete(handler);
+    }
+
     onLost(handler: (peripheralId: string, reason: DisconnectReason) => void): Unsubscribe {
         this.#lostHandlers.add(handler);
         return () => this.#lostHandlers.delete(handler);
     }
 
     async dispose(): Promise<void> {
+        for (const timer of this.#rssiTimers.values()) clearInterval(timer);
+        this.#rssiTimers.clear();
+
         await this.#noble.stopScanningAsync().catch(() => undefined);
 
         await Promise.all([...this.#open.keys()].map((peripheralId) => this.close(peripheralId)));
 
         this.#dataHandlers.clear();
         this.#lostHandlers.clear();
+        this.#rssiHandlers.clear();
         this.#peripherals.clear();
         this.#noble.stop();
+    }
+
+    #startRssiPolling(peripheralId: string, entry: OpenPeripheral): void {
+        if (this.#rssiPollMs <= 0) return;
+
+        // initial RSSI update
+        entry.peripheral
+            .updateRssiAsync()
+            .then((rssi) => {
+                for (const handler of [...this.#rssiHandlers]) handler(peripheralId, rssi);
+            })
+            .catch(() => undefined);
+
+        const timer = setInterval(() => {
+            if (!this.#open.has(peripheralId)) {
+                this.#stopRssiPolling(peripheralId);
+                return;
+            }
+
+            entry.peripheral
+                .updateRssiAsync()
+                .then((rssi) => {
+                    for (const handler of [...this.#rssiHandlers]) handler(peripheralId, rssi);
+                })
+                .catch((error: unknown) => {
+                    this.#log?.debug(`RSSI update failed for ${peripheralId}`, { error: String(error) });
+                });
+        }, this.#rssiPollMs);
+
+        this.#rssiTimers.set(peripheralId, timer);
+    }
+
+    #stopRssiPolling(peripheralId: string): void {
+        const timer = this.#rssiTimers.get(peripheralId);
+        if (timer === undefined) return;
+
+        clearInterval(timer);
+        this.#rssiTimers.delete(peripheralId);
     }
 
     async #readInitial(peripheralId: string, entry: OpenPeripheral): Promise<void> {
@@ -225,6 +284,8 @@ class NobleBleBackend implements BleBackend {
     async #cleanupConnection(peripheralId: string, entry: OpenPeripheral): Promise<void> {
         entry.intentional = true;
         if (entry.onDisconnect) entry.peripheral.removeListener("disconnect", entry.onDisconnect);
+        if (entry.onRssiUpdate) entry.peripheral.removeListener("rssiUpdate", entry.onRssiUpdate);
+        this.#stopRssiPolling(peripheralId);
         this.#open.delete(peripheralId);
 
         for (const { characteristic, handler } of entry.subscriptions) {
@@ -249,7 +310,7 @@ function createNobleBackend(options: NobleBleOptions = {}): BleBackend {
     const module = loadNoble();
     const noble = module.withBindings(binding);
 
-    return new NobleBleBackend(noble, options.logger);
+    return new NobleBleBackend(noble, options.rssiPollMs ?? 0, options.logger);
 }
 
 function loadNoble(): NobleModule {
@@ -295,6 +356,7 @@ interface OpenPeripheral {
     peripheral: Peripheral;
     characteristics: Map<BleCharacteristic, Characteristic>;
     subscriptions: Array<{ characteristic: Characteristic; handler: (data: Buffer, isNotification: boolean) => void }>;
-    onDisconnect?: (reason: number | string) => void;
     intentional: boolean;
+    onDisconnect?: (reason: number | string) => void;
+    onRssiUpdate?: (rssi: number) => void;
 }

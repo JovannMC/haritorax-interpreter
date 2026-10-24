@@ -6,10 +6,12 @@ import { PairingTracker } from "./pairing.js";
 import {
     bodyPartOfTracker,
     bodyPartsFor,
+    decodeTrackerRssi,
     DongleButtonState,
     dongleSettingsCommand,
     isButtonDebounced,
     isDongleSlot,
+    isRssiLost,
     isValidChannel,
     pairCommands,
     parseChannel,
@@ -198,6 +200,9 @@ export class DongleController {
             case "r":
                 this.#onIdentity(endpointId, slot, payload);
                 break;
+            case "a":
+                this.#onTrackerStatus(endpointId, slot, payload);
+                break;
         }
     }
 
@@ -265,6 +270,30 @@ export class DongleController {
         if (identifier === "r" && parsePairingResult(payload) && this.#pairings.settle(endpointId, "paired")) {
             this.#log.info(`Pairing completed on ${endpointId}`);
         }
+    }
+
+    #onTrackerStatus(endpointId: string, slot: string, payload: string): void {
+        const device = this.#registry.deviceAt(endpointId, slot);
+        if (!device) return;
+
+        const tracker = device.trackers[0];
+        if (!tracker) return;
+
+        // mark tracker lost if `a(x):` frame is 7f7f7f7f7f7f
+        if (isRssiLost(payload)) {
+            // make sure to not mark tracker lost if its BLE (not serial/dongle)
+            if (device.connection !== this.#connectionKind(endpointId)) return;
+
+            this.#registry.markTrackerLost(tracker.trackerId, "remote");
+            this.#log.warn(`Tracker ${tracker.trackerId} lost, dongle ${endpointId}:${slot} is searching`);
+            return;
+        }
+
+        this.#registry.trackerSeen(tracker.trackerId);
+
+        const decoded = decodeTrackerRssi(payload);
+        if (!decoded) return;
+        this.#registry.setRssi(tracker.trackerId, decoded.dongle, decoded.sensor);
     }
 
     #onInfo(endpointId: string, slot: string, payload: string): void {

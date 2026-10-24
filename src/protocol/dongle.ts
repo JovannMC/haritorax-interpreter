@@ -163,3 +163,34 @@ export interface DongleButtonState {
     sub: number;
     pressed?: "main" | "sub";
 }
+
+export interface TrackerRssi {
+    dongle: number;
+    sensor: number;
+}
+
+// the a: frame is six hex-encoded bytes. Layout (from live captures):
+//   byte0  byte1  byte2  byte3  byte4  byte5
+//   dongle sensor dongle sensor ?      ?
+//   (each pair is the same measurement reported twice)
+//
+// bytes 0/2 = dongle RSSI (how the dongle hears the tracker)
+// bytes 1/3 = sensor RSSI (how the tracker hears the dongle)
+// bytes 4/5 = unknown — correlates with RSSI but is not a link-quality indicator
+//             (range 44-59, always within ±1 of each other, tracks dongle RSSI)
+// "7f7f7f7f7f7f" means the dongle is searching (tracker lost)
+
+// ^^ what the AI thinks, idk its output seems to be somewhat accurate? need more testing. genuinely no idea how to interpret anything here lol
+export function isRssiLost(payload: string): boolean {
+    return payload.toLowerCase() === "7f7f7f7f7f7f";
+}
+
+export function decodeTrackerRssi(payload: string): TrackerRssi | undefined {
+    if (payload.length < 4) return undefined;
+
+    const dongle = Number.parseInt(payload.slice(0, 2), 16);
+    const sensor = Number.parseInt(payload.slice(2, 4), 16);
+    if (Number.isNaN(dongle) || Number.isNaN(sensor) || dongle === 0) return undefined;
+
+    return { dongle: -dongle, sensor: -sensor };
+}
