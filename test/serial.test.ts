@@ -153,6 +153,37 @@ describe("serial connection", () => {
         );
     });
 
+    it("probes manually configured serial ports even when enumeration omits them", async () => {
+        const port = new FakePort();
+        const connection = createSerialConnection({
+            backend: backendWith([], port, new Map([["COM14", WIRED_INFO_REPLY]])),
+            serialPorts: ["COM14"],
+        });
+
+        const found = await connection.list();
+
+        assert.deepEqual(
+            found.map((descriptor) => [descriptor.id, descriptor.model]),
+            [["COM14", "wired"]],
+        );
+    });
+
+    it("keeps manually configured non-wired serial ports as generic endpoints", async () => {
+        const port = new FakePort();
+        const connection = createSerialConnection({
+            backend: backendWith(
+                [],
+                port,
+                new Map([["COM6", 'i:{"model":"MC4B", "version":"1.0", "serial no":"GX6MAN"}\n']]),
+            ),
+            serialPorts: ["COM6"],
+        });
+
+        const found = await connection.list();
+
+        assert.deepEqual(found.map((descriptor) => [descriptor.id, descriptor.model]), [["COM6", undefined]]);
+    });
+
     it("lists Windows BTHENUM SPP ports by their Serial Port Profile GUID", async () => {
         // Shaped after a real Get-PnpDevice dump: the wired HaritoraX port has no
         // name, no VID/PID and a generic "Microsoft" manufacturer; only the SPP

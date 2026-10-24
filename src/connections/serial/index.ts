@@ -33,6 +33,7 @@ export interface SerialOptions {
     logger?: Logger;
     heartbeatIntervalMs?: number;
     includeWired?: boolean;
+    serialPorts?: readonly string[];
 }
 
 const DONGLE_IDS: Readonly<Record<string, "GX6" | "GX2">> = Object.freeze({
@@ -48,7 +49,7 @@ const DONGLE_HEARTBEAT = Object.freeze(["i:"]);
 const WIRED_HEARTBEAT = Object.freeze(["report send info\nblt send info"]);
 const HEARTBEAT_MS = 5_000;
 
-// on windows, serialport can't read BusReportedDesc (only place that shows "HaritoraX"), so have to list all SPP ports (shown as BTHENUM) and check each one for a heartbeat reply
+// on windows, serialport package can't read BusReportedDesc (only place that shows "HaritoraX"), so have to list all SPP ports (shown as BTHENUM) and check each one for a heartbeat reply
 const SPP_SERVICE_GUID = "00001101-0000-1000-8000-00805f9b34fb";
 const SPP_TIMEOUT = 800;
 
@@ -69,6 +70,7 @@ export class SerialConnection implements Connection {
     readonly #log: Logger;
     readonly #heartbeatMs: number;
     readonly #includeWired: boolean;
+    readonly #serialPorts: readonly string[];
 
     readonly #ports = new Map<string, OpenPort>();
     readonly #wiredEndpoints = new Set<string>();
@@ -80,30 +82,64 @@ export class SerialConnection implements Connection {
         this.#log = options.logger ?? new Logger("silent");
         this.#heartbeatMs = options.heartbeatIntervalMs ?? HEARTBEAT_MS;
         this.#includeWired = options.includeWired ?? false;
+        this.#serialPorts = options.serialPorts ?? [];
     }
 
     async list(options?: ListOptions): Promise<EndpointDescriptor[]> {
         if (options?.signal?.aborted) return [];
 
-        const ports = await this.#backend.list().catch((error: unknown) => {
-            if (error instanceof HaritoraXError) throw error;
-            throw new HaritoraXError("LINK_UNAVAILABLE", "Failed to enumerate serial ports", { cause: error });
-        });
+        let ports: ReadonlyArray<PortSummary> = [];
+        try {
+            ports = await this.#backend.list();
+        } catch (error: unknown) {
+            if (this.#serialPorts.length === 0) {
+                if (error instanceof HaritoraXError) throw error;
+                throw new HaritoraXError("LINK_UNAVAILABLE", "Failed to enumerate serial ports", { cause: error });
+            }
+            this.#log.warn("Serial enumeration failed, trying manually configured serial ports", { error: String(error) });
+        }
 
         const endpoints: EndpointDescriptor[] = [];
+        const manualCandidates: PortSummary[] = [];
+        const manualPaths = new Set(this.#serialPorts);
         const wiredCandidates: PortSummary[] = [];
+        const detectedPaths = new Set<string>();
 
         for (const port of ports) {
             const dongle = DONGLE_IDS[`${port.vendorId}:${port.productId}`.toLowerCase()];
             if (dongle) {
+                detectedPaths.add(port.path);
                 endpoints.push({ id: port.path, connection: this.kind, displayName: `${dongle} (${port.path})`, dongle });
-            } else if (this.#includeWired && isWiredPort(port)) {
+            } else if (this.#includeWired && !manualPaths.has(port.path) && isWiredPort(port)) {
                 wiredCandidates.push(port);
             }
         }
 
+        for (const path of this.#serialPorts) {
+            if (!detectedPaths.has(path)) manualCandidates.push({ path });
+        }
+
+        for (const port of manualCandidates) {
+            const probe = await this.#probeSerialPort(port);
+            if (probe.wired) {
+                this.#wiredEndpoints.add(port.path);
+                endpoints.push({
+                    id: port.path,
+                    connection: this.kind,
+                    displayName: `HaritoraX Wired (${port.path})`,
+                    model: "wired" as const,
+                });
+            } else {
+                endpoints.push({
+                    id: port.path,
+                    connection: this.kind,
+                    displayName: `Serial (${port.path})`,
+                });
+            }
+        }
+
         for (const port of wiredCandidates) {
-            if (await this.#probeWiredPort(port)) {
+            if ((await this.#probeSerialPort(port)).wired) {
                 this.#wiredEndpoints.add(port.path);
                 endpoints.push({
                     id: port.path,
@@ -117,16 +153,16 @@ export class SerialConnection implements Connection {
         return endpoints;
     }
 
-    // tries a port candidate to see if it is a wired device by sending a heartbeat and waiting for a reply
-    async #probeWiredPort(port: PortSummary): Promise<boolean> {
+    // tries a port candidate by sending both the wired and generic serial info requests.
+    async #probeSerialPort(port: PortSummary): Promise<{ wired: boolean }> {
         let handle: SerialPort | undefined;
         try {
             handle = await this.#backend.open(port.path);
-            return await new Promise<boolean>((resolve) => {
+            return await new Promise<{ wired: boolean }>((resolve) => {
                 let settled = false;
                 let pending: Uint8Array = new Uint8Array(0);
 
-                const finish = (result: boolean): void => {
+                const finish = (result: { wired: boolean }): void => {
                     if (settled) return;
                     settled = true;
                     clearTimeout(timer);
@@ -134,7 +170,7 @@ export class SerialConnection implements Connection {
                     resolve(result);
                 };
 
-                const timer = setTimeout(() => finish(false), SPP_TIMEOUT);
+                const timer = setTimeout(() => finish({ wired: false }), SPP_TIMEOUT);
 
                 handle?.on("data", (chunk: Uint8Array) => {
                     const { lines, rest } = splitLines(pending, chunk);
@@ -143,25 +179,32 @@ export class SerialConnection implements Connection {
                         const { identifier, payload } = parseLine(line);
                         if (identifier !== "i") continue;
                         const info = parseInfo(payload);
-                        if (info && modelFromFirmware(info.model) === "wired") {
-                            finish(true);
-                            return;
+                        if (!info) continue;
+                        let wired = false;
+                        try {
+                            wired = modelFromFirmware(info.model) === "wired";
+                        } catch {
+                            // unknown firmware is still a valid response for a manual port
                         }
+                        finish({ wired });
+                        return;
                     }
                 });
-                handle?.on("close", () => finish(false));
-                handle?.on("error", () => finish(false));
+                handle?.on("close", () => finish({ wired: false }));
+                handle?.on("error", () => finish({ wired: false }));
 
                 if (handle) {
                     const target = handle;
-                    this.#writeProbe(target, "report send info\nblt send info\n");
+                    void this.#writeProbe(target, "report send info\nblt send info\n").then(() =>
+                        this.#writeProbe(target, "i:\n"),
+                    );
                 }
             });
         } catch (error) {
             this.#log.debug(`Wired probe failed on ${port.path}`, { error: String(error) });
-            return false;
+            return { wired: false };
         } finally {
-            if (handle) this.#closeHandle(handle);
+            if (handle) void this.#closeHandle(handle);
         }
     }
 
