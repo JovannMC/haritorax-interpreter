@@ -1,5 +1,5 @@
 import { fromByteArray as encodeBase64, toByteArray as decodeBase64 } from "base64-js";
-import type { BodyPart, ImuRole, TrackerSettings } from "../types.js";
+import type { BodyPart, ImuRole, TrackerSettings } from "../../types.js";
 
 const TRACKER_PARTS: Readonly<Record<string, BodyPart>> = Object.freeze({
     "1": "chest",

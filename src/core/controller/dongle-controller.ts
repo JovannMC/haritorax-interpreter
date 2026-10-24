@@ -1,8 +1,8 @@
-import { HaritoraXError } from "../lib/errors.js";
-import type { Emitter } from "../lib/emitter.js";
-import type { Logger } from "../lib/logging.js";
-import { endpointSlotKey, type DeviceRegistry } from "./device-registry.js";
-import { PairingTracker } from "./pairing.js";
+import { HaritoraXError } from "../../lib/errors.js";
+import type { Emitter } from "../../lib/emitter.js";
+import type { Logger } from "../../lib/logging.js";
+import { endpointSlotKey, type DeviceRegistry } from "../device-registry.js";
+import { PairingTracker } from "../pairing.js";
 import {
     bodyPartOfTracker,
     bodyPartsFor,
@@ -21,10 +21,10 @@ import {
     setChannelCommand,
     splitDongleImu,
     unpairCommands,
-} from "../protocol/dongle.js";
-import { decodeImu } from "../protocol/imu.js";
-import { decodeSettings, modelFromFirmware, parseBattery, parseInfo } from "../protocol/messages.js";
-import type { BodyPart, ConnectionKind, DeviceSnapshot, ImuRole, TrackerSettings } from "../types.js";
+} from "../../protocol/endpoint/dongle.js";
+import { decodeImu } from "../../protocol/codec/imu.js";
+import { decodeSettings, modelFromFirmware, parseBattery, parseInfo } from "../../protocol/codec/messages.js";
+import type { BodyPart, ConnectionKind, DeviceSnapshot, ImuRole, TrackerSettings } from "../../types.js";
 
 const PLACEHOLDER_SERIAL = "A00000";
 const PAIRING_COMMAND_DELAY_MS = 1_000;

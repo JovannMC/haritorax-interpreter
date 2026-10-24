@@ -1,5 +1,5 @@
 import { toByteArray as decodeBase64 } from "base64-js";
-import type { MagStatus, Quaternion, TrackerModel, Vector } from "../types.js";
+import type { MagStatus, Quaternion, TrackerModel, Vector } from "../../types.js";
 
 const ROTATION_SCALAR = 0.01 / 180.0;
 const GRAVITY_SCALAR = 1 / 256.0;

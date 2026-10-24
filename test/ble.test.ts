@@ -9,8 +9,8 @@ import {
     bleSettingValues,
     parseBleDeviceName,
     splitBleImu,
-} from "../dist/protocol/ble.js";
-import type { BleCharacteristic } from "../dist/protocol/ble.js";
+} from "../dist/protocol/endpoint/ble.js";
+import type { BleCharacteristic } from "../dist/protocol/endpoint/ble.js";
 import type { DisconnectReason, TrackerSettings, Unsubscribe } from "../dist/types.js";
 
 function bytes(text: string): Uint8Array {
@@ -45,6 +45,7 @@ class FakeBleBackend implements BleBackend {
 
     readonly #dataHandlers = new Set<(endpointId: string, characteristic: BleCharacteristic, data: Uint8Array) => void>();
     readonly #lostHandlers = new Set<(endpointId: string, reason: DisconnectReason) => void>();
+    readonly #rssiHandlers = new Set<(peripheralId: string, rssi: number) => void>();
 
     scan(_options?: ListOptions): Promise<BlePeripheralSummary[]> {
         return Promise.resolve(this.peripherals);
@@ -79,10 +80,16 @@ class FakeBleBackend implements BleBackend {
         return () => this.#lostHandlers.delete(handler);
     }
 
+    onRssi(handler: (peripheralId: string, rssi: number) => void): Unsubscribe {
+        this.#rssiHandlers.add(handler);
+        return () => this.#rssiHandlers.delete(handler);
+    }
+
     dispose(): Promise<void> {
         this.opened.clear();
         this.#dataHandlers.clear();
         this.#lostHandlers.clear();
+        this.#rssiHandlers.clear();
         return Promise.resolve();
     }
 

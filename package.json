@@ -1,6 +1,6 @@
 {
     "name": "haritorax-interpreter",
-    "version": "4.0.0-dev.0",
+    "version": "4.0.0",
     "homepage": "https://github.com/JovannMC/haritorax-interpreter",
     "repository": {
         "type": "git",
@@ -8,7 +8,7 @@
     },
     "bugs": {
         "url": "https://github.com/JovannMC/haritorax-interpreter/issues",
-        "email": "contact@femboyfurry.net"
+        "email": "hello@jovann.me"
     },
     "description": "Communicate with the HaritoraX trackers",
     "type": "module",
@@ -17,7 +17,6 @@
     "exports": {
         ".": {
             "types": "./dist/index.d.ts",
-            "react-native": "./dist/index.js",
             "import": "./dist/index.js",
             "default": "./dist/index.js"
         },
@@ -51,10 +50,9 @@
         "lint:fix": "eslint . --fix",
         "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
         "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
-        "rawdata": "node test/rawdata-serial.mjs",
         "test": "npm run build && node --test \"test/**/*.test.ts\""
     },
-    "author": "JovannMC <jovannmc@femboyfurry.net> (https://femboyfurry.net)",
+    "author": "JovannMC <hello@jovann.me> (https://jovann.me)",
     "license": "MIT",
     "keywords": [
         "haritora",
@@ -63,6 +61,8 @@
         "gx6",
         "gx2",
         "bluetooth",
+        "ble",
+        "serial",
         "interpreter"
     ],
     "peerDependencies": {

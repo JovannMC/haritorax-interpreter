@@ -18,7 +18,7 @@ import {
     setChannelCommand,
     splitDongleImu,
     unpairCommands,
-} from "../dist/protocol/dongle.js";
+} from "../dist/protocol/endpoint/dongle.js";
 
 /** In-memory connection that also records everything written to it. */
 function memoryConnection(endpointId = "COM4") {
@@ -136,10 +136,10 @@ describe("dongle protocol", () => {
         assert.equal(isRssiLost(""), false);
     });
 
-    it("decodes the first byte of an a: frame as negative dBm", () => {
+    it("decodes the a: frame as dongle and sensor RSSI (negative dBm)", () => {
         // Real lines from testing/HaritoraX Wireless.txt (first byte 0x28..0x37)
-        assert.equal(decodeTrackerRssi("284128442f30"), -0x28);
-        assert.equal(decodeTrackerRssi("374237423b3b"), -0x37);
+        assert.deepEqual(decodeTrackerRssi("284128442f30"), { dongle: -0x28, sensor: -0x41 });
+        assert.deepEqual(decodeTrackerRssi("374237423b3b"), { dongle: -0x37, sensor: -0x42 });
         assert.equal(decodeTrackerRssi(""), undefined);
         assert.equal(decodeTrackerRssi("004128442f30"), undefined); // zero magnitude
     });
@@ -412,9 +412,10 @@ describe("tracker identity", () => {
         serial.emitFrame("a0:374237423b3b");
 
         assert.equal(app.getTracker("A2E987:0")?.rssi, -0x37);
+        assert.equal(app.getTracker("A2E987:0")?.sensorRssi, -0x42);
         assert.deepEqual(rssiEvents, [
-            { trackerId: "A2E987:0", deviceId: "A2E987", rssi: -0x28 },
-            { trackerId: "A2E987:0", deviceId: "A2E987", rssi: -0x37 },
+            { trackerId: "A2E987:0", deviceId: "A2E987", rssi: -0x28, sensorRssi: -0x41 },
+            { trackerId: "A2E987:0", deviceId: "A2E987", rssi: -0x37, sensorRssi: -0x42 },
         ]);
     });
 

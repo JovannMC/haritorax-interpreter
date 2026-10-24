@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { fromByteArray as encodeBase64, toByteArray as decodeBase64 } from "base64-js";
 import { createHaritoraX } from "../dist/index.js";
 import type { Frame, ListOptions } from "../dist/connections/contract.js";
-import { parseWiredButton, splitWiredImu, wiredSettingsCommands } from "../dist/protocol/wired.js";
+import { parseWiredButton, splitWiredImu, wiredSettingsCommands } from "../dist/protocol/endpoint/wired.js";
 import type { DisconnectReason, EndpointDescriptor, TrackerSettings, Unsubscribe } from "../dist/types.js";
 
 const ENDPOINT = "/dev/rfcomm0";

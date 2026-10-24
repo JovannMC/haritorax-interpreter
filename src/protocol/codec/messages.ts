@@ -1,5 +1,5 @@
-import { HaritoraXError } from "../lib/errors.js";
-import type { BatteryInfo, FpsMode, SensorAutoCorrection, SensorMode, TrackerModel, TrackerSettings } from "../types.js";
+import { HaritoraXError } from "../../lib/errors.js";
+import type { BatteryInfo, FpsMode, SensorAutoCorrection, SensorMode, TrackerModel, TrackerSettings } from "../../types.js";
 
 export interface ParsedInfo {
     version: string;

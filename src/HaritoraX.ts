@@ -2,12 +2,12 @@ import { HaritoraXError } from "./lib/errors.js";
 import { Logger, type LogSink } from "./lib/logging.js";
 import { Emitter } from "./lib/emitter.js";
 import { DeviceRegistry } from "./core/device-registry.js";
-import { DongleController } from "./core/dongle-controller.js";
-import { WiredController } from "./core/wired-controller.js";
-import { BleController } from "./core/ble-controller.js";
+import { DongleController } from "./core/controller/dongle-controller.js";
+import { WiredController } from "./core/controller/wired-controller.js";
+import { BleController } from "./core/controller/ble-controller.js";
 import type { ProtocolHandler } from "./core/protocol-handler.js";
-import { asciiEncode, parseIdentifier, parseLine } from "./protocol/framing.js";
-import type { BleCharacteristic } from "./protocol/ble.js";
+import { asciiEncode, parseIdentifier, parseLine } from "./protocol/codec/framing.js";
+import type { BleCharacteristic } from "./protocol/endpoint/ble.js";
 import type { Connection, Frame, ListOptions } from "./connections/contract.js";
 import type {
     BodyPart,

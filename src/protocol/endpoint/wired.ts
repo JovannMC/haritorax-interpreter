@@ -1,6 +1,6 @@
 import { fromByteArray as encodeBase64, toByteArray as decodeBase64 } from "base64-js";
-import { magStatusFromByte } from "./imu.js";
-import type { BodyPart, MagStatus, TrackerSettings } from "../types.js";
+import { magStatusFromByte } from "../codec/imu.js";
+import type { BodyPart, MagStatus, TrackerSettings } from "../../types.js";
 
 const WIRED_PARTS: readonly BodyPart[] = Object.freeze([
     "chest",

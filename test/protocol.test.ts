@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { decodeImu, magStatusFromByte } from "../dist/protocol/imu.js";
+import { decodeImu, magStatusFromByte } from "../dist/protocol/codec/imu.js";
 import { fromByteArray as encodeBase64, toByteArray as decodeBase64 } from "base64-js";
-import { decodeSettings, modelFromFirmware, parseBattery, parseInfo } from "../dist/protocol/messages.js";
+import { decodeSettings, modelFromFirmware, parseBattery, parseInfo } from "../dist/protocol/codec/messages.js";
 
 interface Fixture {
     model: "wireless" | "x2" | "wired";

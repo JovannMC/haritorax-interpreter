@@ -120,6 +120,7 @@ describe("container discovery and connection", () => {
             write: () => Promise.resolve(),
             onData: () => () => {},
             onLost: () => () => {},
+            onRssi: () => () => {},
             dispose: () => Promise.resolve(),
         };
 
@@ -206,6 +207,7 @@ describe("container discovery and connection", () => {
             write: () => Promise.resolve(),
             onData: () => () => {},
             onLost: () => () => {},
+            onRssi: () => () => {},
             dispose: () => Promise.resolve(),
         };
 

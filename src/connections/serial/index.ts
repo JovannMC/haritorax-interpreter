@@ -1,7 +1,7 @@
 import { HaritoraXError } from "../../lib/errors.js";
 import { Logger } from "../../lib/logging.js";
-import { asciiDecode, asciiEncode, parseLine, splitLines } from "../../protocol/framing.js";
-import { modelFromFirmware, parseInfo } from "../../protocol/messages.js";
+import { asciiDecode, asciiEncode, parseLine, splitLines } from "../../protocol/codec/framing.js";
+import { modelFromFirmware, parseInfo } from "../../protocol/codec/messages.js";
 import type { Connection, Frame, ListOptions } from "../contract.js";
 import type { EndpointDescriptor, DisconnectReason, Unsubscribe } from "../../types.js";
 

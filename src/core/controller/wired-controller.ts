@@ -1,9 +1,9 @@
-import type { Emitter } from "../lib/emitter.js";
-import type { Logger } from "../lib/logging.js";
-import type { DeviceRegistry } from "./device-registry.js";
-import type { ProtocolHandler } from "./protocol-handler.js";
-import { decodeImu } from "../protocol/imu.js";
-import { modelFromFirmware, parseBattery, parseInfo, type ParsedInfo } from "../protocol/messages.js";
+import type { Emitter } from "../../lib/emitter.js";
+import type { Logger } from "../../lib/logging.js";
+import type { DeviceRegistry } from "../device-registry.js";
+import type { ProtocolHandler } from "../protocol-handler.js";
+import { decodeImu } from "../../protocol/codec/imu.js";
+import { modelFromFirmware, parseBattery, parseInfo, type ParsedInfo } from "../../protocol/codec/messages.js";
 import {
     parseWiredButton,
     parseWiredState,
@@ -11,8 +11,8 @@ import {
     wiredAnkleEnabled,
     wiredSettingsCommands,
     type WiredState,
-} from "../protocol/wired.js";
-import type { ConnectionKind, TrackerSettings } from "../types.js";
+} from "../../protocol/endpoint/wired.js";
+import type { ConnectionKind, TrackerSettings } from "../../types.js";
 
 const WIRED_SLOT = "0";
 

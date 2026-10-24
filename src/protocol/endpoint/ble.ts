@@ -1,5 +1,5 @@
 import { bodyPartOfTracker } from "./dongle.js";
-import { magStatusFromByte } from "./imu.js";
+import { magStatusFromByte } from "../codec/imu.js";
 import type {
     BodyPart,
     FpsMode,
@@ -9,7 +9,7 @@ import type {
     SensorMode,
     TrackerModel,
     TrackerSettings,
-} from "../types.js";
+} from "../../types.js";
 
 export type BleCharacteristic =
     | "manufacturer"

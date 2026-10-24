@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import { HaritoraXError } from "../../lib/errors.js";
 import type { Logger } from "../../lib/logging.js";
-import { bleCharacteristicFromUuid, type BleCharacteristic } from "../../protocol/ble.js";
+import { bleCharacteristicFromUuid, type BleCharacteristic } from "../../protocol/endpoint/ble.js";
 import { BleConnection, type BleBackend, type BleConnectionOptions, type BlePeripheralSummary } from "./index.js";
 import type { ListOptions } from "../contract.js";
 import type { DisconnectReason, Unsubscribe } from "../../types.js";

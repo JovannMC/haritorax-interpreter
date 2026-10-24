@@ -1,6 +1,6 @@
 import { HaritoraXError } from "../../lib/errors.js";
 import type { Logger } from "../../lib/logging.js";
-import { parseBleDeviceName, type BleCharacteristic } from "../../protocol/ble.js";
+import { parseBleDeviceName, type BleCharacteristic } from "../../protocol/endpoint/ble.js";
 import type { Connection, Frame, ListOptions, WriteOptions } from "../contract.js";
 import type { DisconnectReason, EndpointDescriptor, Unsubscribe } from "../../types.js";
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { asciiDecode, parseIdentifier, parseLine } from "../dist/protocol/framing.js";
+import { asciiDecode, parseIdentifier, parseLine } from "../dist/protocol/codec/framing.js";
 
 describe("serial framing", () => {
     it("splits identifier from payload", () => {

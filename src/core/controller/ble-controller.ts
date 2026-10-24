@@ -1,12 +1,12 @@
 import { fromByteArray as encodeBase64 } from "base64-js";
-import { HaritoraXError } from "../lib/errors.js";
-import type { Emitter } from "../lib/emitter.js";
-import type { Logger } from "../lib/logging.js";
-import type { DeviceRegistry } from "./device-registry.js";
-import type { ProtocolHandler } from "./protocol-handler.js";
-import { bodyPartsFor, isButtonDebounced } from "../protocol/dongle.js";
-import { decodeImu } from "../protocol/imu.js";
-import { modelFromFirmware } from "../protocol/messages.js";
+import { HaritoraXError } from "../../lib/errors.js";
+import type { Emitter } from "../../lib/emitter.js";
+import type { Logger } from "../../lib/logging.js";
+import type { DeviceRegistry } from "../device-registry.js";
+import type { ProtocolHandler } from "../protocol-handler.js";
+import { bodyPartsFor, isButtonDebounced } from "../../protocol/endpoint/dongle.js";
+import { decodeImu } from "../../protocol/codec/imu.js";
+import { modelFromFirmware } from "../../protocol/codec/messages.js";
 import {
     bleAutoCorrection,
     bleBatteryVoltage,
@@ -20,7 +20,7 @@ import {
     bleUint8,
     splitBleImu,
     type BleCharacteristic,
-} from "../protocol/ble.js";
+} from "../../protocol/endpoint/ble.js";
 import type {
     BatteryInfo,
     BodyPart,
@@ -31,7 +31,7 @@ import type {
     SensorMode,
     TrackerModel,
     TrackerSettings,
-} from "../types.js";
+} from "../../types.js";
 
 const BLE_SLOT = "0";
 
