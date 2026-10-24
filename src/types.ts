@@ -56,7 +56,6 @@ export interface DeviceInfo {
     deviceId: string;
     version: string;
     model: string;
-    serialNumber: string;
     imuCount?: number;
     timestamp: number;
 }
@@ -72,7 +71,7 @@ export interface TrackerSettings {
     ankleMotionDetection: boolean;
 }
 
-export type ConnectionKind = "bluetooth-le" | "serial";
+export type ConnectionKind = "ble" | "serial";
 
 export type DisconnectReason = "requested" | "timeout" | "remote" | "error";
 

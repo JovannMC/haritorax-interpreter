@@ -113,7 +113,7 @@ describe("container discovery and connection", () => {
 
     it("does not fail discovery when one connection throws", async () => {
         const broken: Connection = {
-            kind: "bluetooth-le",
+            kind: "ble",
             list: () => Promise.reject(new Error("no adapter")),
             open: () => Promise.resolve(),
             close: () => Promise.resolve(),
@@ -194,7 +194,7 @@ describe("container discovery and connection", () => {
         let receivedSignal: AbortSignal | undefined;
 
         const slow: Connection = {
-            kind: "bluetooth-le",
+            kind: "ble",
             list: (options) => {
                 receivedSignal = options?.signal;
                 return new Promise((resolve) => {
@@ -275,7 +275,7 @@ describe("protocol dispatch", () => {
     it("creates a serial-keyed device from i0 and emits info", async () => {
         const { app, serial } = await connected();
 
-        const infos: Array<{ deviceId: string; serialNumber: string; model: string }> = [];
+        const infos: Array<{ deviceId: string; model: string }> = [];
         app.on("info", (info) => infos.push(info));
 
         serial.emitFrame("COM4", 'i0:{"version":"1.0.22","model":"mc3s","serial no":"A2E987"}');
@@ -292,7 +292,7 @@ describe("protocol dispatch", () => {
         assert.equal(device.trackers[0]?.bodyPart, "unassigned");
         assert.equal(device.connection, "serial");
         assert.equal(infos[0]?.deviceId, "A2E987");
-        assert.equal(infos[0]?.serialNumber, "A2E987");
+        assert.equal(infos[0]?.deviceId, "A2E987");
         assert.equal(infos[0]?.model, "mc3s");
     });
 

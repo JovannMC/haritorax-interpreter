@@ -4,8 +4,10 @@ import { Emitter } from "./lib/emitter.js";
 import { DeviceRegistry } from "./core/device-registry.js";
 import { DongleController } from "./core/dongle-controller.js";
 import { WiredController } from "./core/wired-controller.js";
+import { BleController } from "./core/ble-controller.js";
 import type { ProtocolHandler } from "./core/protocol-handler.js";
 import { asciiEncode, parseIdentifier, parseLine } from "./protocol/framing.js";
+import type { BleCharacteristic } from "./protocol/ble.js";
 import type { Connection, Frame, ListOptions } from "./connections/contract.js";
 import type {
     BodyPart,
@@ -28,6 +30,7 @@ export class HaritoraX {
     readonly #registry: DeviceRegistry;
     readonly #dongle: DongleController;
     readonly #wired: WiredController;
+    readonly #ble: BleController;
     readonly #handlers = new Map<string, ProtocolHandler>();
 
     #endpoints: EndpointDescriptor[] = [];
@@ -45,7 +48,6 @@ export class HaritoraX {
             this.#emitter.emit("log", entry);
         });
         this.#emitter.setErrorHandler((event, error) => {
-            // Logging from a throwing "log" listener would recurse forever.
             if (event === "log") return;
             this.#log.error(`Listener for "${event}" threw`, { error: String(error) });
         });
@@ -68,6 +70,13 @@ export class HaritoraX {
             registry: this.#registry,
             connectionKind,
             write: (endpointId, command) => this.#writeCommand(endpointId, command),
+        });
+        this.#ble = new BleController({
+            emitter: this.#emitter,
+            log: this.#log,
+            registry: this.#registry,
+            connectionKind,
+            write: (endpointId, characteristic, data) => this.#writeBleCommand(endpointId, characteristic, data),
         });
 
         for (const connection of this.#connections) {
@@ -106,7 +115,11 @@ export class HaritoraX {
             for (const descriptor of found) {
                 merged.set(descriptor.id, descriptor);
                 this.#endpointOwners.set(descriptor.id, connection);
-                this.#handlers.set(descriptor.id, descriptor.model === "wired" ? this.#wired : this.#dongle);
+
+                const handler =
+                    descriptor.connection === "ble" ? this.#ble : descriptor.model === "wired" ? this.#wired : this.#dongle;
+
+                this.#handlers.set(descriptor.id, handler);
             }
         }
 
@@ -158,6 +171,11 @@ export class HaritoraX {
         if (!device) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown device "${deviceId}"`);
         if (!this.#open.has(device.endpointId))
             throw new HaritoraXError("NOT_CONNECTED", `${device.endpointId} is not connected`);
+
+        if (device.connection === "ble") {
+            await this.#ble.setSettings(device.endpointId, settings);
+            return;
+        }
 
         if (device.model === "wired") {
             const endpointIds = this.#endpoints
@@ -228,6 +246,7 @@ export class HaritoraX {
         this.#discovery = undefined;
         this.#dongle.dispose();
         this.#wired.dispose();
+        this.#ble.dispose();
 
         for (const unsubscribe of this.#subscriptions) unsubscribe();
         this.#subscriptions.length = 0;
@@ -261,6 +280,18 @@ export class HaritoraX {
         let identifier = "";
 
         try {
+            if (frame.characteristic !== undefined) {
+                if (this.#log.enabled("debug")) {
+                    this.#log.debug(`Frame ${frame.characteristic} from ${frame.endpointId}`, {
+                        bytes: frame.data.length,
+                    });
+                }
+
+                const handler = this.#handlers.get(frame.endpointId) ?? this.#ble;
+                handler.handleBinaryFrame?.(frame.endpointId, frame.characteristic, frame.data);
+                return;
+            }
+
             const line = parseLine(frame.data);
             identifier = line.identifier;
             const { payload } = line;
@@ -297,6 +328,13 @@ export class HaritoraX {
         if (!connection) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown endpoint "${endpointId}"`);
 
         return connection.write(endpointId, asciiEncode(command));
+    }
+
+    async #writeBleCommand(endpointId: string, characteristic: BleCharacteristic, data: Uint8Array): Promise<void> {
+        const connection = this.#endpointOwners.get(endpointId);
+        if (!connection) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown endpoint "${endpointId}"`);
+
+        return connection.write(endpointId, data, { characteristic });
     }
 
     #dropEndpoint(endpointId: string, reason: DisconnectReason): void {

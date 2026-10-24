@@ -349,7 +349,6 @@ export class DeviceRegistry {
             deviceId: input.deviceId,
             version: input.version,
             model: input.firmwareModel,
-            serialNumber: input.deviceId,
             imuCount: input.reportedImuCount,
             timestamp: Date.now(),
         });
