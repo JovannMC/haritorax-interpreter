@@ -1,6 +1,7 @@
 import { HaritoraXError } from "../../lib/errors.js";
 import { Logger } from "../../lib/logging.js";
-import { asciiDecode, asciiEncode, splitLines } from "../../protocol/framing.js";
+import { asciiDecode, asciiEncode, parseLine, splitLines } from "../../protocol/framing.js";
+import { modelFromFirmware, parseInfo } from "../../protocol/messages.js";
 import type { Connection, Frame, ListOptions } from "../contract.js";
 import type { EndpointDescriptor, DisconnectReason, Unsubscribe } from "../../types.js";
 
@@ -47,6 +48,10 @@ const DONGLE_HEARTBEAT = Object.freeze(["i:"]);
 const WIRED_HEARTBEAT = Object.freeze(["report send info\nblt send info"]);
 const HEARTBEAT_MS = 5_000;
 
+// on windows, serialport can't read BusReportedDesc (only place that shows "HaritoraX"), so have to list all SPP ports (shown as BTHENUM) and check each one for a heartbeat reply
+const SPP_SERVICE_GUID = "00001101-0000-1000-8000-00805f9b34fb";
+const SPP_TIMEOUT = 800;
+
 const MAX_PENDING_BYTES = 64 * 1024;
 
 interface OpenPort {
@@ -85,26 +90,94 @@ export class SerialConnection implements Connection {
             throw new HaritoraXError("LINK_UNAVAILABLE", "Failed to enumerate serial ports", { cause: error });
         });
 
-        return ports.flatMap((port): EndpointDescriptor[] => {
+        const endpoints: EndpointDescriptor[] = [];
+        const wiredCandidates: PortSummary[] = [];
+
+        for (const port of ports) {
             const dongle = DONGLE_IDS[`${port.vendorId}:${port.productId}`.toLowerCase()];
             if (dongle) {
-                return [{ id: port.path, connection: this.kind, displayName: `${dongle} (${port.path})`, dongle }];
+                endpoints.push({ id: port.path, connection: this.kind, displayName: `${dongle} (${port.path})`, dongle });
+            } else if (this.#includeWired && isWiredPort(port)) {
+                wiredCandidates.push(port);
             }
+        }
 
-            if (this.#includeWired && isWiredPort(port)) {
+        for (const port of wiredCandidates) {
+            if (await this.#probeWiredPort(port)) {
                 this.#wiredEndpoints.add(port.path);
-                return [
-                    {
-                        id: port.path,
-                        connection: this.kind,
-                        displayName: `HaritoraX Wired (${port.path})`,
-                        model: "wired" as const,
-                    },
-                ];
+                endpoints.push({
+                    id: port.path,
+                    connection: this.kind,
+                    displayName: `HaritoraX Wired (${port.path})`,
+                    model: "wired" as const,
+                });
             }
+        }
 
-            return [];
+        return endpoints;
+    }
+
+    // tries a port candidate to see if it is a wired device by sending a heartbeat and waiting for a reply
+    async #probeWiredPort(port: PortSummary): Promise<boolean> {
+        let handle: SerialPort | undefined;
+        try {
+            handle = await this.#backend.open(port.path);
+            return await new Promise<boolean>((resolve) => {
+                let settled = false;
+                let pending: Uint8Array = new Uint8Array(0);
+
+                const finish = (result: boolean): void => {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(timer);
+                    handle?.removeAllListeners();
+                    resolve(result);
+                };
+
+                const timer = setTimeout(() => finish(false), SPP_TIMEOUT);
+
+                handle?.on("data", (chunk: Uint8Array) => {
+                    const { lines, rest } = splitLines(pending, chunk);
+                    pending = rest;
+                    for (const line of lines) {
+                        const { identifier, payload } = parseLine(line);
+                        if (identifier !== "i") continue;
+                        const info = parseInfo(payload);
+                        if (info && modelFromFirmware(info.model) === "wired") {
+                            finish(true);
+                            return;
+                        }
+                    }
+                });
+                handle?.on("close", () => finish(false));
+                handle?.on("error", () => finish(false));
+
+                if (handle) {
+                    const target = handle;
+                    this.#writeProbe(target, "report send info\nblt send info\n");
+                }
+            });
+        } catch (error) {
+            this.#log.debug(`Wired probe failed on ${port.path}`, { error: String(error) });
+            return false;
+        } finally {
+            if (handle) this.#closeHandle(handle);
+        }
+    }
+
+    #writeProbe(handle: SerialPort, data: string): Promise<void> {
+        return new Promise((resolve) => {
+            handle.write(data, (error) => {
+                if (error) this.#log.debug(`Wired probe write failed: ${String(error)}`);
+                resolve();
+            });
         });
+    }
+
+    #closeHandle(handle: SerialPort): Promise<void> {
+        handle.removeAllListeners();
+        if (!handle.isOpen) return Promise.resolve();
+        return new Promise((resolve) => handle.close(() => resolve()));
     }
 
     async open(endpointId: string): Promise<void> {
@@ -219,11 +292,12 @@ export class SerialConnection implements Connection {
     }
 }
 
-// TODO: ts likely isnt it lol, i need to collect real data again
-// letting the AI do this for now while i need to collect real data unhmgsgklnmm
+// annoying to detect wired trackers guh.
 function isWiredPort(port: PortSummary): boolean {
     const path = port.path.toLowerCase();
     if (path.startsWith("/dev/rfcomm") || path.includes("haritora")) return true;
+
+    if ((port.pnpId ?? "").toLowerCase().includes(SPP_SERVICE_GUID)) return true;
 
     const name = `${port.manufacturer ?? ""} ${port.pnpId ?? ""} ${port.serialNumber ?? ""}`.toLowerCase();
     return name.includes("haritora");
