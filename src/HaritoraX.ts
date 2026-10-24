@@ -209,6 +209,55 @@ export class HaritoraX {
         return this.#dongle.unpair(endpointId, slot);
     }
 
+    async powerOff(deviceId: string): Promise<void> {
+        const device = this.#registry.getDevice(deviceId);
+        if (!device) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown device "${deviceId}"`);
+        if (device.model === "wired") throw new HaritoraXError("NOT_SUPPORTED", "Power-off is not supported for wired devices");
+        if (!this.#open.has(device.endpointId))
+            throw new HaritoraXError("NOT_CONNECTED", `${device.endpointId} is not connected`);
+
+        if (device.connection === "ble") {
+            await this.#ble.powerOff(device.endpointId);
+        } else {
+            const snapshot = device.settings;
+            const settings: TrackerSettings = snapshot ?? {
+                sensorMode: 2,
+                fpsMode: 50,
+                sensorAutoCorrection: [],
+                ankleMotionDetection: false,
+            };
+            await this.#dongle.powerOff(device.endpointId, device.slot, settings);
+        }
+
+        this.#log.info(`Powering off ${deviceId}`);
+    }
+
+    async switchCommunication(deviceId: string, mode: "ble" | "serial"): Promise<void> {
+        const device = this.#registry.getDevice(deviceId);
+        if (!device) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown device "${deviceId}"`);
+        if (device.model === "wired")
+            throw new HaritoraXError("NOT_SUPPORTED", "Switching communication is not supported for wired devices");
+        if (!this.#open.has(device.endpointId))
+            throw new HaritoraXError("NOT_CONNECTED", `${device.endpointId} is not connected`);
+
+        if (device.connection === "ble") {
+            if (mode === "ble") throw new HaritoraXError("NOT_SUPPORTED", "This tracker is already on BLE communication");
+            await this.#ble.switchCommunication(device.endpointId);
+        } else {
+            if (mode === "serial") throw new HaritoraXError("NOT_SUPPORTED", "This tracker is already on serial communication");
+            const snapshot = device.settings;
+            const settings: TrackerSettings = snapshot ?? {
+                sensorMode: 2,
+                fpsMode: 50,
+                sensorAutoCorrection: [],
+                ankleMotionDetection: false,
+            };
+            await this.#dongle.switchCommunication(device.endpointId, device.slot, settings);
+        }
+
+        this.#log.info(`Switching ${deviceId} to ${mode}`);
+    }
+
     async connect(endpointId: string): Promise<void> {
         const connection = this.#endpointOwners.get(endpointId);
         if (!connection) {

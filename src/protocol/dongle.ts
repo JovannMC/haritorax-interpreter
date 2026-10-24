@@ -112,18 +112,54 @@ export function unpairCommands(channel: number, slot: "0" | "1"): readonly strin
     return Object.freeze([`o:30${channel.toString(16)}2`, setChannelCommand(channel)]);
 }
 
-// sending "o(x):00000" + fps + sensor mode + "010" + auto-correction + "00" + ankle motion detection
-// e.g. "o0:0000010100000" for 100fps, sensor mode 1, no auto-correction, no ankle motion detection, for slot 0
-// yea this is just how settings are lol
-export function dongleSettingsCommand(slot: string, settings: TrackerSettings): string {
-    let correctionBits = 0;
-    if (settings.sensorAutoCorrection.includes("accel")) correctionBits |= 1;
-    if (settings.sensorAutoCorrection.includes("gyro")) correctionBits |= 2;
-    if (settings.sensorAutoCorrection.includes("mag")) correctionBits |= 4;
+// sending "o(x):00000" + fps + sensor mode + "010" + auto-correction + "0" + command + ankle motion detection
+// e.g. "o0:00000110107000" for 100fps, sensor mode 1, accel+gyro+mag sensor auto correction, no ankle motion detection. for slot 0.
+// bit 12 is command, 0 = normal, 1 = switch to BLE, 2 = power off
+export function dongleSettingsCommand(slot: string, settings: TrackerSettings, command?: number): string {
+    let correction = 0;
+    if (settings.sensorAutoCorrection.includes("accel")) correction |= 1;
+    if (settings.sensorAutoCorrection.includes("gyro")) correction |= 2;
+    if (settings.sensorAutoCorrection.includes("mag")) correction |= 4;
 
-    const fpsBit = settings.fpsMode === 100 ? 1 : 0;
-    const sensorBit = settings.sensorMode === 1 ? 1 : 0;
-    const ankleBit = settings.ankleMotionDetection ? 1 : 0;
+    const fps = settings.fpsMode === 100 ? 1 : 0;
+    const sensor = settings.sensorMode === 1 ? 1 : 0;
+    const ankle = settings.ankleMotionDetection ? 1 : 0;
+    const cmd = command ?? 0;
 
-    return `o${slot}:00000${fpsBit}${sensorBit}010${correctionBits}00${ankleBit}`;
+    return `o${slot}:00000${fps}${sensor}010${correction}0${cmd}${ankle}`;
+}
+
+// e.g. `r0:110060800a00`
+// main button pressed 7 times, sub button pressed 9 times
+export function parseDongleButtons(payload: string, previous: DongleButtonState): DongleButtonState {
+    const main = Number.parseInt(payload.charAt(6), 16);
+    const sub = Number.parseInt(payload.charAt(9), 16);
+
+    const result: DongleButtonState = { main: Number.isNaN(main) ? 0 : main, sub: Number.isNaN(sub) ? 0 : sub };
+
+    if (result.main !== 0 && result.main !== previous.main) result.pressed = "main";
+    else if (result.sub !== 0 && result.sub !== previous.sub) result.pressed = "sub";
+
+    return result;
+}
+
+export function isButtonDebounced(
+    key: string,
+    button: "main" | "sub" | "sub2",
+    lastPress: Map<string, number>,
+    now: number,
+    debounceMs: number,
+): boolean {
+    const tag = `${key}:${button}`;
+    const last = lastPress.get(tag);
+    if (last !== undefined && now - last < debounceMs) return true;
+
+    lastPress.set(tag, now);
+    return false;
+}
+
+export interface DongleButtonState {
+    main: number;
+    sub: number;
+    pressed?: "main" | "sub";
 }

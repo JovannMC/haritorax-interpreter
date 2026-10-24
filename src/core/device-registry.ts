@@ -114,6 +114,7 @@ export class DeviceRegistry {
                 this.#deviceByEndpointSlot.set(key, deviceId);
                 existing.endpointId = endpointId;
                 existing.slot = slot;
+                existing.connection = input.connection;
                 for (const tracker of existing.trackers) tracker.endpointId = endpointId;
             }
 

@@ -6,11 +6,14 @@ import { PairingTracker } from "./pairing.js";
 import {
     bodyPartOfTracker,
     bodyPartsFor,
+    DongleButtonState,
     dongleSettingsCommand,
+    isButtonDebounced,
     isDongleSlot,
     isValidChannel,
     pairCommands,
     parseChannel,
+    parseDongleButtons,
     parsePairingResult,
     parseTrackerId,
     setChannelCommand,
@@ -33,6 +36,7 @@ export interface DongleControllerOptions {
     connectionKind: (endpointId: string) => ConnectionKind;
     write: (endpointId: string, command: string) => Promise<void>;
     onChannel: (endpointId: string, channel: number) => void;
+    buttonDebounceMs?: number;
 }
 
 export class DongleController {
@@ -47,6 +51,9 @@ export class DongleController {
     readonly #channels = new Map<string, number>();
     // pending/current dongle identity, keyed by endpointId:slot
     readonly #identities = new Map<string, TrackerIdentity>();
+    readonly #buttons = new Map<string, DongleButtonState>();
+    readonly #lastButtonPress = new Map<string, number>();
+    readonly #buttonDebounceMs: number;
     readonly #pairings = new PairingTracker();
 
     constructor(options: DongleControllerOptions) {
@@ -57,6 +64,7 @@ export class DongleController {
         this.#connectionKind = options.connectionKind;
         this.#write = options.write;
         this.#onChannel = options.onChannel;
+        this.#buttonDebounceMs = options.buttonDebounceMs ?? 200;
     }
 
     /*
@@ -134,6 +142,35 @@ export class DongleController {
         this.#log.info(`Applied settings to ${endpointId}:${slot}`);
     }
 
+    async powerOff(endpointId: string, slot: string, settings: TrackerSettings): Promise<void> {
+        if (!this.#isOpen(endpointId)) {
+            throw new HaritoraXError("NOT_CONNECTED", `${endpointId} is not connected`);
+        }
+
+        const command = dongleSettingsCommand(slot, settings, 2);
+        const restore = dongleSettingsCommand(slot, settings, 0);
+        await this.#write(endpointId, command);
+        await delay(150);
+        await this.#write(endpointId, restore);
+
+        this.#log.info(`Powering off ${endpointId}:${slot}`);
+    }
+
+    // swaps to BLE
+    async switchCommunication(endpointId: string, slot: string, settings: TrackerSettings): Promise<void> {
+        if (!this.#isOpen(endpointId)) {
+            throw new HaritoraXError("NOT_CONNECTED", `${endpointId} is not connected`);
+        }
+
+        const command = dongleSettingsCommand(slot, settings, 1);
+        const restore = dongleSettingsCommand(slot, settings, 0);
+        await this.#write(endpointId, command);
+        await delay(150);
+        await this.#write(endpointId, restore);
+
+        this.#log.info(`Switching ${endpointId}:${slot} to BLE`);
+    }
+
     /*
      * frame handling
      */
@@ -170,7 +207,14 @@ export class DongleController {
 
         const prefix = `${endpointId}:`;
         for (const key of [...this.#identities.keys()]) {
-            if (key.startsWith(prefix)) this.#identities.delete(key);
+            if (key.startsWith(prefix)) {
+                this.#identities.delete(key);
+                this.#buttons.delete(key);
+            }
+        }
+
+        for (const key of this.#lastButtonPress.keys()) {
+            if (key.startsWith(prefix)) this.#lastButtonPress.delete(key);
         }
     }
 
@@ -178,6 +222,8 @@ export class DongleController {
         this.#pairings.cancelAll();
         this.#channels.clear();
         this.#identities.clear();
+        this.#buttons.clear();
+        this.#lastButtonPress.clear();
     }
 
     /*
@@ -246,7 +292,8 @@ export class DongleController {
         });
     }
 
-    // "r0:"/"r1:" replies identify the tracker currently paired to that slot
+    // "r0:"/"r1:" replies identify the tracker currently paired to that slot and button states
+    // 5th bit is tracker id, 7th and 10th bit are main/sub button states
     #onIdentity(endpointId: string, slot: string, payload: string): void {
         const dongleId = parseTrackerId(payload);
         if (!dongleId) return;
@@ -258,17 +305,29 @@ export class DongleController {
         }
 
         const key = endpointSlotKey(endpointId, slot);
-        const previous = this.#identities.get(key);
-        if (previous?.dongleId === dongleId && previous.bodyPart === bodyPart) return;
+        const identity = this.#identities.get(key);
 
-        this.#identities.set(key, { dongleId, bodyPart });
-        this.#log.info(`Identified ${endpointId}:${slot} as ${bodyPart} (tracker ${dongleId})`);
+        // register identity on first discovery
+        if (!identity || identity.dongleId !== dongleId || identity.bodyPart !== bodyPart) {
+            this.#identities.set(key, { dongleId, bodyPart });
+            this.#log.info(`Identified ${endpointId}:${slot} as ${bodyPart} (tracker ${dongleId})`);
+        }
 
+        // update body parts and device if identity is new
         const device = this.#registry.deviceAt(endpointId, slot);
-        if (!device) return;
+        if (device) this.#registry.setTrackers(device.deviceId, bodyPartsFor(bodyPart, device.imuCount ?? 1));
 
-        // update bodyPart of trackers
-        this.#registry.setTrackers(device.deviceId, bodyPartsFor(bodyPart, device.imuCount));
+        // parse and emit button state changes on every `r(x):` frame
+        const buttonKey = endpointSlotKey(endpointId, slot);
+        const buttonState = this.#buttons.get(buttonKey) ?? { main: 0, sub: 0 };
+        const updated = parseDongleButtons(payload, buttonState);
+        this.#buttons.set(buttonKey, updated);
+
+        if (!updated.pressed || !device) return;
+
+        if (!isButtonDebounced(buttonKey, updated.pressed, this.#lastButtonPress, Date.now(), this.#buttonDebounceMs)) {
+            this.#emitter.emit("button", { deviceId: device.deviceId, button: updated.pressed });
+        }
     }
 
     #onBattery(endpointId: string, slot: string, payload: string): void {

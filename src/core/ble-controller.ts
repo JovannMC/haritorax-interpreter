@@ -4,7 +4,7 @@ import type { Emitter } from "../lib/emitter.js";
 import type { Logger } from "../lib/logging.js";
 import type { DeviceRegistry } from "./device-registry.js";
 import type { ProtocolHandler } from "./protocol-handler.js";
-import { bodyPartsFor } from "../protocol/dongle.js";
+import { bodyPartsFor, isButtonDebounced } from "../protocol/dongle.js";
 import { decodeImu } from "../protocol/imu.js";
 import { modelFromFirmware } from "../protocol/messages.js";
 import {
@@ -41,6 +41,7 @@ export interface BleControllerOptions {
     registry: DeviceRegistry;
     connectionKind: (endpointId: string) => ConnectionKind;
     write: (endpointId: string, characteristic: BleCharacteristic, data: Uint8Array) => Promise<void>;
+    buttonDebounceMs?: number;
 }
 
 export class BleController implements ProtocolHandler {
@@ -50,6 +51,8 @@ export class BleController implements ProtocolHandler {
     readonly #connectionKind: (endpointId: string) => ConnectionKind;
     readonly #write: (endpointId: string, characteristic: BleCharacteristic, data: Uint8Array) => Promise<void>;
     readonly #states = new Map<string, BleState>();
+    readonly #lastButtonPress = new Map<string, number>();
+    readonly #buttonDebounceMs: number;
 
     constructor(options: BleControllerOptions) {
         this.#emitter = options.emitter;
@@ -57,6 +60,7 @@ export class BleController implements ProtocolHandler {
         this.#registry = options.registry;
         this.#connectionKind = options.connectionKind;
         this.#write = options.write;
+        this.#buttonDebounceMs = options.buttonDebounceMs ?? 200;
     }
 
     handleFrame(): void {}
@@ -186,10 +190,33 @@ export class BleController implements ProtocolHandler {
 
     forgetEndpoint(endpointId: string): void {
         this.#states.delete(endpointId);
+        for (const key of this.#lastButtonPress.keys()) {
+            if (key.startsWith(endpointId)) this.#lastButtonPress.delete(key);
+        }
+    }
+
+    async powerOff(endpointId: string): Promise<void> {
+        const state = this.#state(endpointId);
+        const device = this.#ensureDevice(state);
+        if (!device) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown BLE tracker on "${endpointId}"`);
+
+        await this.#write(endpointId, "wireless-mode", new Uint8Array([2]));
+        this.#log.info(`Powering off BLE ${endpointId}`);
+    }
+
+    // swaps to GX dongle
+    async switchCommunication(endpointId: string): Promise<void> {
+        const state = this.#state(endpointId);
+        const device = this.#ensureDevice(state);
+        if (!device) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown BLE tracker on "${endpointId}"`);
+
+        await this.#write(endpointId, "wireless-mode", new Uint8Array([1]));
+        this.#log.info(`Switching BLE ${endpointId} to serial`);
     }
 
     dispose(): void {
         this.#states.clear();
+        this.#lastButtonPress.clear();
     }
 
     #onImu(state: BleState, data: Uint8Array): void {
@@ -228,6 +255,8 @@ export class BleController implements ProtocolHandler {
     #onButton(state: BleState, button: "main" | "sub" | "sub2"): void {
         const device = this.#ensureDevice(state);
         if (!device) return;
+
+        if (isButtonDebounced(state.endpointId, button, this.#lastButtonPress, Date.now(), this.#buttonDebounceMs)) return;
 
         this.#emitter.emit("button", { deviceId: device.deviceId, button });
     }
