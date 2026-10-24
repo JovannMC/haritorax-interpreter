@@ -1,24 +1,87 @@
 # HaritoraX Interpreter
 
-![Showcase of the package output with debug logs on, showing the data such as tracker settings, info, and interpreted IMU data via the GX6 dongle](showcase.png)
+A node.js package that enables communication with the HaritoraX FBT trackers to read & write data to them. No HaritoraConfigurator / Shiftall VR Manager software needed!
 
-A node.js package that enables communication with the HaritoraX FBT trackers to read/write data to the trackers. No HaritoraConfigurator / VR Manager software needed (mostly)!
-
-Check out the Haritora-GX(6/2) proof-of-concept repository here: https://github.com/JovannMC/haritora-gx-poc
+Check out the Haritora-GX(6/2) POC if you want some more info: <https://github.com/JovannMC/haritora-gx-poc>
 
 ## Installation
 
 `npm install haritorax-interpreter`
 
-## Documentation
+or
 
-Will write actual documentation at some point, for now refer to the source code, examples, and JSDoc comments. You may also see how it's used in [SlimeTora](https://github.com/OCSYT/SlimeTora)!
+`pnpm install haritorax-interpreter`
+
+or
+
+`(insert whatever package manager, lol)`
+
+## Quick start
+
+The package is split so you can import only what you need and most dependencies are optional:
+
+```ts
+import { createHaritoraX } from "haritorax-interpreter";
+import { createSerialConnection } from "haritorax-interpreter/connections/serial";
+
+const serial = createSerialConnection();
+const app = createHaritoraX({ connections: [serial], logLevel: "info" });
+
+const endpoints = await app.discover();
+for (const endpoint of endpoints) await app.connect(endpoint.id);
+
+app.on("imu", (sample) => console.log(sample.deviceId, sample.rotation));
+```
+
+Bluetooth LE is used by using `createBleConnection` from `haritorax-interpreter/connections/ble`.
+
+### Serial options
+
+GX2 and GX6 dongles are detected by VID/PID. Wired SPP detection is opt-in:
+
+```ts
+const serial = createSerialConnection({ includeWired: true });
+```
+
+If you prefer, you can specify serial port paths explicitly instead, GX(6/2) dongles or wired SPP devices:
+
+```ts
+const serial = createSerialConnection({
+    serialPorts: ["COM14", "/dev/ttyACM0", "/dev/rfcomm0"],
+});
+```
+
+On Linux, you can use optionally use `autoBindWired: true` to check paired HaritoraX Wired Bluetooth devices, resolve their SPP channel with `sdptool`, and attempt `rfcomm bind` for you, instead of doing it yourself. This requires `bluetoothctl`, `sdptool`, and `rfcomm`.
+
+If you want to do it manually instead, find the paired device and resolve its SPP channel:
+
+```bash
+# look for a "HaritoraX" device and note its MAC address
+bluetoothctl devices Paired
+
+# make sure it says "Connected: yes"
+bluetoothctl info <MAC>
+# e.g. bluetoothctl info 00:11:22:33:44:55
+
+# find the "Serial Port" profile and note the Channel number
+sdptool browse <MAC>
+# e.g. sdptool browse 00:11:22:33:44:55
+```
+
+Then bind it to an RFCOMM device:
+
+```bash
+sudo rfcomm bind /dev/rfcomm0 <MAC> <channel>
+# e.g. sudo rfcomm bind /dev/rfcomm0 00:11:22:33:44:55 1
+```
+
+The device will then appear as `/dev/rfcomm0` and be detected automatically by the package.
 
 ## Linux-specific instructions
 
 For Linux users, you (or your users) need to do some setup depending on the connection mode so the package can communicate with the trackers:
 
-### Bluetooth Classic (SPP)/COM/Serial port
+### Serial ports / Bluetooth (SPP)
 
 - Run the following commands in your terminal:
   - `sudo usermod -a -G dialout $USER`
@@ -27,52 +90,34 @@ For Linux users, you (or your users) need to do some setup depending on the conn
 
 ### Bluetooth (LE)
 
-> See https://github.com/chrvadala/node-ble/tree/main?tab=readme-ov-file#provide-permissions for more info
+BLE on Linux uses [noble](https://github.com/stoprocent/noble)'s BlueZ D-Bus binding through the optional `dbus-next` dependency. On most distributions just make sure BlueZ is running, Bluetooth is enabled, and your user has access to the adapter.
 
-- Run the following command:
-  - This creates a DBus config that will allow the interpreter to access your BLE devices
-  - You may need to change `__USERID__` if it couldn't detect your user
-
-```
-echo '<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
-  "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
-<busconfig>
-  <policy user="__USERID__">
-   <allow own="org.bluez"/>
-    <allow send_destination="org.bluez"/>
-    <allow send_interface="org.bluez.GattCharacteristic1"/>
-    <allow send_interface="org.bluez.GattDescriptor1"/>
-    <allow send_interface="org.freedesktop.DBus.ObjectManager"/>
-    <allow send_interface="org.freedesktop.DBus.Properties"/>
-  </policy>
-</busconfig>' | sed "s/__USERID__/$(id -un)/" | sudo tee /etc/dbus-1/system.d/node-ble.conf > /dev/null
-```
-
-- Restart your computer
+If discovery fails with a D-Bus or permission error, check your distribution's BlueZ/polkit configuration and system logs.
 
 ## Supported devices
 
-| Device             | Supported | Elbow/Hip support | Additional trackers | Extensions |
-|--------------------|-----------|-------------------|---------------------|------------|
-| HaritoraX 2        |     N     |         N         |         N           |     N      |
-| HaritoraX Wireless |     N     |         N         |         N           |     N      |
-| HaritoraX 1.1B     |     N     |         N         |         N           |     N      |
-| HaritoraX 1.1      |     N     |         N         |         N           |     N      |
-| HaritoraX 1.0      |     N     |         N         |         N           |     N      |
-| Haritora           |     ?     |         ?         |         N           |     N      |
+| Device             | Supported | Additional trackers (e.g. elbow/hip) | Extensions |
+| ------------------ | --------- | ------------------------------------ | ---------- |
+| HaritoraX 2 Pro    | ?         | ?                                    | -          |
+| HaritoraX 2        | Y         | Y                                    | Y          |
+| HaritoraX Wireless | Y         | Y                                    | -          |
+| HaritoraX 1.1B     | Y         | Y                                    | -          |
+| HaritoraX 1.1      | Y         | Y                                    | -          |
+| HaritoraX 1.0      | Y         | Y                                    | -          |
+| Haritora           | N         | N                                    | -          |
 
-| Communication mode        | Supported |
-|---------------------------|-----------|
-| Bluetooth (Low Energy)    |     N     |
-| Bluetooth Classic (serial)|     N     |
-| GX6 Communication Dongle  |     N     |
-| GX2 Communication Dongle  |     N     |
+| Communication mode       | Supported |
+| ------------------------ | --------- |
+| Bluetooth (Low Energy)   | Y         |
+| Bluetooth (SPP)          | Y         |
+| GX6 Communication Dongle | Y         |
+| GX2 Communication Dongle | Y         |
 
 ## Projects using package
 
-- [SlimeTora](https://github.com/OCSYT/SlimeTora) - A program that connects any of the HaritoraX trackers to the SlimeVR server, supporting Bluetooth (classic), Bluetooth (low energy), and the GX(6/2) communication dongles for all the HaritoraX tracker models!
+- [SlimeTora](https://github.com/OCSYT/SlimeTora) - A program that connects any of the HaritoraX trackers to the SlimeVR server, supporting Bluetooth (SPP), Bluetooth (LE), and the GX(6/2) communication dongles for all the HaritoraX tracker models!
 
-Let me know if you want to be featured here, if you are using this package in any project!
+Let me know if you are using this package if you want to be featured here!
 
 ## License
 
