@@ -146,7 +146,7 @@ describe("dongle protocol", () => {
 
     it("splits a dongle IMU payload into one or two slices", () => {
         const single = "QAV1/Is6EBngAaf/bAkCAA==";
-        assert.deepEqual(splitDongleImu(single, 1), [{ payload: single, role: "ankle", index: 0 }]);
+        assert.deepEqual(splitDongleImu(single, 1), [{ payload: single, role: "ankle", index: 0, status: 0x0002 }]);
 
         const leg = decodeBase64(single);
         const combo = new Uint8Array(30);
@@ -157,7 +157,7 @@ describe("dongle protocol", () => {
         const payload = encodeBase64(combo);
 
         // a 30-byte payload on a 1-tracker device stays whole (v3 behaviour)
-        assert.deepEqual(splitDongleImu(payload, 1), [{ payload, role: "ankle", index: 0 }]);
+        assert.deepEqual(splitDongleImu(payload, 1), [{ payload, role: "ankle", index: 0, status: 0x0103 }]);
 
         const slices = splitDongleImu(payload, 2);
         assert.equal(slices.length, 2);
@@ -169,9 +169,10 @@ describe("dongle protocol", () => {
             slices.map((slice) => slice.index),
             [0, 1],
         );
+        // both IMUs share the status word at bytes 14-15
         assert.deepEqual(
-            slices.map((slice) => slice.magByte),
-            [3, 1],
+            slices.map((slice) => slice.status),
+            [0x0103, 0x0103],
         );
 
         const [first] = slices;

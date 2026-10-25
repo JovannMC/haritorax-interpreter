@@ -5,9 +5,10 @@ import type { Logger } from "../../lib/logging.js";
 import type { DeviceRegistry } from "../device-registry.js";
 import type { ProtocolHandler } from "../protocol-handler.js";
 import { bodyPartsFor, isButtonDebounced } from "../../protocol/endpoint/dongle.js";
-import { decodeImu } from "../../protocol/codec/imu.js";
+import { decodeImu, decodeImuStatus } from "../../protocol/codec/imu.js";
 import { modelFromFirmware } from "../../protocol/codec/messages.js";
 import {
+    bleAccelAccuracy,
     bleAutoCorrection,
     bleBatteryVoltage,
     bleBodyPart,
@@ -16,6 +17,7 @@ import {
     bleMagStatus,
     bleSensorMode,
     bleSettingValues,
+    bleStatusWord,
     bleText,
     bleUint8,
     splitBleImu,
@@ -117,6 +119,31 @@ export class BleController implements ProtocolHandler {
                 const status = bleMagStatus(data);
                 if (!device || !status) return;
                 this.#registry.setMag(`${device.deviceId}:0`, status);
+                break;
+            }
+            // TODO: if sensor2 isn't available in chars, then use original sensor char
+            // case "sensor2": {
+            //     const device = this.#ensureDevice(state);
+            //     const word = bleStatusWord(data);
+            //     if (!device || word === undefined) return;
+            //     for (const index of [0, 1]) {
+            //         const tracker = device.trackers[index];
+            //         if (!tracker) continue;
+
+            //         const fields = decodeImuStatus(word, index);
+            //         this.#registry.setMag(tracker.trackerId, fields.mag);
+            //         this.#registry.setTap(tracker.trackerId, fields.tap);
+            //     }
+            //     break;
+            // }
+            case "accel-accuracy": {
+                const device = this.#ensureDevice(state);
+                if (!device) return;
+                for (const index of [0, 1]) {
+                    const tracker = device.trackers[index];
+                    const accuracy = bleAccelAccuracy(data, index);
+                    if (tracker && accuracy !== undefined) this.#registry.setAccelAccuracy(tracker.trackerId, accuracy);
+                }
                 break;
             }
             case "battery-level":

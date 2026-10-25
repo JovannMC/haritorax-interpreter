@@ -5,8 +5,8 @@ const ROTATION_SCALAR = 0.01 / 180.0;
 const GRAVITY_SCALAR = 1 / 256.0;
 const GRAVITY_CONSTANT = 9.81;
 
-// A-D is for HXW, rest for HX2
-// need to actually find proper data for HX2, it is very inaccurate. HX2 has more mag information
+// legacy HXW fallback for frames without a status word, reads a 6-bit slice of the base64
+// from v3
 const MAG_BY_CHAR: Readonly<Record<string, MagStatus>> = Object.freeze({
     A: "veryBad",
     E: "veryBad",
@@ -37,14 +37,39 @@ export function magStatusFromByte(value: number): MagStatus {
     return MAG_BY_BYTE[value] ?? "unknown";
 }
 
+// bytes 14-15 of a 16-byte IMU frame are one little-endian u16 holding 2-bit fields for each IMU
+// first IMU uses bits 0-7 (mag 0-1, tap 2-3, main press count 4-5, sub press count 6-7), second IMU uses bits 8-15 with the same pattern
+export function readImuStatusWord(bytes: Uint8Array): number | undefined {
+    const low = bytes[14];
+    const high = bytes[15];
+    if (bytes.length < 16 || low === undefined || high === undefined) return undefined;
+
+    return low | (high << 8);
+}
+
+export interface ImuStatusFields {
+    mag: MagStatus;
+    tap: number;
+}
+
+export function decodeImuStatus(word: number, imuIndex: number): ImuStatusFields {
+    const shift = imuIndex === 1 ? 8 : 0;
+
+    return {
+        mag: magStatusFromByte((word >> shift) & 3),
+        tap: (word >> (shift + 2)) & 3,
+    };
+}
+
 export interface DecodedImu {
     rotation: Quaternion;
     acceleration: Vector;
     ankleAngle?: number;
     magStatus?: MagStatus;
+    tap?: number;
 }
 
-export function decodeImu(base64: string, model: TrackerModel, magByte?: number): DecodedImu | undefined {
+export function decodeImu(base64: string, model: TrackerModel, statusWord?: number, imuIndex = 0): DecodedImu | undefined {
     const bytes = decodeBase64(base64);
     if (bytes.length < 14) return undefined;
 
@@ -63,12 +88,15 @@ export function decodeImu(base64: string, model: TrackerModel, magByte?: number)
 
     // TODO: proper ankle detection, i believe HX2 doesn't have proper ankle data rn vs HXW
     const ankleAngle = base64.slice(-2) === "==" ? undefined : view.getUint16(bytes.length - 2, true);
-    const magStatus =
-        magByte !== undefined
-            ? magStatusFromByte(magByte)
-            : model === "wired"
-              ? undefined
-              : (MAG_BY_CHAR[base64.charAt(base64.length - 5)] ?? "veryBad");
+    let magStatus: MagStatus | undefined;
+    let tap: number | undefined;
+    if (statusWord !== undefined) {
+        const fields = decodeImuStatus(statusWord, imuIndex);
+        magStatus = fields.mag;
+        tap = fields.tap;
+    } else if (model === "wireless") {
+        magStatus = MAG_BY_CHAR[base64.charAt(base64.length - 5)] ?? "veryBad";
+    }
 
     const rc = [rotation.w, rotation.x, rotation.y, rotation.z] as const;
     const r = [rc[0], -rc[1], -rc[2], -rc[3]] as const;
@@ -96,5 +124,5 @@ export function decodeImu(base64: string, model: TrackerModel, magByte?: number)
         z: gravityRawZ - hFinal[3] * gravityAdjustment,
     };
 
-    return { rotation, acceleration, ankleAngle, magStatus };
+    return { rotation, acceleration, ankleAngle, magStatus, tap };
 }

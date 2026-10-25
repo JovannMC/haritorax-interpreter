@@ -1,6 +1,7 @@
 import type { Emitter } from "../lib/emitter.js";
 import type { Logger } from "../lib/logging.js";
 import type {
+    AccelAccuracy,
     BatteryInfo,
     BodyPart,
     ConnectionKind,
@@ -245,6 +246,23 @@ export class DeviceRegistry {
 
         state.snapshot.mag = status;
         this.#emitter.emit("mag", { trackerId, deviceId: state.snapshot.deviceId, status });
+    }
+
+    // taps are recorded and stay on the tracker for a second before resetting
+    setTap(trackerId: string, count: number): void {
+        const state = this.#trackers.get(trackerId);
+        if (!state || state.snapshot.tap === count) return;
+
+        state.snapshot.tap = count;
+        this.#emitter.emit("tap", { trackerId, deviceId: state.snapshot.deviceId, count });
+    }
+
+    setAccelAccuracy(trackerId: string, accuracy: AccelAccuracy): void {
+        const state = this.#trackers.get(trackerId);
+        if (!state || state.snapshot.accelAccuracy === accuracy) return;
+
+        state.snapshot.accelAccuracy = accuracy;
+        this.#emitter.emit("accelAccuracy", { trackerId, deviceId: state.snapshot.deviceId, accuracy });
     }
 
     setRssi(trackerId: string, dongleRssi: number, sensorRssi?: number): void {

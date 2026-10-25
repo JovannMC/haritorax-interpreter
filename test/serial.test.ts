@@ -171,17 +171,16 @@ describe("serial connection", () => {
     it("keeps manually configured non-wired serial ports as generic endpoints", async () => {
         const port = new FakePort();
         const connection = createSerialConnection({
-            backend: backendWith(
-                [],
-                port,
-                new Map([["COM6", 'i:{"model":"MC4B", "version":"1.0", "serial no":"GX6MAN"}\n']]),
-            ),
+            backend: backendWith([], port, new Map([["COM6", 'i:{"model":"MC4B", "version":"1.0", "serial no":"GX6MAN"}\n']])),
             serialPorts: ["COM6"],
         });
 
         const found = await connection.list();
 
-        assert.deepEqual(found.map((descriptor) => [descriptor.id, descriptor.model]), [["COM6", undefined]]);
+        assert.deepEqual(
+            found.map((descriptor) => [descriptor.id, descriptor.model]),
+            [["COM6", undefined]],
+        );
     });
 
     it("lists Windows BTHENUM SPP ports by their Serial Port Profile GUID", async () => {
@@ -206,8 +205,7 @@ describe("serial connection", () => {
             {
                 path: "COM14",
                 manufacturer: "Microsoft",
-                pnpId:
-                    "BTHENUM\\{00001101-0000-1000-8000-00805F9B34FB}_LOCALMFG&001D\\A&3A86B8C9&0&EC64C9445182_C00000000",
+                pnpId: "BTHENUM\\{00001101-0000-1000-8000-00805F9B34FB}_LOCALMFG&001D\\A&3A86B8C9&0&EC64C9445182_C00000000",
             },
             // A paired BTHENUM device advertising a different RFCOMM service class
             // (dial-up modem) must not even be probed — the GUID filter rejects it.
@@ -221,15 +219,13 @@ describe("serial connection", () => {
             {
                 path: "COM15",
                 manufacturer: "Microsoft",
-                pnpId:
-                    "BTHENUM\\{00001101-0000-1000-8000-00805F9B34FB}_LOCALMFG&0020\\A&3A86B8C9&0&111111111111_000000000",
+                pnpId: "BTHENUM\\{00001101-0000-1000-8000-00805F9B34FB}_LOCALMFG&0020\\A&3A86B8C9&0&111111111111_000000000",
             },
             // Same SPP GUID but silent (no reply) — probed, then rejected by timeout.
             {
                 path: "COM16",
                 manufacturer: "Microsoft",
-                pnpId:
-                    "BTHENUM\\{00001101-0000-1000-8000-00805F9B34FB}_LOCALMFG&0021\\A&3A86B8C9&0&222222222222_000000000",
+                pnpId: "BTHENUM\\{00001101-0000-1000-8000-00805F9B34FB}_LOCALMFG&0021\\A&3A86B8C9&0&222222222222_000000000",
             },
         ];
 

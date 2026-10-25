@@ -1,4 +1,5 @@
 import { fromByteArray as encodeBase64, toByteArray as decodeBase64 } from "base64-js";
+import { readImuStatusWord } from "../codec/imu.js";
 import type { BodyPart, ImuRole, TrackerSettings } from "../../types.js";
 
 const TRACKER_PARTS: Readonly<Record<string, BodyPart>> = Object.freeze({
@@ -54,21 +55,22 @@ export interface DongleImuSlice {
     payload: string;
     role: ImuRole;
     index: number;
-    magByte?: number;
+    status?: number;
 }
 
-// one 14-byte IMU packet or a 30-byte packet carrying two IMUs (leg + thigh)
+// one 14-byte IMU packet (+ 2 status bytes) or a 30-byte packet carrying two IMUs (leg + thigh)
 export function splitDongleImu(payload: string, trackerCount: number): DongleImuSlice[] {
     const bytes = decodeBase64(payload);
+    const status = readImuStatusWord(bytes);
 
     if (bytes.length >= 30 && trackerCount >= 2) {
         return [
-            { payload: encodeBase64(bytes.slice(0, 14)), role: "ankle", index: 0, magByte: bytes[14] },
-            { payload: encodeBase64(bytes.slice(16, 30)), role: "knee", index: 1, magByte: bytes[15] },
+            { payload: encodeBase64(bytes.slice(0, 14)), role: "ankle", index: 0, status },
+            { payload: encodeBase64(bytes.slice(16, 30)), role: "knee", index: 1, status },
         ];
     }
 
-    return [{ payload, role: "ankle", index: 0 }];
+    return [{ payload, role: "ankle", index: 0, status }];
 }
 
 export function bodyPartOfTracker(trackerId: string): BodyPart | undefined {

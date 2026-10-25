@@ -390,7 +390,7 @@ export class DongleController {
         if (!device) return; // drop packet if device is unidentified still
 
         for (const slice of splitDongleImu(payload, device.trackers.length)) {
-            this.#emitSample(device, slice.index, slice.role, decodeImu(slice.payload, device.model, slice.magByte));
+            this.#emitSample(device, slice.index, slice.role, decodeImu(slice.payload, device.model, slice.status, slice.index));
         }
     }
 
@@ -414,6 +414,7 @@ export class DongleController {
         });
 
         if (decoded.magStatus) this.#registry.setMag(tracker.trackerId, decoded.magStatus);
+        if (decoded.tap !== undefined) this.#registry.setTap(tracker.trackerId, decoded.tap);
     }
 
     #updateChannel(endpointId: string, channel: number): void {

@@ -44,6 +44,9 @@ export interface ImuSample {
 
 export type MagStatus = "great" | "okay" | "bad" | "veryBad" | "unknown";
 
+// 0 no info, 1 low, 2 medium, 3 high
+export type AccelAccuracy = 0 | 1 | 2 | 3;
+
 export interface BatteryInfo {
     deviceId: string;
     level: number | null;
@@ -99,6 +102,8 @@ export interface TrackerSnapshot {
     // sensor RSSI (tracker hearing dongle)
     sensorRssi?: number;
     mag?: MagStatus;
+    tap?: number;
+    accelAccuracy?: AccelAccuracy;
 }
 
 export interface DeviceSnapshot {
@@ -157,6 +162,8 @@ export interface Events {
     imu: ImuSample;
     battery: BatteryInfo;
     mag: { trackerId: string; deviceId: string; status: MagStatus };
+    tap: { trackerId: string; deviceId: string; count: number };
+    accelAccuracy: { trackerId: string; deviceId: string; accuracy: AccelAccuracy };
     rssi: {
         trackerId: string;
         deviceId: string;

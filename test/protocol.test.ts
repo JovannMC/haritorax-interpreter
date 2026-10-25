@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { decodeImu, magStatusFromByte } from "../dist/protocol/codec/imu.js";
+import { decodeImu, magStatusFromByte, readImuStatusWord } from "../dist/protocol/codec/imu.js";
 import { fromByteArray as encodeBase64, toByteArray as decodeBase64 } from "base64-js";
 import { decodeSettings, modelFromFirmware, parseBattery, parseInfo } from "../dist/protocol/codec/messages.js";
 
@@ -28,7 +28,7 @@ describe("IMU decoding matches v3", () => {
 
     for (const [index, fixture] of fixtures.entries()) {
         it(`decodes fixture ${index} (${fixture.model})`, () => {
-            const decoded = decodeImu(fixture.payload, fixture.model);
+            const decoded = decodeImu(fixture.payload, fixture.model, readImuStatusWord(decodeBase64(fixture.payload)));
             assert.ok(decoded, "expected a decoded sample");
 
             for (const axis of ["x", "y", "z", "w"] as const) {
@@ -66,11 +66,25 @@ describe("IMU packet quirks", () => {
         assert.equal(decoded?.ankleAngle, (fourteen[12]! | (fourteen[13]! << 8)) >>> 0);
     });
 
-    it("uses a supplied magnetometer byte when a leg packet was split", () => {
+    it("decodes mag and tap from the status word for each IMU", () => {
         const payload = "QAV1/Is6EBngAaf/bAkCAA==";
-        assert.equal(decodeImu(payload, "x2", 3)?.magStatus, "great");
-        assert.equal(decodeImu(payload, "x2", 0)?.magStatus, "veryBad");
-        assert.equal(decodeImu(payload, "x2", 9)?.magStatus, "unknown");
+        // IMU0: mag bits 0-1, tap bits 2-3, button press counts (bits 4-7) are ignored
+        assert.equal(decodeImu(payload, "x2", 0x0003)?.magStatus, "great");
+        assert.equal(decodeImu(payload, "x2", 0x0000)?.magStatus, "veryBad");
+        assert.equal(decodeImu(payload, "x2", 0x0012)?.magStatus, "okay");
+        assert.equal(decodeImu(payload, "x2", 0x0007)?.tap, 1);
+        assert.equal(decodeImu(payload, "x2", 0x000f)?.tap, 3);
+        assert.equal(decodeImu(payload, "x2", 0x0070)?.tap, 0);
+
+        // IMU1 uses the same pattern shifted by 8 bits
+        assert.equal(decodeImu(payload, "x2", 0x0b00, 1)?.magStatus, "great");
+        assert.equal(decodeImu(payload, "x2", 0x0b00, 1)?.tap, 2);
+        assert.equal(decodeImu(payload, "x2", 0x0b00, 0)?.magStatus, "veryBad");
+    });
+
+    it("does not guess mag for HX2 frames without a status word", () => {
+        assert.equal(decodeImu("QAV1/Is6EBngAaf/bAkCAA==", "x2")?.magStatus, undefined);
+        assert.equal(decodeImu("QAV1/Is6EBngAaf/bAkCAA==", "x2")?.tap, undefined);
     });
 
     it("maps wired mag bytes", () => {

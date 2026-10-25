@@ -289,6 +289,37 @@ describe("BLE device", () => {
         assert.equal(app.getDevice("C1M8W0")?.battery?.voltage, 4032);
     });
 
+    it("emits mag, tap and accel accuracy from sensor2 and 00dbc401", async () => {
+        const { app, backend } = await connected();
+
+        const taps: number[] = [];
+        const mags: string[] = [];
+        const accuracy: number[] = [];
+        app.on("tap", (event) => taps.push(event.count));
+        app.on("mag", (event) => mags.push(event.status));
+        app.on("accelAccuracy", (event) => accuracy.push(event.accuracy));
+
+        // 16-byte sensor2 frame, status word 0x0006: IMU0 mag 2 (okay), tap 1; upper byte is for IMU1 (not present)
+        const frame = new Uint8Array(16);
+        frame[14] = 0x06;
+        frame[15] = 0x0b;
+        backend.emit("ble-1", "sensor2", frame);
+        backend.emit("ble-1", "sensor2", frame);
+        frame[14] = 0x00;
+        backend.emit("ble-1", "sensor2", frame);
+
+        // 0b11 = IMU0 high
+        backend.emit("ble-1", "accel-accuracy", byte(0x03));
+        backend.emit("ble-1", "accel-accuracy", byte(0x03));
+
+        assert.deepEqual(taps, [1, 0]);
+        // mag was already "okay" from the magnetometer characteristic at connect, so only the drop to 0 is a change
+        assert.deepEqual(mags, ["veryBad"]);
+        assert.deepEqual(accuracy, [3]);
+        assert.equal(app.getTracker("C1M8W0:0")?.tap, 0);
+        assert.equal(app.getTracker("C1M8W0:0")?.accelAccuracy, 3);
+    });
+
     it("writes BLE settings to the setting characteristics", async () => {
         const { app, backend } = await connected();
 

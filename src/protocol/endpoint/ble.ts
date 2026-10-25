@@ -1,6 +1,7 @@
 import { bodyPartOfTracker } from "./dongle.js";
-import { magStatusFromByte } from "../codec/imu.js";
+import { magStatusFromByte, readImuStatusWord } from "../codec/imu.js";
 import type {
+    AccelAccuracy,
     BodyPart,
     FpsMode,
     ImuRole,
@@ -23,6 +24,7 @@ export type BleCharacteristic =
     | "charge-status"
     | "sensor"
     | "sensor2"
+    | "accel-accuracy"
     | "number-of-imu"
     | "magnetometer"
     | "main-button"
@@ -47,6 +49,7 @@ const BLE_CHARACTERISTICS: Readonly<Record<string, BleCharacteristic>> = Object.
     ef843cb290a911eda1eb0242ac120002: "charge-status",
     "00dbf1c690aa11eda1eb0242ac120002": "sensor",
     "00dbc40090aa11eda1eb0242ac120002": "sensor2",
+    "00dbc40190aa11eda1eb0242ac120002": "accel-accuracy",
     "00dbf07c90aa11eda1eb0242ac120002": "number-of-imu",
     "00dbf30690aa11eda1eb0242ac120002": "magnetometer",
     "00dbf45090aa11eda1eb0242ac120002": "main-button",
@@ -148,6 +151,17 @@ export function bleChargeStatus(data: Uint8Array): "discharging" | "charging" | 
 export function bleMagStatus(data: Uint8Array): MagStatus | undefined {
     const value = bleUint8(data);
     return value === undefined ? undefined : magStatusFromByte(value);
+}
+
+// sensor2 frames carry the same status word as dongle frames at bytes 14-15, see readImuStatusWord
+export function bleStatusWord(data: Uint8Array): number | undefined {
+    return readImuStatusWord(data);
+}
+
+// one byte with 2 bits per IMU, IMU0 in bits 0-1
+export function bleAccelAccuracy(data: Uint8Array, imuIndex: number): AccelAccuracy | undefined {
+    const value = bleUint8(data);
+    return value === undefined ? undefined : (((value >> (imuIndex * 2)) & 3) as AccelAccuracy);
 }
 
 export function bleBodyPart(data: Uint8Array): BodyPart | undefined {

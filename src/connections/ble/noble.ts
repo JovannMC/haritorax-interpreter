@@ -25,6 +25,7 @@ const INITIAL_READS: readonly BleCharacteristic[] = Object.freeze([
     "model-number",
     "body-part",
     "magnetometer",
+    "accel-accuracy",
     "sensor-mode",
     "fps",
     "auto-calibration",
