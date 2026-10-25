@@ -20,6 +20,11 @@
             "import": "./dist/index.js",
             "default": "./dist/index.js"
         },
+        "./mobile": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js",
+            "default": "./dist/index.js"
+        },
         "./connections/contract": {
             "types": "./dist/connections/contract.d.ts",
             "default": "./dist/connections/contract.js"
@@ -43,13 +48,14 @@
         "node": ">=20.19.0"
     },
     "scripts": {
-        "build": "npm run clean && tsc -p tsconfig.json",
+        "build": "npm run clean && tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js', 0o755)\"",
         "clean": "rm -rf dist",
         "typecheck": "tsc -p tsconfig.json --noEmit",
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
         "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
         "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
+        "trace": "node dist/cli.js",
         "test": "npm run build && node --test \"test/**/*.test.ts\""
     },
     "author": "JovannMC <hello@jovann.me> (https://jovann.me)",
