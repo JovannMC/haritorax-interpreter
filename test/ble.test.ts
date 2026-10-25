@@ -9,6 +9,7 @@ import {
     bleSettingValues,
     parseBleDeviceName,
     splitBleImu,
+    splitBleSensor2,
 } from "../dist/protocol/endpoint/ble.js";
 import type { BleCharacteristic } from "../dist/protocol/endpoint/ble.js";
 import type { DisconnectReason, TrackerSettings, Unsubscribe } from "../dist/types.js";
@@ -34,6 +35,9 @@ function hex(text: string): Uint8Array {
 
 // captured from a HaritoraX2-C1M8W0 (HaritoraX2-C1M8W0-read.txt)
 const SINGLE_IMU = hex("9400fe01c0085d3f7dff3c00fc07");
+// captured from a two-IMU HaritoraX 2 over BLE (the same instant, so sensor and sensor2 carry the same IMU data)
+const SENSOR_2IMU = hex("00db0afb3b00fc33020181f89a02551d31fdb2fecc3875008b069e04");
+const SENSOR2_2IMU = hex("00db0afb3b00fc33020181f89a020201551d31fdb2fecc3875008b069e04");
 
 class FakeBleBackend implements BleBackend {
     readonly peripherals: BlePeripheralSummary[] = [
@@ -167,21 +171,35 @@ describe("BLE protocol", () => {
             ["ankle"],
         );
 
-        const dual30 = new Uint8Array(30);
-        dual30.set(SINGLE_IMU, 0);
-        dual30.set(SINGLE_IMU, 14);
-        const slices30 = splitBleImu(dual30);
-        assert.equal(slices30.length, 2);
-        assert.equal(slices30[0]?.payload.length, 14);
-        assert.equal(slices30[1]?.payload.length, 15);
-        assert.equal(slices30[1]?.role, "knee");
+        // two-IMU sensor frames are 28 bytes: [IMU0 14][IMU1 14], verified on hardware
+        const slices28 = splitBleImu(SENSOR_2IMU.slice(0, 28));
+        assert.equal(slices28.length, 2);
+        assert.equal(slices28[0]?.payload.length, 14);
+        assert.equal(slices28[1]?.payload.length, 14);
+        assert.equal(slices28[1]?.role, "knee");
+    });
 
-        const dual33 = new Uint8Array(33);
-        dual33.set(SINGLE_IMU, 0);
-        dual33.set(SINGLE_IMU, 18);
-        const slices33 = splitBleImu(dual33);
-        assert.equal(slices33.length, 2);
-        assert.equal(slices33[1]?.payload.length, 14);
+    it("slices sensor2 frames by length and reads status and range", () => {
+        const one = splitBleSensor2(SENSOR2_2IMU.slice(0, 16));
+        assert.equal(one.length, 1);
+        assert.equal(one[0]?.index, 0);
+        assert.equal(one[0]?.status, 0x0102);
+        assert.equal(one[0]?.range, undefined);
+
+        const ranged = new Uint8Array(18);
+        ranged.set(SENSOR2_2IMU.slice(0, 16), 0);
+        ranged.set([0x2a, 0x00], 16);
+        assert.equal(splitBleSensor2(ranged)[0]?.range, 42);
+
+        const two = splitBleSensor2(SENSOR2_2IMU);
+        assert.equal(two.length, 2);
+        assert.equal(two[0]?.status, 0x0102);
+        assert.equal(two[1]?.index, 1);
+        assert.equal(two[1]?.role, "knee");
+        assert.deepEqual(two[1]?.payload, SENSOR_2IMU.slice(14, 28));
+
+        // 32 bytes (two IMUs plus range) has an unverified layout and is skipped
+        assert.deepEqual(splitBleSensor2(new Uint8Array(32)), []);
     });
 
     it("maps settings values and body part assignments", () => {
@@ -255,7 +273,7 @@ describe("BLE device", () => {
         backend.emit("ble-1", "sensor", SINGLE_IMU);
         assert.deepEqual(samples, [{ trackerId: "C1M8W0:0", role: "ankle" }]);
 
-        const dual = new Uint8Array(30);
+        const dual = new Uint8Array(28);
         dual.set(SINGLE_IMU, 0);
         dual.set(SINGLE_IMU, 14);
         backend.emit("ble-1", "sensor", dual);
@@ -269,6 +287,57 @@ describe("BLE device", () => {
             ],
         );
         assert.equal(app.getTracker("C1M8W0:1")?.bodyPart, "unassigned");
+    });
+
+    it("uses sensor2 as the IMU source and ignores sensor once it has been seen", async () => {
+        const { app, backend } = await connected();
+
+        const samples: Array<{ trackerId: string; role: string; ankleAngle?: number }> = [];
+        app.on("imu", (sample) =>
+            samples.push({ trackerId: sample.trackerId, role: sample.role, ankleAngle: sample.ankleAngle }),
+        );
+        const taps: number[] = [];
+        app.on("tap", (event) => taps.push(event.count));
+
+        const sensor2 = new Uint8Array(30);
+        sensor2.set(SENSOR2_2IMU, 0);
+        backend.emit("ble-1", "sensor2", sensor2);
+        backend.emit("ble-1", "sensor", SENSOR_2IMU.slice(0, 28));
+
+        assert.deepEqual(
+            samples.map((sample) => [sample.trackerId, sample.role]),
+            [
+                ["C1M8W0:0", "ankle"],
+                ["C1M8W0:1", "knee"],
+            ],
+        );
+        assert.deepEqual(taps, [0, 0]);
+        assert.equal(app.getTracker("C1M8W0:1")?.mag, "bad");
+    });
+
+    it("falls back to sensor for firmware without sensor2", async () => {
+        const { app, backend } = await connected();
+
+        const samples: string[] = [];
+        app.on("imu", (sample) => samples.push(sample.trackerId));
+
+        backend.emit("ble-1", "sensor", SINGLE_IMU);
+        assert.deepEqual(samples, ["C1M8W0:0"]);
+    });
+
+    it("reports a sensor2 range only when the frame carries one", async () => {
+        const { app, backend } = await connected();
+
+        const ranges: Array<number | undefined> = [];
+        app.on("imu", (sample) => ranges.push(sample.ankleAngle));
+
+        backend.emit("ble-1", "sensor2", SENSOR2_2IMU.slice(0, 16));
+        const withRange = new Uint8Array(18);
+        withRange.set(SENSOR2_2IMU.slice(0, 16), 0);
+        withRange.set([0x2a, 0x00], 16);
+        backend.emit("ble-1", "sensor2", withRange);
+
+        assert.deepEqual(ranges, [undefined, 42]);
     });
 
     it("emits magnetometer, button and battery updates", async () => {

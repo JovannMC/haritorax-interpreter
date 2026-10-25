@@ -158,10 +158,61 @@ export function bleStatusWord(data: Uint8Array): number | undefined {
     return readImuStatusWord(data);
 }
 
-// one byte with 2 bits per IMU, IMU0 in bits 0-1
+// one byte with 2 bits per IMU, first IMU in bits 0-1
 export function bleAccelAccuracy(data: Uint8Array, imuIndex: number): AccelAccuracy | undefined {
     const value = bleUint8(data);
     return value === undefined ? undefined : (((value >> (imuIndex * 2)) & 3) as AccelAccuracy);
+}
+
+export interface BleSensor2Slice {
+    payload: Uint8Array;
+    status: number;
+    index: number;
+    role: ImuRole;
+    range?: number;
+}
+
+
+// 16 bytes = single IMU, 18 bytes = single IMU + range, 30 bytes = dual IMU, 32 bytes = dual IMU + range
+export function splitBleSensor2(data: Uint8Array): BleSensor2Slice[] {
+    const status = readImuStatusWord(data);
+    if (status === undefined) return [];
+
+    const ankle = data.slice(0, 14);
+    const range = bleUint16(data, 16);
+    switch (data.length) {
+        case 16:
+            return [{ payload: ankle, status, index: 0, role: "ankle" }];
+        case 18:
+            return [{ payload: ankle, status, index: 0, role: "ankle", range }];
+        case 30:
+            return [
+                { payload: ankle, status, index: 0, role: "ankle" },
+                { payload: data.slice(16, 30), status, index: 1, role: "knee" },
+            ];
+        case 32:
+            // 32 -= dual imu and range
+            return [
+                { payload: ankle, status, index: 0, role: "ankle", range },
+                { payload: data.slice(16, 30), status, index: 1, role: "knee" },
+            ];
+        default:
+            return [];
+    }
+}
+
+// one byte per IMU on the magnetometer characteristic
+export function bleMagStatusAt(data: Uint8Array, index: number): MagStatus | undefined {
+    const value = data[index];
+    return value === undefined ? undefined : magStatusFromByte(value);
+}
+
+export function bleUint16(data: Uint8Array, offset: number): number | undefined {
+    const low = data[offset];
+    const high = data[offset + 1];
+    if (low === undefined || high === undefined) return undefined;
+
+    return low | (high << 8);
 }
 
 export function bleBodyPart(data: Uint8Array): BodyPart | undefined {
