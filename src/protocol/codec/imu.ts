@@ -1,9 +1,14 @@
 import { toByteArray as decodeBase64 } from "base64-js";
 import type { MagStatus, Quaternion, TrackerModel, Vector } from "../../types.js";
 
-const ROTATION_SCALAR = 0.01 / 180.0;
-const GRAVITY_SCALAR = 1 / 256.0;
-const GRAVITY_CONSTANT = 9.81;
+const ROTATION_SCALAR = 1 / 16384;
+const GRAVITY_CONSTANT = 9.80665;
+
+const ACCEL_SCALAR: Readonly<Record<TrackerModel, number>> = Object.freeze({
+    x2: GRAVITY_CONSTANT / 2048,
+    wireless: 1 / 256,
+    wired: 1 / 256,
+});
 
 // legacy HXW fallback for frames without a status word, reads a 6-bit slice of the base64
 // from v3
@@ -61,10 +66,19 @@ export function decodeImuStatus(word: number, imuIndex: number): ImuStatusFields
     };
 }
 
+// range sensors (ankle motion detection) append mm distance to IMU frames
+export function decodeRange(model: TrackerModel, raw: number | undefined): number | undefined {
+    if (raw === undefined || raw === 0xffff) return undefined;
+
+    if (model === "x2") return raw >> 5;
+
+    const signed = raw > 0x7fff ? raw - 0x10000 : raw;
+    return signed >= 0 ? signed : undefined;
+}
+
 export interface DecodedImu {
     rotation: Quaternion;
     acceleration: Vector;
-    ankleAngle?: number;
     magStatus?: MagStatus;
     tap?: number;
 }
@@ -82,12 +96,11 @@ export function decodeImu(base64: string, model: TrackerModel, statusWord?: numb
         w: view.getInt16(6, true) * -ROTATION_SCALAR,
     };
 
-    const gravityRawX = view.getInt16(8, true) * GRAVITY_SCALAR;
-    const gravityRawY = view.getInt16(10, true) * GRAVITY_SCALAR;
-    const gravityRawZ = view.getInt16(12, true) * GRAVITY_SCALAR;
+    const accelScalar = ACCEL_SCALAR[model];
+    const gravityRawX = view.getInt16(8, true) * accelScalar;
+    const gravityRawY = view.getInt16(10, true) * accelScalar;
+    const gravityRawZ = view.getInt16(12, true) * accelScalar;
 
-    // TODO: proper ankle detection, i believe HX2 doesn't have proper ankle data rn vs HXW
-    const ankleAngle = base64.slice(-2) === "==" ? undefined : view.getUint16(bytes.length - 2, true);
     let magStatus: MagStatus | undefined;
     let tap: number | undefined;
     if (statusWord !== undefined) {
@@ -116,13 +129,11 @@ export function decodeImu(base64: string, model: TrackerModel, statusWord?: numb
         hrp[0] * rc[3] + hrp[1] * rc[2] - hrp[2] * rc[1] + hrp[3] * rc[0],
     ] as const;
 
-    const gravityAdjustment = model === "x2" ? 1.0 : 1.2;
-
     const acceleration: Vector = {
-        x: gravityRawX - hFinal[1] * -gravityAdjustment,
-        y: gravityRawY - hFinal[2] * -gravityAdjustment,
-        z: gravityRawZ - hFinal[3] * gravityAdjustment,
+        x: gravityRawX + hFinal[1],
+        y: gravityRawY + hFinal[2],
+        z: gravityRawZ - hFinal[3],
     };
 
-    return { rotation, acceleration, ankleAngle, magStatus, tap };
+    return { rotation, acceleration, magStatus, tap };
 }

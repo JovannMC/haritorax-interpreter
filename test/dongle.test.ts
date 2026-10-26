@@ -5,18 +5,22 @@ import { createHaritoraX } from "../dist/index.js";
 import type { Frame, ListOptions } from "../dist/connections/contract.js";
 import type { DisconnectReason, TrackerSettings, Unsubscribe } from "../dist/types.js";
 import {
+    bodyPartCommands,
     bodyPartOfTracker,
     bodyPartsFor,
     decodeTrackerRssi,
     dongleSettingsCommand,
     isDongleSlot,
     isRssiLost,
+    isSlotPaired,
     pairCommands,
     parseChannel,
-    parsePairingResult,
+    parseDongleAccelAccuracy,
+    parseDongleRegister,
     parseTrackerId,
     setChannelCommand,
     splitDongleImu,
+    trackerIdOfBodyPart,
     unpairCommands,
 } from "../dist/protocol/endpoint/dongle.js";
 
@@ -116,10 +120,30 @@ describe("dongle protocol", () => {
         assert.equal(parseChannel("30f0"), undefined);
     });
 
-    it("recognises a completed pairing", () => {
-        assert.equal(parsePairingResult("330"), true);
-        assert.equal(parsePairingResult("310"), true);
-        assert.equal(parsePairingResult("110"), false);
+    it("reads the dongle register and which slots are paired", () => {
+        // [mode][paired slots][unpaired slots]
+        assert.deepEqual(parseDongleRegister("300"), { mode: 3, paired: 0, unpaired: 0 });
+        assert.deepEqual(parseDongleRegister("110"), { mode: 1, paired: 1, unpaired: 0 });
+        assert.equal(parseDongleRegister("30"), undefined);
+        assert.equal(parseDongleRegister("3zz"), undefined);
+
+        // sensing mode is not a pairing, only the slot's own bit is
+        const sensing = parseDongleRegister("300");
+        const slotZero = parseDongleRegister("110");
+        const slotOne = parseDongleRegister("220");
+        assert.ok(sensing && slotZero && slotOne);
+        assert.equal(isSlotPaired(sensing, "0"), false);
+        assert.equal(isSlotPaired(slotZero, "0"), true);
+        assert.equal(isSlotPaired(slotZero, "1"), false);
+        assert.equal(isSlotPaired(slotOne, "1"), true);
+        assert.equal(isSlotPaired(slotOne, "0"), false);
+    });
+
+    it("reads accel accuracy from the 14 digit register of newer dongles", () => {
+        assert.deepEqual(parseDongleAccelAccuracy("11003020000023"), [2, 3]);
+        assert.deepEqual(parseDongleAccelAccuracy("11003020000000"), [0, 0]);
+        assert.equal(parseDongleAccelAccuracy("110030200000"), undefined);
+        assert.equal(parseDongleAccelAccuracy("11003020000090"), undefined);
     });
 
     it("reads the tracker id from a slot reply", () => {
@@ -136,28 +160,55 @@ describe("dongle protocol", () => {
         assert.equal(isRssiLost(""), false);
     });
 
-    it("decodes the a: frame as dongle and sensor RSSI (negative dBm)", () => {
-        // Real lines from testing/HaritoraX Wireless.txt (first byte 0x28..0x37)
-        assert.deepEqual(decodeTrackerRssi("284128442f30"), { dongle: -0x28, sensor: -0x41 });
-        assert.deepEqual(decodeTrackerRssi("374237423b3b"), { dongle: -0x37, sensor: -0x42 });
-        assert.equal(decodeTrackerRssi(""), undefined);
-        assert.equal(decodeTrackerRssi("004128442f30"), undefined); // zero magnitude
+    it("decodes the a: frame from the averages, as dongle and sensor RSSI (negative dBm)", () => {
+        // [dongle min][dongle max][sensor min][sensor max][dongle average][sensor average]
+        // real lines from testing/HaritoraX Wireless.txt and from a dongle on 1.0.26
+        assert.deepEqual(decodeTrackerRssi("284128442f30"), { dongle: -0x2f, sensor: -0x30 });
+        assert.deepEqual(decodeTrackerRssi("374237423b3b"), { dongle: -0x3b, sensor: -0x3b });
+        assert.deepEqual(decodeTrackerRssi("33392d3e3732"), { dongle: -55, sensor: -50 });
+        assert.deepEqual(decodeTrackerRssi("2649254b2f2e"), { dongle: -47, sensor: -46 });
     });
 
-    it("splits a dongle IMU payload into one or two slices", () => {
-        const single = "QAV1/Is6EBngAaf/bAkCAA==";
-        assert.deepEqual(splitDongleImu(single, 1), [{ payload: single, role: "ankle", index: 0, status: 0x0002 }]);
+    it("ignores RSSI averages that can't be real", () => {
+        assert.equal(decodeTrackerRssi(""), undefined);
+        assert.equal(decodeTrackerRssi("2842"), undefined); // too short to hold the averages
+        assert.equal(decodeTrackerRssi("284128440030"), undefined); // the dongle average is zero
+        assert.deepEqual(decodeTrackerRssi("284128442f00"), { dongle: -0x2f }); // only the sensor average is
+        assert.equal(decodeTrackerRssi("2259224cd0c9"), undefined); // stale counters on the first frame after connecting
 
-        const leg = decodeBase64(single);
+        // a side without samples stays 7f, the other side is still good
+        assert.deepEqual(decodeTrackerRssi("28412844307f"), { dongle: -0x30 });
+        assert.deepEqual(decodeTrackerRssi("2259225062ff"), { dongle: -98 });
+    });
+
+    it("splits a dongle IMU payload by its length", () => {
+        const single = "QAV1/Is6EBngAaf/bAkCAA==";
+        const leg = decodeBase64(single).slice(0, 14);
+        const thigh = leg.map((byte) => byte ^ 0x55);
+
+        // 16 bytes: [IMU0 14][status 2], the slice is the 14 bytes of IMU data
+        const [only] = splitDongleImu(single, 1);
+        assert.deepEqual(decodeBase64(only?.payload ?? ""), leg);
+        assert.deepEqual({ ...only, payload: "" }, { payload: "", role: "ankle", index: 0, status: 0x0002 });
+
+        // 18 bytes: [IMU0 14][status 2][range 2]
+        const withRange = new Uint8Array(18);
+        withRange.set(leg, 0);
+        withRange.set([3, 1], 14);
+        withRange.set([0xbc, 0x02], 16);
+        const [ranged] = splitDongleImu(encodeBase64(withRange), 1);
+        assert.equal(ranged?.range, 700);
+        assert.equal(ranged?.status, 0x0103);
+
+        // 30 bytes: [IMU0 14][status 2][IMU1 14]
         const combo = new Uint8Array(30);
-        combo.set(leg.slice(0, 14), 0);
-        combo[14] = 3;
-        combo[15] = 1;
-        combo.set(leg.slice(0, 14), 16);
+        combo.set(leg, 0);
+        combo.set([3, 1], 14);
+        combo.set(thigh, 16);
         const payload = encodeBase64(combo);
 
-        // a 30-byte payload on a 1-tracker device stays whole (v3 behaviour)
-        assert.deepEqual(splitDongleImu(payload, 1), [{ payload, role: "ankle", index: 0, status: 0x0103 }]);
+        // a one-tracker device only gets its first IMU
+        assert.equal(splitDongleImu(payload, 1).length, 1);
 
         const slices = splitDongleImu(payload, 2);
         assert.equal(slices.length, 2);
@@ -174,10 +225,24 @@ describe("dongle protocol", () => {
             slices.map((slice) => slice.status),
             [0x0103, 0x0103],
         );
+        assert.deepEqual(decodeBase64(slices[0]?.payload ?? ""), leg);
+        assert.deepEqual(decodeBase64(slices[1]?.payload ?? ""), thigh);
+        assert.equal(slices[0]?.range, undefined);
 
-        const [first] = slices;
-        assert.ok(first);
-        assert.equal(decodeBase64(first.payload).length, 14);
+        // 32 bytes: [IMU0 14][status 2][range 2][IMU1 14], the second IMU moves to byte 18
+        const comboRange = new Uint8Array(32);
+        comboRange.set(leg, 0);
+        comboRange.set([3, 1], 14);
+        comboRange.set([0xbc, 0x02], 16);
+        comboRange.set(thigh, 18);
+
+        const rangedSlices = splitDongleImu(encodeBase64(comboRange), 2);
+        assert.equal(rangedSlices.length, 2);
+        assert.equal(rangedSlices[0]?.range, 700);
+        assert.equal(rangedSlices[1]?.range, undefined);
+        assert.deepEqual(decodeBase64(rangedSlices[1]?.payload ?? ""), thigh);
+
+        assert.deepEqual(splitDongleImu(encodeBase64(new Uint8Array(10)), 1), []);
     });
 
     it("maps tracker ids to body parts", () => {
@@ -206,8 +271,9 @@ describe("dongle protocol", () => {
         assert.equal(setChannelCommand(4), "o:3040");
         assert.equal(setChannelCommand(10), "o:30a0");
 
-        assert.deepEqual(pairCommands(4, "0"), ["o:1140", "o:1040", "o:3040"]);
-        assert.deepEqual(pairCommands(4, "1"), ["o:2240", "o:2040", "o:3040"]);
+        // pairing mode with a reset for the slot, then without. Going back to sensing is up to the caller once the slot is paired
+        assert.deepEqual(pairCommands(4, "0"), ["o:1140", "o:1040"]);
+        assert.deepEqual(pairCommands(4, "1"), ["o:2240", "o:2040"]);
 
         assert.deepEqual(unpairCommands(4, "0"), ["o:3041", "o:3040"]);
         assert.deepEqual(unpairCommands(10, "1"), ["o:30a2", "o:30a0"]);
@@ -233,6 +299,31 @@ describe("dongle protocol", () => {
             }),
             "o1:00000000100000",
         );
+    });
+
+    it("puts a body part in the attach point digits", () => {
+        const settings = {
+            sensorMode: 1,
+            fpsMode: 100,
+            sensorAutoCorrection: ["accel", "gyro", "mag"],
+            ankleMotionDetection: false,
+        } satisfies TrackerSettings;
+
+        assert.equal(dongleSettingsCommand("0", settings, undefined, 0x1f), "o0:0001f110107000");
+        assert.equal(dongleSettingsCommand("0", settings, 2, 0x0a), "o0:0000a110107020");
+
+        assert.equal(trackerIdOfBodyPart("chest"), 1);
+        assert.equal(trackerIdOfBodyPart("rightFoot"), 0xd);
+        assert.equal(trackerIdOfBodyPart("unassigned"), undefined);
+
+        // newer firmware only applies it after 0A, 1F, <id>, 00. HXW before 1.0.28 applies any change
+        assert.deepEqual(bodyPartCommands("0", settings, 5, true), [
+            "o0:0000a110107000",
+            "o0:0001f110107000",
+            "o0:00005110107000",
+            "o0:00000110107000",
+        ]);
+        assert.deepEqual(bodyPartCommands("0", settings, 5, false), ["o0:00005110107000"]);
     });
 });
 
@@ -412,11 +503,12 @@ describe("tracker identity", () => {
         serial.emitFrame("a0:284128442f30"); // unchanged — no second event
         serial.emitFrame("a0:374237423b3b");
 
-        assert.equal(app.getTracker("A2E987:0")?.rssi, -0x37);
-        assert.equal(app.getTracker("A2E987:0")?.sensorRssi, -0x42);
+        // the averages, not the min and max
+        assert.equal(app.getTracker("A2E987:0")?.rssi, -0x3b);
+        assert.equal(app.getTracker("A2E987:0")?.sensorRssi, -0x3b);
         assert.deepEqual(rssiEvents, [
-            { trackerId: "A2E987:0", deviceId: "A2E987", rssi: -0x28, sensorRssi: -0x41 },
-            { trackerId: "A2E987:0", deviceId: "A2E987", rssi: -0x37, sensorRssi: -0x42 },
+            { trackerId: "A2E987:0", deviceId: "A2E987", rssi: -0x2f, sensorRssi: -0x30 },
+            { trackerId: "A2E987:0", deviceId: "A2E987", rssi: -0x3b, sensorRssi: -0x3b },
         ]);
     });
 
@@ -500,20 +592,89 @@ describe("tracker lifecycle", () => {
     });
 });
 
+// lets promises that are waiting on a write or a mocked timer run
+async function flush(): Promise<void> {
+    for (let index = 0; index < 5; index++) await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
 describe("pairing", () => {
-    it("pairs a slot and observes the completion", async () => {
+    it("pairs a slot once the dongle reports the slot as paired, then goes back to sensing", async () => {
         const { app, serial } = await connected();
         serial.emitFrame("o:3040");
 
         const paired: Array<{ endpointId: string; slot: string }> = [];
         app.on("paired", (event) => paired.push(event));
 
-        const pending = app.pair("COM4", 0);
-        serial.emitFrame("r:330");
-        await pending;
+        mock.timers.enable({ apis: ["setTimeout"] });
+        try {
+            const pending = app.pair("COM4", 0);
+            await flush();
+            assert.deepEqual(serial.writes, ["COM4:o:1140"]);
 
-        assert.deepEqual(serial.writes, ["COM4:o:1140", "COM4:o:1040", "COM4:o:3040", "COM4:o:3040", "COM4:r0:"]);
+            // a register from before the reset has been processed doesn't count, and neither does sensing mode
+            serial.emitFrame("r:310");
+            mock.timers.tick(1_000);
+            await flush();
+            assert.deepEqual(serial.writes, ["COM4:o:1140", "COM4:o:1040"]);
+
+            serial.emitFrame("r:100");
+            serial.emitFrame("r:300");
+            // the other slot being paired isn't this slot
+            serial.emitFrame("r:120");
+            await flush();
+            assert.deepEqual(paired, []);
+
+            // the dongle stays in pairing mode (1) and sets the slot's bit
+            serial.emitFrame("r:110");
+            await pending;
+        } finally {
+            mock.timers.reset();
+        }
+
+        assert.deepEqual(serial.writes, ["COM4:o:1140", "COM4:o:1040", "COM4:o:3040", "COM4:r0:"]);
         assert.deepEqual(paired, [{ endpointId: "COM4", slot: "0" }]);
+    });
+
+    it("pairs the second slot on its own bit", async () => {
+        const { app, serial } = await connected();
+        serial.emitFrame("o:3040");
+
+        mock.timers.enable({ apis: ["setTimeout"] });
+        try {
+            const pending = app.pair("COM4", 1);
+            await flush();
+            mock.timers.tick(1_000);
+            await flush();
+
+            serial.emitFrame("r:210"); // slot 0's bit
+            serial.emitFrame("r:220"); // slot 1's bit
+            await pending;
+        } finally {
+            mock.timers.reset();
+        }
+
+        assert.deepEqual(serial.writes, ["COM4:o:2240", "COM4:o:2040", "COM4:o:3040", "COM4:r1:"]);
+    });
+
+    it("times out and returns the dongle to sensing mode", async () => {
+        const { app, serial } = await connected();
+        serial.emitFrame("o:3040");
+
+        mock.timers.enable({ apis: ["setTimeout"] });
+        try {
+            const pending = app.pair("COM4", 0).catch((error: unknown) => error);
+            await flush();
+            mock.timers.tick(1_000);
+            await flush();
+            mock.timers.tick(30_000);
+
+            const error = await pending;
+            assert.equal((error as { code?: string }).code, "TIMEOUT");
+        } finally {
+            mock.timers.reset();
+        }
+
+        assert.deepEqual(serial.writes, ["COM4:o:1140", "COM4:o:1040", "COM4:o:3040"]);
     });
 
     it("refuses to pair without a known channel", async () => {
@@ -538,5 +699,360 @@ describe("pairing", () => {
         assert.deepEqual(serial.writes, ["COM4:o:3041", "COM4:o:3040"]);
         assert.equal(app.getBodyPart("A2E987:0"), "unassigned");
         assert.deepEqual(unpaired, [{ endpointId: "COM4", slot: "0" }]);
+    });
+});
+
+const DONGLE_1_1_1 = 'i:{"version":"1.1.1","model":"GX6","serial no":"B5T3V0"}';
+const DONGLE_1_0_26 = 'i:{"version":"1.0.26","model":"GX6","serial no":"B5T3V0"}';
+const INFO_DUAL_1_0_30 = 'i0:{"version":"1.0.30","model":"mc4b","imu_num":2,"serial no":"C1MGN3"}';
+const INFO_DUAL_1_1_1 = 'i0:{"version":"1.1.1","model":"mc4b","imu_num":2,"serial no":"C1MGN3"}';
+const SETTINGS = "o0:00000110107000";
+const LEG_IMU = decodeBase64("QAV1/Is6EBngAaf/bAkCAA==").slice(0, 14);
+
+describe("dongle firmware version", () => {
+    it("reads the dongle version from its info frame", async () => {
+        const { app, serial } = await connected();
+        assert.equal(app.getDongleVersion("COM4"), undefined);
+
+        serial.emitFrame(DONGLE_1_0_26);
+        assert.equal(app.getDongleVersion("COM4"), "1.0.26");
+
+        serial.emitFrame(DONGLE_1_1_1);
+        assert.equal(app.getDongleVersion("COM4"), "1.1.1");
+    });
+
+    it("exposes the tracker version on the device", async () => {
+        const { app, serial } = await connected();
+        serial.emitFrame(INFO_DUAL);
+
+        assert.equal(app.getDevice("C1MGN3")?.version, "1.0.5");
+    });
+
+    it("reads accel accuracy from HX2 on a dongle that reports it", async () => {
+        const { app, serial } = await connected();
+        serial.emitFrame(DONGLE_1_1_1);
+        serial.emitFrame(INFO_DUAL);
+
+        const events: Array<{ trackerId: string; deviceId: string; accuracy: number }> = [];
+        app.on("accelAccuracy", (event) => events.push(event));
+
+        // the last two digits of the 14 digit register are the accuracy of the first and second IMU
+        serial.emitFrame("r0:11003020000023");
+
+        assert.deepEqual(events, [
+            { trackerId: "C1MGN3:0", deviceId: "C1MGN3", accuracy: 2 },
+            { trackerId: "C1MGN3:1", deviceId: "C1MGN3", accuracy: 3 },
+        ]);
+        assert.equal(app.getTracker("C1MGN3:1")?.accelAccuracy, 3);
+    });
+
+    it("ignores accel accuracy on a dongle known to be older, and for HXW", async () => {
+        const old = await connected();
+        old.serial.emitFrame(DONGLE_1_0_26);
+        old.serial.emitFrame(INFO_DUAL);
+
+        const oldEvents: unknown[] = [];
+        old.app.on("accelAccuracy", (event) => oldEvents.push(event));
+        old.serial.emitFrame("r0:11003020000023");
+        assert.deepEqual(oldEvents, []);
+
+        // HXW never reports it, whatever the dongle says
+        const hxw = await connected();
+        hxw.serial.emitFrame(DONGLE_1_1_1);
+        hxw.serial.emitFrame(INFO);
+
+        const hxwEvents: unknown[] = [];
+        hxw.app.on("accelAccuracy", (event) => hxwEvents.push(event));
+        hxw.serial.emitFrame("r0:11003020000023");
+        assert.deepEqual(hxwEvents, []);
+    });
+
+    it("lets the frame length decide while the dongle version is not known yet", async () => {
+        const { app, serial } = await connected();
+        serial.emitFrame(INFO_DUAL);
+
+        const events: unknown[] = [];
+        app.on("accelAccuracy", (event) => events.push(event));
+
+        serial.emitFrame("r0:110030200000"); // 12 digits, nothing to read
+        assert.equal(events.length, 0);
+
+        serial.emitFrame("r0:11003020000011");
+        assert.equal(events.length, 2);
+    });
+});
+
+describe("dongle range data", () => {
+    it("reports the range from an HXW frame", async () => {
+        const { app, serial } = await connected();
+        serial.emitFrame(INFO);
+
+        const ranges: Array<number | undefined> = [];
+        app.on("imu", (sample) => ranges.push(sample.range));
+
+        const frame = (range: number) => {
+            const bytes = new Uint8Array(18);
+            bytes.set(LEG_IMU, 0);
+            bytes.set([2, 0], 14);
+            new DataView(bytes.buffer).setUint16(16, range, true);
+            return `x0:${encodeBase64(bytes)}`;
+        };
+
+        serial.emitFrame(frame(700));
+        serial.emitFrame(frame(0xfff9)); // an error code
+        serial.emitFrame(`x0:${encodeBase64(new Uint8Array([...LEG_IMU, 2, 0]))}`); // no range sensor data
+
+        assert.deepEqual(ranges, [700, undefined, undefined]);
+    });
+
+    it("reports the range from an HX2 leg frame on the ankle only", async () => {
+        const { app, serial } = await connected();
+        serial.emitFrame(INFO_DUAL);
+        serial.emitFrame("r0:110030200000");
+
+        const samples: Array<{ bodyPart: string; range: number | undefined }> = [];
+        app.on("imu", (sample) => samples.push({ bodyPart: sample.bodyPart, range: sample.range }));
+
+        const bytes = new Uint8Array(32);
+        bytes.set(LEG_IMU, 0);
+        new DataView(bytes.buffer).setUint16(16, (700 << 5) | 3, true);
+        bytes.set(LEG_IMU, 18);
+        serial.emitFrame(`x0:${encodeBase64(bytes)}`);
+
+        assert.deepEqual(samples, [
+            { bodyPart: "leftAnkle", range: 700 },
+            { bodyPart: "leftKnee", range: undefined },
+        ]);
+    });
+});
+
+describe("power off and switching", () => {
+    async function holdTimes(info: string, dongleInfo?: string) {
+        const { app, serial } = await connected();
+        if (dongleInfo) serial.emitFrame(dongleInfo);
+        serial.emitFrame(info);
+        serial.emitFrame(SETTINGS);
+
+        mock.timers.enable({ apis: ["setTimeout"] });
+        try {
+            const pending = app.powerOff("C1MGN3");
+            await flush();
+            assert.deepEqual(serial.writes, ["COM4:o0:00000110107020"]);
+
+            // the command stays set until just before the hold time ends
+            return { app, serial, pending };
+        } catch (error) {
+            mock.timers.reset();
+            throw error;
+        }
+    }
+
+    it("clears the command after 150 ms on trackers older than 1.1.1", async () => {
+        const { serial, pending } = await holdTimes(INFO_DUAL);
+        try {
+            mock.timers.tick(149);
+            await flush();
+            assert.equal(serial.writes.length, 1);
+
+            mock.timers.tick(1);
+            await pending;
+            assert.deepEqual(serial.writes, ["COM4:o0:00000110107020", "COM4:o0:00000110107000"]);
+        } finally {
+            mock.timers.reset();
+        }
+    });
+
+    it("holds the command for 600 ms on 1.1.1 trackers, which need to see it in several packets", async () => {
+        const { serial, pending } = await holdTimes(INFO_DUAL_1_1_1, DONGLE_1_1_1);
+        try {
+            mock.timers.tick(599);
+            await flush();
+            assert.equal(serial.writes.length, 1);
+
+            mock.timers.tick(1);
+            await pending;
+            assert.deepEqual(serial.writes, ["COM4:o0:00000110107020", "COM4:o0:00000110107000"]);
+        } finally {
+            mock.timers.reset();
+        }
+    });
+
+    it("holds it for 600 ms when the tracker version is not known", async () => {
+        const { serial, pending } = await holdTimes('i0:{"version":"","model":"mc4b","imu_num":2,"serial no":"C1MGN3"}');
+        try {
+            mock.timers.tick(150);
+            await flush();
+            assert.equal(serial.writes.length, 1);
+
+            mock.timers.tick(450);
+            await pending;
+            assert.equal(serial.writes.length, 2);
+        } finally {
+            mock.timers.reset();
+        }
+    });
+
+    it("warns when a 1.1.1 tracker is on a dongle that may not repeat the command", async () => {
+        const warnings: string[] = [];
+        const serial = memoryConnection();
+        const app = createHaritoraX({
+            connections: [serial],
+            logLevel: "warn",
+            onLog: (entry) => warnings.push(entry.message),
+        });
+        await app.discover();
+        await app.connect("COM4");
+
+        serial.emitFrame(DONGLE_1_0_26);
+        serial.emitFrame(INFO_DUAL_1_1_1);
+        serial.emitFrame(SETTINGS);
+
+        mock.timers.enable({ apis: ["setTimeout"] });
+        try {
+            const pending = app.powerOff("C1MGN3");
+            await flush();
+            mock.timers.tick(600);
+            await pending;
+        } finally {
+            mock.timers.reset();
+        }
+
+        assert.equal(warnings.filter((message) => message.includes("dongle firmware 1.0.26")).length, 1);
+    });
+});
+
+describe("setting the body part over a dongle", () => {
+    async function ready(info: string, identity: string) {
+        const { app, serial } = await connected();
+        serial.emitFrame(info);
+        serial.emitFrame(identity);
+        serial.emitFrame(SETTINGS);
+        serial.writes.length = 0;
+        return { app, serial };
+    }
+
+    it("sends the unlock sequence and waits for the tracker to report the body part", async () => {
+        // HX2 1.0.14 and later need the 0A 1F <id> 00 sequence, 1.0.5 applies a change directly (see the test below)
+        const { app, serial } = await ready(INFO_DUAL_1_0_30, "r0:110030200000");
+
+        mock.timers.enable({ apis: ["setTimeout"] });
+        try {
+            const pending = app.setBodyPart("C1MGN3", "rightAnkle");
+            await flush();
+            assert.deepEqual(serial.writes, ["COM4:o0:0000a110107000"]);
+
+            for (let step = 0; step < 3; step++) {
+                mock.timers.tick(200);
+                await flush();
+            }
+
+            assert.deepEqual(serial.writes, [
+                "COM4:o0:0000a110107000",
+                "COM4:o0:0001f110107000",
+                "COM4:o0:00005110107000",
+                "COM4:o0:00000110107000",
+                "COM4:r0:",
+            ]);
+
+            // the tracker reports its new body part in the register
+            serial.emitFrame("r0:110050200000");
+            await pending;
+        } finally {
+            mock.timers.reset();
+        }
+
+        assert.equal(app.getBodyPart("C1MGN3:0"), "rightAnkle");
+        assert.equal(app.getBodyPart("C1MGN3:1"), "rightKnee");
+    });
+
+    it("applies the body part directly on HX2 1.0.5, without the unlock sequence", async () => {
+        // an extra (serial ends in 0) has no factory part, so the base lock doesn't apply
+        const extra = 'i0:{"version":"1.0.5","model":"mc4b","imu_num":2,"serial no":"C1M8W0"}';
+        const { app, serial } = await ready(extra, "r0:110030200000");
+
+        mock.timers.enable({ apis: ["setTimeout"] });
+        try {
+            const pending = app.setBodyPart("C1M8W0", "rightAnkle");
+            await flush();
+            assert.deepEqual(serial.writes, ["COM4:o0:00005110107000", "COM4:r0:"]);
+
+            serial.emitFrame("r0:110050200000");
+            await pending;
+        } finally {
+            mock.timers.reset();
+        }
+
+        assert.equal(app.getBodyPart("C1M8W0:0"), "rightAnkle");
+    });
+
+    it("refuses to set the body part when the firmware version is unknown", async () => {
+        // the extra (serial ends in 0) has no base lock, so only the unknown version can stop the write
+        const unknown = 'i0:{"version":"","model":"mc4b","imu_num":2,"serial no":"C1M8W0"}';
+        const { app, serial } = await ready(unknown, "r0:110030200000");
+
+        const error = (await app.setBodyPart("C1M8W0", "rightAnkle").catch((caught: unknown) => caught)) as {
+            code?: string;
+        };
+        assert.equal(error.code, "NOT_SUPPORTED");
+        assert.deepEqual(serial.writes, []);
+    });
+
+    it("refuses a base tracker on firmware with the lock before writing anything", async () => {
+        const { app, serial } = await ready(INFO_DUAL, "r0:110030200000");
+
+        const error = (await app.setBodyPart("C1MGN3", "rightAnkle").catch((caught: unknown) => caught)) as {
+            code?: string;
+            message?: string;
+        };
+        assert.equal(error.code, "NOT_SUPPORTED");
+        assert.match(error.message ?? "", /base tracker.*1\.0\.24/);
+        assert.deepEqual(serial.writes, []);
+    });
+
+    it("fails when the tracker never reports the body part", async () => {
+        const { app } = await ready(INFO_DUAL_1_0_30, "r0:110030200000");
+
+        mock.timers.enable({ apis: ["setTimeout"] });
+        try {
+            const pending = app.setBodyPart("C1MGN3", "rightAnkle").catch((error: unknown) => error);
+            await flush();
+            for (let step = 0; step < 3; step++) {
+                mock.timers.tick(200);
+                await flush();
+            }
+            mock.timers.tick(2_000);
+
+            assert.equal(((await pending) as { code?: string }).code, "TIMEOUT");
+        } finally {
+            mock.timers.reset();
+        }
+    });
+
+    it("writes the id directly to an HXW older than 1.0.27", async () => {
+        // an extra (serial ends in 0), so the base lock doesn't stop the write
+        const extra = 'i0:{"version":"1.0.22","model":"mc3s","imu_num":1,"serial no":"A2E980"}';
+        const { app, serial } = await ready(extra, "r0:110030200000");
+
+        const pending = app.setBodyPart("A2E980", "leftElbow");
+        await flush();
+        assert.deepEqual(serial.writes, ["COM4:o0:00007110107000", "COM4:r0:"]);
+
+        serial.emitFrame("r0:110070200000");
+        await pending;
+        assert.equal(app.getBodyPart("A2E980:0"), "leftElbow");
+    });
+
+    it("rejects what can't be done", async () => {
+        const { app } = await ready(INFO_DUAL_1_0_30, "r0:110030200000");
+
+        const code = async (action: Promise<unknown>) =>
+            ((await action.catch((error: unknown) => error)) as { code?: string }).code;
+        assert.equal(await code(app.setBodyPart("C1MGN3", "unassigned")), "NOT_SUPPORTED");
+        assert.equal(await code(app.setBodyPart("NOPE00", "chest")), "DEVICE_NOT_FOUND");
+
+        // settings are needed, the sequence writes all of them back
+        const noSettings = await connected();
+        noSettings.serial.emitFrame(INFO_DUAL_1_0_30);
+        assert.equal(await code(noSettings.app.setBodyPart("C1MGN3", "chest")), "READ_FAILED");
     });
 });

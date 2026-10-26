@@ -2,13 +2,12 @@ import type { Emitter } from "../../lib/emitter.js";
 import type { Logger } from "../../lib/logging.js";
 import type { DeviceRegistry } from "../device-registry.js";
 import type { ProtocolHandler } from "../protocol-handler.js";
-import { decodeImu } from "../../protocol/codec/imu.js";
+import { decodeImu, decodeRange } from "../../protocol/codec/imu.js";
 import { modelFromFirmware, parseBattery, parseInfo, type ParsedInfo } from "../../protocol/codec/messages.js";
 import {
     parseWiredButton,
     parseWiredState,
     splitWiredImu,
-    wiredAnkleEnabled,
     wiredSettingsCommands,
     type WiredState,
 } from "../../protocol/endpoint/wired.js";
@@ -62,9 +61,10 @@ export class WiredController implements ProtocolHandler {
             case "p":
             case "r":
             case "e":
+            case "f":
             case "h":
             case "g":
-                this.#onImu(endpointId, name, payload);
+                this.#onImu(endpointId, payload);
                 break;
         }
     }
@@ -165,11 +165,11 @@ export class WiredController implements ProtocolHandler {
         this.#emitter.emit("button", { deviceId: device.deviceId, button });
     }
 
-    #onImu(endpointId: string, identifier: string, payload: string): void {
+    #onImu(endpointId: string, payload: string): void {
         const device = this.#registry.deviceAt(endpointId, WIRED_SLOT);
         if (!device || device.trackers.length === 0) return;
 
-        const slices = splitWiredImu(payload, device.trackers.length, wiredAnkleEnabled(identifier));
+        const slices = splitWiredImu(payload, device.trackers.length);
         for (const slice of slices) {
             const tracker = device.trackers[slice.index];
             if (!tracker) continue;
@@ -177,7 +177,7 @@ export class WiredController implements ProtocolHandler {
             const decoded = decodeImu(slice.payload, device.model);
             if (!decoded || !this.#registry.trackerSeen(tracker.trackerId)) continue;
 
-            const ankleAngle = decoded.ankleAngle ?? slice.ankleAngle;
+            const range = decodeRange(device.model, slice.range);
 
             this.#emitter.emit("imu", {
                 trackerId: tracker.trackerId,
@@ -186,7 +186,7 @@ export class WiredController implements ProtocolHandler {
                 role: "single",
                 rotation: decoded.rotation,
                 acceleration: decoded.acceleration,
-                ...(ankleAngle === undefined ? {} : { ankleAngle }),
+                ...(range === undefined ? {} : { range }),
                 timestamp: Date.now(),
             });
         }

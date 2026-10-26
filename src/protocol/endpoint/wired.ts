@@ -15,7 +15,7 @@ const WIRED_PARTS: readonly BodyPart[] = Object.freeze([
 
 const WIRED_MIN_IMUS = 5;
 const WIRED_IMU_BYTES = 14;
-const WIRED_ANKLE_BYTES = 4;
+const WIRED_RANGE_BYTES = 4;
 
 export interface WiredState {
     imuCount: number;
@@ -26,7 +26,8 @@ export interface WiredState {
 export interface WiredImuSlice {
     payload: string;
     index: number;
-    ankleAngle?: number;
+    // raw range sensor value (see decodeRange)
+    range?: number;
 }
 
 // `s:{"imu_mode":1, "imu_num":5, "magf_status":"33333", "speed_mode":2, "dcal_flags":"04", "detected":"04004C4C"}`
@@ -50,32 +51,28 @@ export function parseWiredState(payload: string): WiredState | undefined {
     }
 }
 
-// `r` and `h` are the ankle-motion variants, `h` is shared by 7 and 8 trackers
-export function wiredAnkleEnabled(identifier: string): boolean {
-    return identifier === "r" || identifier === "h";
-}
-
-export function splitWiredImu(payload: string, partCount: number, ankleEnabled: boolean): WiredImuSlice[] {
+// frames are 14 bytes per IMU, followed by two 16-bit range values (left ankle, right ankle) when ankle motion detection is on
+export function splitWiredImu(payload: string, partCount: number): WiredImuSlice[] {
     const bytes = decodeBase64(payload);
     if (partCount <= 0 || bytes.length < partCount * WIRED_IMU_BYTES) return [];
 
-    const ankleOffset = bytes.length - WIRED_ANKLE_BYTES;
-    const hasAnkle = ankleEnabled && bytes.length >= partCount * WIRED_IMU_BYTES + WIRED_ANKLE_BYTES;
-    const view = hasAnkle ? new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength) : undefined;
+    const hasRange = bytes.length >= partCount * WIRED_IMU_BYTES + WIRED_RANGE_BYTES;
+    const rangeOffset = partCount * WIRED_IMU_BYTES;
+    const view = hasRange ? new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength) : undefined;
 
     const slices: WiredImuSlice[] = [];
     for (let index = 0; index < partCount; index++) {
         const part = WIRED_PARTS[index];
-        let ankleAngle: number | undefined;
+        let range: number | undefined;
 
-        if (view && part === "leftAnkle") ankleAngle = view.getInt8(ankleOffset);
-        else if (view && part === "rightAnkle") ankleAngle = view.getInt8(ankleOffset + 2);
+        if (view && part === "leftAnkle") range = view.getUint16(rangeOffset, true);
+        else if (view && part === "rightAnkle") range = view.getUint16(rangeOffset + 2, true);
 
         const start = index * WIRED_IMU_BYTES;
         slices.push({
             payload: encodeBase64(bytes.slice(start, start + WIRED_IMU_BYTES)),
             index,
-            ...(ankleAngle === undefined ? {} : { ankleAngle }),
+            ...(range === undefined ? {} : { range }),
         });
     }
 
@@ -106,8 +103,9 @@ export function wiredSettingsCommands(settings: TrackerSettings): readonly strin
     if (settings.sensorAutoCorrection.includes("gyro")) correctionBits |= 2;
     if (settings.sensorAutoCorrection.includes("mag")) correctionBits |= 4;
 
+    // according to firmware, wired trackers swap the sensor modes, so 1 is actually without mag and 2 is with mag?
     return [
-        `sensor imu mode ${settings.sensorMode}\r\n`,
+        `sensor imu mode ${settings.sensorMode === 1 ? 2 : 1}\r\n`,
         settings.fpsMode === 50 ? "system speed mode 1\r\n" : "system speed mode 2\r\n",
         `sensor cal flags ${correctionBits}\r\nsensor restart\r\n`,
         settings.ankleMotionDetection

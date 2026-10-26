@@ -364,7 +364,8 @@ describe("protocol dispatch", () => {
         assert.equal(samples[0]?.trackerId, "A2E987:0");
         assert.equal(samples[0]?.deviceId, "A2E987");
         assert.equal(samples[0]?.role, "ankle");
-        assert.ok(Math.abs((samples[0]?.rotation.x ?? 0) - 0.07466666666666667) < 1e-12);
+        // the first quaternion component of the frame is 1344, sent as Q14
+        assert.ok(Math.abs((samples[0]?.rotation.x ?? 0) - 1344 / 16384) < 1e-12);
         assert.deepEqual(mags, [{ trackerId: "A2E987:0", deviceId: "A2E987", status: "okay" }]);
     });
 

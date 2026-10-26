@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { decodeImu, magStatusFromByte, readImuStatusWord } from "../dist/protocol/codec/imu.js";
+import { decodeImu, decodeRange, magStatusFromByte, readImuStatusWord } from "../dist/protocol/codec/imu.js";
 import { fromByteArray as encodeBase64, toByteArray as decodeBase64 } from "base64-js";
 import { decodeSettings, modelFromFirmware, parseBattery, parseInfo } from "../dist/protocol/codec/messages.js";
 
@@ -21,9 +21,49 @@ function close(actual: number, expected: number): boolean {
     return Math.abs(actual - expected) < 1e-12;
 }
 
-describe("IMU decoding matches v3", () => {
-    it("has fixtures generated from the v3 decoder", () => {
+// the fixtures are real frames (HXW from a dongle capture, HX2 from BLE), with the expected values worked out by a separate implementation of the same maths
+describe("IMU decoding", () => {
+    it("has captured fixtures for both trackers", () => {
         assert.ok(fixtures.length >= 12);
+        assert.ok(fixtures.some((fixture) => fixture.model === "wireless"));
+        assert.ok(fixtures.some((fixture) => fixture.model === "x2"));
+    });
+
+    it("keeps the captured fixtures at rest, so a tap or a move can't end up as an expected value", () => {
+        for (const fixture of fixtures) {
+            const decoded = decodeImu(fixture.payload, fixture.model);
+            const { x, y, z } = decoded?.acceleration ?? { x: NaN, y: NaN, z: NaN };
+            assert.ok(Math.hypot(x, y, z) < 1, `${fixture.model} fixture has ${Math.hypot(x, y, z)} m/s² of linear acceleration`);
+        }
+    });
+
+    it("decodes unit quaternions", () => {
+        for (const fixture of fixtures) {
+            const { x, y, z, w } = decodeImu(fixture.payload, fixture.model)?.rotation ?? { x: NaN, y: NaN, z: NaN, w: NaN };
+            assert.ok(Math.abs(Math.hypot(x, y, z, w) - 1) < 1e-3, `norm ${Math.hypot(x, y, z, w)}`);
+        }
+    });
+
+    it("leaves no acceleration for a tracker lying still with gravity on one axis", () => {
+        // identity orientation (the decoder flips the sign of w), 1 g on z. HX2 sends 2048 LSB per g, HXW and wired Q8 m/s²
+        const frame = (accelZ: number) => {
+            const bytes = new Uint8Array(14);
+            const view = new DataView(bytes.buffer);
+            view.setInt16(6, -16384, true);
+            view.setInt16(12, accelZ, true);
+            return encodeBase64(bytes);
+        };
+
+        for (const [model, accelZ] of [
+            ["x2", 2048],
+            ["wireless", 2510],
+            ["wired", 2510],
+        ] as const) {
+            const acceleration = decodeImu(frame(accelZ), model)?.acceleration;
+            assert.ok(Math.abs(acceleration?.x ?? NaN) < 1e-9, `${model} x`);
+            assert.ok(Math.abs(acceleration?.y ?? NaN) < 1e-9, `${model} y`);
+            assert.ok(Math.abs(acceleration?.z ?? NaN) < 0.01, `${model} z ${acceleration?.z}`);
+        }
     });
 
     for (const [index, fixture] of fixtures.entries()) {
@@ -55,15 +95,27 @@ describe("IMU packet quirks", () => {
         assert.equal(decodeImu(encodeBase64(new Uint8Array(10)), "wireless"), undefined);
     });
 
-    it("reads an ankle angle only when the payload lacks double padding", () => {
-        const sixteen = decodeBase64("QAV1/Is6EBngAaf/bAkCAA==");
-        assert.equal(sixteen.length, 16);
-        assert.equal(decodeImu(encodeBase64(sixteen), "wireless")?.ankleAngle, undefined);
+    it("does not take a range value from the padding of the payload", () => {
+        // v3 treated a 14-byte payload (ends in a single "=") as having an ankle value, which was really acceleration
+        const decoded = decodeImu(encodeBase64(decodeBase64("QAV1/Is6EBngAaf/bAkCAA==").slice(0, 14)), "wireless");
+        assert.equal(decoded !== undefined && "ankleAngle" in decoded, false);
+        assert.equal(decoded !== undefined && "range" in decoded, false);
+    });
 
-        // A 14-byte slice ends in a single "=", which v3 treated as "has ankle".
-        const fourteen = sixteen.slice(0, 14);
-        const decoded = decodeImu(encodeBase64(fourteen), "wireless");
-        assert.equal(decoded?.ankleAngle, (fourteen[12]! | (fourteen[13]! << 8)) >>> 0);
+    it("decodes the range for each tracker", () => {
+        // HX2: millimetres in bits 5-15 with a spread code below
+        assert.equal(decodeRange("x2", (700 << 5) | 3), 700);
+        assert.equal(decodeRange("x2", 0), 0);
+        assert.equal(decodeRange("x2", 0xffff), undefined);
+
+        // HXW and wired: signed millimetres, negative values are error codes
+        assert.equal(decodeRange("wireless", 700), 700);
+        assert.equal(decodeRange("wired", 700), 700);
+        assert.equal(decodeRange("wireless", 0xfff9), undefined);
+        assert.equal(decodeRange("wired", 0xff0b), undefined);
+        assert.equal(decodeRange("wireless", 0xffff), undefined);
+
+        assert.equal(decodeRange("x2", undefined), undefined);
     });
 
     it("decodes mag and tap from the status word for each IMU", () => {

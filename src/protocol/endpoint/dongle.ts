@@ -1,6 +1,6 @@
 import { fromByteArray as encodeBase64, toByteArray as decodeBase64 } from "base64-js";
 import { readImuStatusWord } from "../codec/imu.js";
-import type { BodyPart, ImuRole, TrackerSettings } from "../../types.js";
+import type { AccelAccuracy, BodyPart, ImuRole, TrackerSettings } from "../../types.js";
 
 const TRACKER_PARTS: Readonly<Record<string, BodyPart>> = Object.freeze({
     "1": "chest",
@@ -37,11 +37,31 @@ export function parseChannel(payload: string): number | undefined {
     return isValidChannel(channel) ? channel : undefined;
 }
 
-// receiving "r:330"
-// marks a completed pairing
-// TODO: check if this is actually the case, for some reason i checked either the first and second chars
-export function parsePairingResult(payload: string): boolean {
-    return payload.charAt(0) === "3" || payload.charAt(1) === "3";
+export interface DongleRegister {
+    // the mode ordered with "o:", 3 is sensing
+    mode: number;
+    // bit n = slot n has been paired since the dongle booted
+    paired: number;
+    // bit n = slot n has no tracker stored
+    unpaired: number;
+}
+
+// receiving "r:300", the dongle register: [mode][paired slots][unpaired slots]
+export function parseDongleRegister(payload: string): DongleRegister | undefined {
+    if (payload.length < 3) return undefined;
+
+    const mode = Number.parseInt(payload.charAt(0), 16);
+    const paired = Number.parseInt(payload.charAt(1), 16);
+    const unpaired = Number.parseInt(payload.charAt(2), 16);
+    if (Number.isNaN(mode) || Number.isNaN(paired) || Number.isNaN(unpaired)) return undefined;
+
+    return { mode, paired, unpaired };
+}
+
+// the dongle stays in pairing mode until the host leaves it, and sets the slot's bit once a tracker has been bound to it
+// ordering a pairing reset for the slot clears the bit first, so a set bit after that means a new pairing
+export function isSlotPaired(register: DongleRegister, slot: "0" | "1"): boolean {
+    return (register.paired & (1 << Number(slot))) !== 0;
 }
 
 // receiving "r0:110070200000"
@@ -51,30 +71,86 @@ export function parseTrackerId(payload: string): string | undefined {
     return id !== "" && id !== "0" ? id : undefined;
 }
 
+// dongle firmware from 1.0.29 ends `r(x):` frames with the accel accuracy (0-3) of the first and second IMU, 12 bytes become 14 (HX2 only)
+export function parseDongleAccelAccuracy(payload: string): AccelAccuracy[] | undefined {
+    if (payload.length < 14) return undefined;
+
+    const accuracy: AccelAccuracy[] = [];
+    for (const index of [12, 13]) {
+        const value = Number.parseInt(payload.charAt(index), 16);
+        if (Number.isNaN(value) || value > 3) return undefined;
+        accuracy.push(value as AccelAccuracy);
+    }
+
+    return accuracy;
+}
+
 export interface DongleImuSlice {
+    // base64 of the 14 bytes of quaternion + acceleration
     payload: string;
     role: ImuRole;
     index: number;
     status?: number;
+    // raw range sensor value (see decodeRange), the sensor sits at the first IMU
+    range?: number;
 }
 
-// one 14-byte IMU packet (+ 2 status bytes) or a 30-byte packet carrying two IMUs (leg + thigh)
+// decoded IMU packets from the dongle:
+//  14 bytes: [IMU0 14]
+//  16 bytes: [IMU0 14][status 2]
+//  18 bytes: [IMU0 14][status 2][range 2]
+//  30 bytes: [IMU0 14][status 2][IMU1 14]
+//  32 bytes: [IMU0 14][status 2][range 2][IMU1 14]
 export function splitDongleImu(payload: string, trackerCount: number): DongleImuSlice[] {
     const bytes = decodeBase64(payload);
-    const status = readImuStatusWord(bytes);
+    if (bytes.length < 14) return [];
 
-    if (bytes.length >= 30 && trackerCount >= 2) {
-        return [
-            { payload: encodeBase64(bytes.slice(0, 14)), role: "ankle", index: 0, status },
-            { payload: encodeBase64(bytes.slice(16, 30)), role: "knee", index: 1, status },
-        ];
+    const status = readImuStatusWord(bytes);
+    const hasRange = bytes.length === 18 || bytes.length === 32;
+    const range = hasRange ? readUint16(bytes, 16) : undefined;
+
+    const slices: DongleImuSlice[] = [
+        {
+            payload: encodeBase64(bytes.slice(0, 14)),
+            role: "ankle",
+            index: 0,
+            ...(status === undefined ? {} : { status }),
+            ...(range === undefined ? {} : { range }),
+        },
+    ];
+
+    const secondOffset = hasRange ? 18 : 16;
+    if (trackerCount >= 2 && bytes.length >= secondOffset + 14) {
+        slices.push({
+            payload: encodeBase64(bytes.slice(secondOffset, secondOffset + 14)),
+            role: "knee",
+            index: 1,
+            ...(status === undefined ? {} : { status }),
+        });
     }
 
-    return [{ payload, role: "ankle", index: 0, status }];
+    return slices;
+}
+
+function readUint16(bytes: Uint8Array, offset: number): number | undefined {
+    const low = bytes[offset];
+    const high = bytes[offset + 1];
+    if (low === undefined || high === undefined) return undefined;
+
+    return low | (high << 8);
 }
 
 export function bodyPartOfTracker(trackerId: string): BodyPart | undefined {
     return TRACKER_PARTS[trackerId];
+}
+
+// the id a tracker stores for a body part
+export function trackerIdOfBodyPart(bodyPart: BodyPart): number | undefined {
+    for (const [id, part] of Object.entries(TRACKER_PARTS)) {
+        if (part === bodyPart) return Number.parseInt(id, 16);
+    }
+
+    return undefined;
 }
 
 // for HX2 with 2 IMUs, the first part is the "ankle" (leg), the second part is the "knee" (thigh)
@@ -96,14 +172,12 @@ export function setChannelCommand(channel: number): string {
     return `o:30${channel.toString(16)}0`;
 }
 
-// sending "o:1140"
+// sending "o:1140" then "o:1040"
 // start pairing to channel 4, slot 0
 export function pairCommands(channel: number, slot: "0" | "1"): readonly string[] {
-    if (slot === "0") {
-        return Object.freeze([`o:11${channel.toString(16)}0`, `o:10${channel.toString(16)}0`, setChannelCommand(channel)]);
-    }
+    if (slot === "0") return Object.freeze([`o:11${channel.toString(16)}0`, `o:10${channel.toString(16)}0`]);
 
-    return Object.freeze([`o:22${channel.toString(16)}0`, `o:20${channel.toString(16)}0`, setChannelCommand(channel)]);
+    return Object.freeze([`o:22${channel.toString(16)}0`, `o:20${channel.toString(16)}0`]);
 }
 
 // sending "o:3041" then "o:3040"
@@ -117,7 +191,8 @@ export function unpairCommands(channel: number, slot: "0" | "1"): readonly strin
 // sending "o(x):00000" + fps + sensor mode + "010" + auto-correction + "0" + command + ankle motion detection
 // e.g. "o0:00000110107000" for 100fps, sensor mode 1, accel+gyro+mag sensor auto correction, no ankle motion detection. for slot 0.
 // bit 12 is command, 0 = normal, 1 = switch to BLE, 2 = power off
-export function dongleSettingsCommand(slot: string, settings: TrackerSettings, command?: number): string {
+// bits 3-4 are the body part id the tracker should use, 0 leaves it alone
+export function dongleSettingsCommand(slot: string, settings: TrackerSettings, command?: number, attachPoint?: number): string {
     let correction = 0;
     if (settings.sensorAutoCorrection.includes("accel")) correction |= 1;
     if (settings.sensorAutoCorrection.includes("gyro")) correction |= 2;
@@ -127,8 +202,16 @@ export function dongleSettingsCommand(slot: string, settings: TrackerSettings, c
     const sensor = settings.sensorMode === 1 ? 1 : 0;
     const ankle = settings.ankleMotionDetection ? 1 : 0;
     const cmd = command ?? 0;
+    const attach = (attachPoint ?? 0).toString(16).padStart(2, "0");
 
-    return `o${slot}:00000${fps}${sensor}010${correction}0${cmd}${ankle}`;
+    return `o${slot}:000${attach}${fps}${sensor}010${correction}0${cmd}${ankle}`;
+}
+
+// the tracker applies a body part sent through the dongle only after seeing 0x0A, 0x1F, <id>, 0x00 in the attach point digits.
+// firmware without that requirement gets the id alone (the caller decides with bodyPartNeedsUnlock)
+export function bodyPartCommands(slot: string, settings: TrackerSettings, trackerId: number, unlock: boolean): string[] {
+    const steps = unlock ? [0x0a, 0x1f, trackerId, 0x00] : [trackerId];
+    return steps.map((attachPoint) => dongleSettingsCommand(slot, settings, undefined, attachPoint));
 }
 
 // e.g. `r0:110060800a00`
@@ -168,31 +251,29 @@ export interface DongleButtonState {
 
 export interface TrackerRssi {
     dongle: number;
-    sensor: number;
+    sensor?: number;
 }
 
-// the a: frame is six hex-encoded bytes. Layout (from live captures):
-//   byte0  byte1  byte2  byte3  byte4  byte5
-//   dongle sensor dongle sensor ?      ?
-//   (each pair is the same measurement reported twice)
-//
-// bytes 0/2 = dongle RSSI (how the dongle hears the tracker)
-// bytes 1/3 = sensor RSSI (how the tracker hears the dongle)
-// bytes 4/5 = unknown — correlates with RSSI but is not a link-quality indicator
-//             (range 44-59, always within ±1 of each other, tracks dongle RSSI)
-// "7f7f7f7f7f7f" means the dongle is searching (tracker lost)
-
-// ^^ what the AI thinks, idk its output seems to be somewhat accurate? need more testing. genuinely no idea how to interpret anything here lol
+// the a: frame is six bytes of -dBm, collected per slot since the previous frame:
+//   [dongle min][dongle max][sensor min][sensor max][dongle average][sensor average]
+// "dongle" is how well the dongle hears the tracker, "sensor" is how well the tracker hears the dongle (sent in every IMU packet)
 export function isRssiLost(payload: string): boolean {
     return payload.toLowerCase() === "7f7f7f7f7f7f";
 }
 
+// we only need the average i think
 export function decodeTrackerRssi(payload: string): TrackerRssi | undefined {
-    if (payload.length < 4) return undefined;
+    const dongle = rssiMagnitude(payload, 4);
+    if (dongle === undefined) return undefined;
 
-    const dongle = Number.parseInt(payload.slice(0, 2), 16);
-    const sensor = Number.parseInt(payload.slice(2, 4), 16);
-    if (Number.isNaN(dongle) || Number.isNaN(sensor) || dongle === 0) return undefined;
+    const sensor = rssiMagnitude(payload, 5);
+    return { dongle: -dongle, ...(sensor === undefined ? {} : { sensor: -sensor }) };
+}
 
-    return { dongle: -dongle, sensor: -sensor };
+// 0 and 7f or above can't be a real signal strength (no samples or stale counters)
+function rssiMagnitude(payload: string, byteIndex: number): number | undefined {
+    if (payload.length < (byteIndex + 1) * 2) return undefined;
+
+    const value = Number.parseInt(payload.slice(byteIndex * 2, byteIndex * 2 + 2), 16);
+    return Number.isNaN(value) || value === 0 || value >= 0x7f ? undefined : value;
 }

@@ -8,6 +8,7 @@ import { BleController } from "./core/controller/ble-controller.js";
 import type { ProtocolHandler } from "./core/protocol-handler.js";
 import { asciiEncode, parseIdentifier, parseLine } from "./protocol/codec/framing.js";
 import type { BleCharacteristic } from "./protocol/endpoint/ble.js";
+import { bodyPartBaseLocked, baseLockRemovedIn } from "./protocol/firmware.js";
 import type { Connection, Frame, ListOptions } from "./connections/contract.js";
 import type {
     BodyPart,
@@ -215,6 +216,33 @@ export class HaritoraX {
 
     unpair(endpointId: string, slot: string | number): Promise<void> {
         return this.#dongle.unpair(endpointId, slot);
+    }
+
+    getDongleVersion(endpointId: string): string | undefined {
+        return this.#dongle.getDongleVersion(endpointId);
+    }
+
+    async setBodyPart(deviceId: string, bodyPart: BodyPart): Promise<void> {
+        const device = this.#registry.getDevice(deviceId);
+        if (!device) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown device "${deviceId}"`);
+        if (device.model === "wired")
+            throw new HaritoraXError("NOT_SUPPORTED", "Wired trackers get their body parts from the order of their sensors");
+        if (!this.#open.has(device.endpointId))
+            throw new HaritoraXError("NOT_CONNECTED", `${device.endpointId} is not connected`);
+
+        if (bodyPartBaseLocked(device.model, device.version, device.deviceId) === true) {
+            throw new HaritoraXError(
+                "NOT_SUPPORTED",
+                `${device.deviceId} is a base tracker and keeps its body part on firmware ${device.version}. Update the tracker firmware to ${baseLockRemovedIn(device.model)} or newer to reassign it`,
+            );
+        }
+
+        if (device.connection === "ble") {
+            await this.#ble.setBodyPart(device.endpointId, bodyPart);
+            return;
+        }
+
+        await this.#dongle.setBodyPart(device.endpointId, device.slot, bodyPart);
     }
 
     async powerOff(deviceId: string): Promise<void> {

@@ -120,6 +120,7 @@ export class DeviceRegistry {
             }
 
             existing.model = input.model;
+            if (input.version) existing.version = input.version;
             this.#emitInfo(input);
             this.#emitDevices();
             return existing;
@@ -131,6 +132,7 @@ export class DeviceRegistry {
             slot,
             imuCount,
             model: input.model,
+            ...(input.version ? { version: input.version } : {}),
             connection: input.connection,
             trackers: this.#createTrackers(deviceId, endpointId, input.parts),
         };

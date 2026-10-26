@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it, mock } from "node:test";
 import { createHaritoraX } from "../dist/index.js";
 import { BleConnection, type BleBackend, type BlePeripheralSummary } from "../dist/connections/ble/index.js";
 import type { ListOptions } from "../dist/connections/contract.js";
@@ -38,6 +38,9 @@ const SINGLE_IMU = hex("9400fe01c0085d3f7dff3c00fc07");
 // captured from a two-IMU HaritoraX 2 over BLE (the same instant, so sensor and sensor2 carry the same IMU data)
 const SENSOR_2IMU = hex("00db0afb3b00fc33020181f89a02551d31fdb2fecc3875008b069e04");
 const SENSOR2_2IMU = hex("00db0afb3b00fc33020181f89a020201551d31fdb2fecc3875008b069e04");
+
+// HXW reports its model as "MC3" over BLE, the dongle calls it "mc3s"
+const HXW_DEVICE: FakeDevice = { localName: "HaritoraXW-A2E987", serial: "A2E987", model: "MC3", version: "1.0.28" };
 
 class FakeBleBackend implements BleBackend {
     readonly peripherals: BlePeripheralSummary[] = [
@@ -107,13 +110,24 @@ class FakeBleBackend implements BleBackend {
     }
 }
 
-function identityFrames(): Array<[BleCharacteristic, Uint8Array]> {
+interface FakeDevice {
+    localName: string;
+    serial: string;
+    // device information model number, "MC4B" for HX2 and "MC3" for HXW
+    model: string;
+    // software revision (2a28), the tracker's firmware version
+    version: string;
+}
+
+const HX2_DEVICE: FakeDevice = { localName: "HaritoraX2-C1M8W0", serial: "C1M8W0", model: "MC4B", version: "1.0.30" };
+
+function identityFrames(device: FakeDevice): Array<[BleCharacteristic, Uint8Array]> {
     return [
-        ["serial-number", bytes("C1M8W0")],
+        ["serial-number", bytes(device.serial)],
         // v3 used the software revision (2a28) as the tracker version
-        ["software-revision", bytes("1.0.30")],
+        ["software-revision", bytes(device.version)],
         ["number-of-imu", byte(1)],
-        ["model-number", bytes("MC4B")],
+        ["model-number", bytes(device.model)],
         ["body-part", byte(7)],
         ["magnetometer", byte(2)],
         ["sensor-mode", byte(8)],
@@ -126,8 +140,10 @@ function identityFrames(): Array<[BleCharacteristic, Uint8Array]> {
     ];
 }
 
-async function connected() {
+async function connected(device: FakeDevice = HX2_DEVICE) {
     const backend = new FakeBleBackend();
+    backend.peripherals[0] = { id: "ble-1", localName: device.localName, rssi: -52 };
+
     const connection = new BleConnection(backend, { scanTimeoutMs: 1 });
     const app = createHaritoraX({ connections: [connection], logLevel: "silent" });
 
@@ -138,7 +154,7 @@ async function connected() {
     await app.connect("ble-1");
 
     // the real backend reads these during open; the fake emits them once connected
-    for (const [characteristic, data] of identityFrames()) backend.emit("ble-1", characteristic, data);
+    for (const [characteristic, data] of identityFrames(device)) backend.emit("ble-1", characteristic, data);
 
     return { app, backend, infos };
 }
@@ -177,6 +193,33 @@ describe("BLE protocol", () => {
         assert.equal(slices28[0]?.payload.length, 14);
         assert.equal(slices28[1]?.payload.length, 14);
         assert.equal(slices28[1]?.role, "knee");
+        assert.deepEqual(slices28[1]?.payload, SENSOR_2IMU.slice(14, 28));
+        assert.equal(slices28[0]?.range, undefined);
+    });
+
+    it("finds the range bytes in sensor frames", () => {
+        // with ankle motion detection the range sits between the IMUs: [IMU0 14][range 2] and [IMU0 14][range 2][IMU1 14]
+        const single = new Uint8Array(16);
+        single.set(SINGLE_IMU, 0);
+        single.set([0xbc, 0x02], 14);
+
+        const [only] = splitBleImu(single);
+        assert.equal(splitBleImu(single).length, 1);
+        assert.equal(only?.payload.length, 14);
+        assert.equal(only?.range, 700);
+
+        const dual = new Uint8Array(30);
+        dual.set(SENSOR_2IMU.slice(0, 14), 0);
+        dual.set([0xbc, 0x02], 14);
+        dual.set(SENSOR_2IMU.slice(14, 28), 16);
+
+        const slices = splitBleImu(dual);
+        assert.equal(slices.length, 2);
+        assert.equal(slices[0]?.range, 700);
+        assert.deepEqual(slices[1]?.payload, SENSOR_2IMU.slice(14, 28));
+        assert.equal(slices[1]?.range, undefined);
+
+        assert.deepEqual(splitBleImu(new Uint8Array(13)), []);
     });
 
     it("slices sensor2 frames by length and reads status and range", () => {
@@ -198,8 +241,19 @@ describe("BLE protocol", () => {
         assert.equal(two[1]?.role, "knee");
         assert.deepEqual(two[1]?.payload, SENSOR_2IMU.slice(14, 28));
 
-        // 32 bytes (two IMUs plus range) has an unverified layout and is skipped
-        assert.deepEqual(splitBleSensor2(new Uint8Array(32)), []);
+        // two IMUs plus range: [IMU0 14][status 2][range 2][IMU1 14], the second IMU starts at 18
+        // (from the firmware, not captured on hardware yet)
+        const dualRanged = new Uint8Array(32);
+        dualRanged.set(SENSOR2_2IMU.slice(0, 16), 0);
+        dualRanged.set([0xbc, 0x02], 16);
+        dualRanged.set(SENSOR_2IMU.slice(14, 28), 18);
+
+        const dual = splitBleSensor2(dualRanged);
+        assert.equal(dual.length, 2);
+        assert.equal(dual[0]?.range, 700);
+        assert.deepEqual(dual[1]?.payload, SENSOR_2IMU.slice(14, 28));
+
+        assert.deepEqual(splitBleSensor2(new Uint8Array(20)), []);
     });
 
     it("maps settings values and body part assignments", () => {
@@ -264,8 +318,17 @@ describe("BLE device", () => {
         assert.equal(device.battery?.chargeStatus, "discharging");
     });
 
-    it("emits IMU samples for single and dual payloads", async () => {
-        const { app, backend } = await connected();
+    it("registers an HXW over BLE, which reports its model as MC3", async () => {
+        const { app } = await connected(HXW_DEVICE);
+
+        const device = app.getDevice("A2E987");
+        assert.equal(device?.model, "wireless");
+        assert.equal(device?.version, "1.0.28");
+        assert.equal(app.getTracker("A2E987:0")?.bodyPart, "leftElbow");
+    });
+
+    it("reads sensor for firmware without sensor2, for single and dual payloads", async () => {
+        const { app, backend } = await connected({ ...HX2_DEVICE, version: "0.9.0" });
 
         const samples: Array<{ trackerId: string; role: string }> = [];
         app.on("imu", (sample) => samples.push({ trackerId: sample.trackerId, role: sample.role }));
@@ -289,19 +352,60 @@ describe("BLE device", () => {
         assert.equal(app.getTracker("C1M8W0:1")?.bodyPart, "unassigned");
     });
 
-    it("uses sensor2 as the IMU source and ignores sensor once it has been seen", async () => {
+    it("skips sensor from the start once the firmware version proves sensor2 exists", async () => {
         const { app, backend } = await connected();
 
-        const samples: Array<{ trackerId: string; role: string; ankleAngle?: number }> = [];
-        app.on("imu", (sample) =>
-            samples.push({ trackerId: sample.trackerId, role: sample.role, ankleAngle: sample.ankleAngle }),
-        );
+        const samples: string[] = [];
+        app.on("imu", (sample) => samples.push(sample.trackerId));
+
+        // HX2 1.0.30 has sensor2, so the sensor notification that arrives first is not read
+        backend.emit("ble-1", "sensor", SINGLE_IMU);
+        assert.deepEqual(samples, []);
+
+        backend.emit("ble-1", "sensor2", SENSOR2_2IMU.slice(0, 16));
+        assert.deepEqual(samples, ["C1M8W0:0"]);
+    });
+
+    it("gates sensor2 on the HXW firmware version", async () => {
+        const old = await connected({ ...HXW_DEVICE, version: "1.0.22" });
+        const oldSamples: string[] = [];
+        old.app.on("imu", (sample) => oldSamples.push(sample.trackerId));
+        old.backend.emit("ble-1", "sensor", SINGLE_IMU);
+        assert.deepEqual(oldSamples, ["A2E987:0"]);
+
+        const current = await connected(HXW_DEVICE);
+        const currentSamples: string[] = [];
+        current.app.on("imu", (sample) => currentSamples.push(sample.trackerId));
+        current.backend.emit("ble-1", "sensor", SINGLE_IMU);
+        assert.deepEqual(currentSamples, []);
+    });
+
+    it("reads sensor while the version is unknown, until sensor2 shows up", async () => {
+        const { app, backend } = await connected({ ...HX2_DEVICE, version: "" });
+
+        const samples: string[] = [];
+        app.on("imu", (sample) => samples.push(sample.trackerId));
+
+        backend.emit("ble-1", "sensor", SINGLE_IMU);
+        assert.equal(samples.length, 1);
+
+        backend.emit("ble-1", "sensor2", SENSOR2_2IMU.slice(0, 16));
+        assert.equal(samples.length, 2);
+
+        // sensor2 has been seen, so sensor is the duplicate now
+        backend.emit("ble-1", "sensor", SINGLE_IMU);
+        assert.equal(samples.length, 2);
+    });
+
+    it("uses sensor2 as the IMU source for two IMUs", async () => {
+        const { app, backend } = await connected();
+
+        const samples: Array<{ trackerId: string; role: string }> = [];
+        app.on("imu", (sample) => samples.push({ trackerId: sample.trackerId, role: sample.role }));
         const taps: number[] = [];
         app.on("tap", (event) => taps.push(event.count));
 
-        const sensor2 = new Uint8Array(30);
-        sensor2.set(SENSOR2_2IMU, 0);
-        backend.emit("ble-1", "sensor2", sensor2);
+        backend.emit("ble-1", "sensor2", SENSOR2_2IMU);
         backend.emit("ble-1", "sensor", SENSOR_2IMU.slice(0, 28));
 
         assert.deepEqual(
@@ -315,29 +419,50 @@ describe("BLE device", () => {
         assert.equal(app.getTracker("C1M8W0:1")?.mag, "bad");
     });
 
-    it("falls back to sensor for firmware without sensor2", async () => {
-        const { app, backend } = await connected();
+    it("reports the range in millimetres, decoded for the tracker model", async () => {
+        const hx2 = await connected();
+        const hx2Ranges: Array<number | undefined> = [];
+        hx2.app.on("imu", (sample) => hx2Ranges.push(sample.range));
 
-        const samples: string[] = [];
-        app.on("imu", (sample) => samples.push(sample.trackerId));
+        const frame = (raw: number) => {
+            const data = new Uint8Array(18);
+            data.set(SENSOR2_2IMU.slice(0, 16), 0);
+            data.set([raw & 0xff, raw >> 8], 16);
+            return data;
+        };
 
-        backend.emit("ble-1", "sensor", SINGLE_IMU);
-        assert.deepEqual(samples, ["C1M8W0:0"]);
+        hx2.backend.emit("ble-1", "sensor2", SENSOR2_2IMU.slice(0, 16));
+        // HX2 range sensor: millimetres in the upper 11 bits, a spread code in the low 5
+        hx2.backend.emit("ble-1", "sensor2", frame((700 << 5) | 3));
+        hx2.backend.emit("ble-1", "sensor2", frame(0xffff));
+        assert.deepEqual(hx2Ranges, [undefined, 700, undefined]);
+
+        const hxw = await connected(HXW_DEVICE);
+        const hxwRanges: Array<number | undefined> = [];
+        hxw.app.on("imu", (sample) => hxwRanges.push(sample.range));
+
+        // HXW range sensor: signed millimetres, negative values are errors, 0xffff is no reading yet
+        hxw.backend.emit("ble-1", "sensor2", frame(700));
+        hxw.backend.emit("ble-1", "sensor2", frame(0xfff9));
+        hxw.backend.emit("ble-1", "sensor2", frame(0xffff));
+        assert.deepEqual(hxwRanges, [700, undefined, undefined]);
     });
 
-    it("reports a sensor2 range only when the frame carries one", async () => {
-        const { app, backend } = await connected();
+    it("reads the range from sensor frames too", async () => {
+        const { app, backend } = await connected({ ...HX2_DEVICE, version: "0.9.0" });
 
         const ranges: Array<number | undefined> = [];
-        app.on("imu", (sample) => ranges.push(sample.ankleAngle));
+        app.on("imu", (sample) => ranges.push(sample.range));
 
-        backend.emit("ble-1", "sensor2", SENSOR2_2IMU.slice(0, 16));
-        const withRange = new Uint8Array(18);
-        withRange.set(SENSOR2_2IMU.slice(0, 16), 0);
-        withRange.set([0x2a, 0x00], 16);
-        backend.emit("ble-1", "sensor2", withRange);
+        const withRange = new Uint8Array(16);
+        withRange.set(SINGLE_IMU, 0);
+        withRange.set([(700 << 5) & 0xff, (700 << 5) >> 8], 14);
 
-        assert.deepEqual(ranges, [undefined, 42]);
+        backend.emit("ble-1", "sensor", SINGLE_IMU);
+        backend.emit("ble-1", "sensor", withRange);
+
+        // a 14-byte frame has no range, its last bytes are acceleration
+        assert.deepEqual(ranges, [undefined, 700]);
     });
 
     it("emits magnetometer, button and battery updates", async () => {
@@ -419,5 +544,81 @@ describe("BLE device", () => {
 
         assert.deepEqual(lost, ["ble-1:remote"]);
         assert.deepEqual(app.getDevices(), []);
+    });
+});
+
+describe("setting the body part over BLE", () => {
+    const settle = async () => {
+        for (let index = 0; index < 3; index++) await new Promise<void>((resolve) => setImmediate(resolve));
+    };
+
+    it("writes the id and waits for the tracker to notify the new body part", async () => {
+        const { app, backend } = await connected();
+
+        const pending = app.setBodyPart("C1M8W0", "rightAnkle");
+        await settle();
+        assert.deepEqual(backend.writes.at(-1), { endpointId: "ble-1", characteristic: "body-part-write", data: [5] });
+
+        // the tracker answers by notifying the body part characteristic
+        backend.emit("ble-1", "body-part", byte(5));
+        await pending;
+
+        assert.equal(app.getBodyPart("C1M8W0:0"), "rightAnkle");
+    });
+
+    it("fails when the tracker never notifies the body part", async () => {
+        const { app } = await connected();
+
+        mock.timers.enable({ apis: ["setTimeout"] });
+        try {
+            const pending = app.setBodyPart("C1M8W0", "rightAnkle").catch((error: unknown) => error);
+            await settle();
+            mock.timers.tick(2_000);
+
+            assert.equal(((await pending) as { code?: string }).code, "TIMEOUT");
+        } finally {
+            mock.timers.reset();
+        }
+    });
+
+    it("doesn't wait when the tracker already has that body part, it doesn't notify then", async () => {
+        const { app, backend } = await connected();
+
+        // C1M8W0 reports left elbow (7)
+        await app.setBodyPart("C1M8W0", "leftElbow");
+
+        assert.deepEqual(backend.writes.at(-1), { endpointId: "ble-1", characteristic: "body-part-write", data: [7] });
+    });
+
+    it("doesn't wait for a notification from firmware that can't send one", async () => {
+        // an extra (serial ends in 0), so the base lock doesn't stop the write
+        const { app, backend } = await connected({
+            ...HXW_DEVICE,
+            localName: "HaritoraXW-A2E980",
+            serial: "A2E980",
+            version: "1.0.22",
+        });
+
+        await app.setBodyPart("A2E980", "leftKnee");
+
+        assert.deepEqual(backend.writes.at(-1), { endpointId: "ble-1", characteristic: "body-part-write", data: [2] });
+    });
+
+    it("refuses a base tracker on firmware that still has the lock, before writing", async () => {
+        // A2E987 ends in 7, so it came with a body part, and 1.0.27 is the last HXW build with the lock
+        const { app, backend } = await connected({ ...HXW_DEVICE, version: "1.0.27" });
+
+        const error = (await app.setBodyPart("A2E987", "leftKnee").catch((reason: unknown) => reason)) as {
+            code?: string;
+        };
+        assert.equal(error.code, "NOT_SUPPORTED");
+        assert.equal(backend.writes.filter((write) => write.characteristic === "body-part-write").length, 0);
+    });
+
+    it("rejects a body part a tracker can't have", async () => {
+        const { app } = await connected();
+
+        const error = await app.setBodyPart("C1M8W0", "unassigned").catch((reason: unknown) => reason);
+        assert.equal((error as { code?: string }).code, "NOT_SUPPORTED");
     });
 });

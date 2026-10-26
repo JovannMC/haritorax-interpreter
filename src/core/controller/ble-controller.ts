@@ -4,8 +4,9 @@ import type { Emitter } from "../../lib/emitter.js";
 import type { Logger } from "../../lib/logging.js";
 import type { DeviceRegistry } from "../device-registry.js";
 import type { ProtocolHandler } from "../protocol-handler.js";
-import { bodyPartsFor, isButtonDebounced } from "../../protocol/endpoint/dongle.js";
-import { decodeImu } from "../../protocol/codec/imu.js";
+import { bodyPartsFor, isButtonDebounced, trackerIdOfBodyPart } from "../../protocol/endpoint/dongle.js";
+import { decodeImu, decodeRange } from "../../protocol/codec/imu.js";
+import { bodyPartNotifies, hasSensor2 } from "../../protocol/firmware.js";
 import { modelFromFirmware } from "../../protocol/codec/messages.js";
 import {
     bleAccelAccuracy,
@@ -19,7 +20,6 @@ import {
     bleSettingValues,
     bleText,
     bleUint8,
-    bleUint16,
     splitBleImu,
     splitBleSensor2,
     type BleCharacteristic,
@@ -39,6 +39,8 @@ import type {
 } from "../../types.js";
 
 const BLE_SLOT = "0";
+const BODY_PART_TIMEOUT_MS = 2_000;
+const MAX_BLE_BODY_PART_ID = 15;
 
 export interface BleControllerOptions {
     emitter: Emitter;
@@ -57,6 +59,7 @@ export class BleController implements ProtocolHandler {
     readonly #write: (endpointId: string, characteristic: BleCharacteristic, data: Uint8Array) => Promise<void>;
     readonly #states = new Map<string, BleState>();
     readonly #lastButtonPress = new Map<string, number>();
+    readonly #bodyPartWaits = new Map<string, { bodyPart: BodyPart; resolve: () => void }>();
     readonly #buttonDebounceMs: number;
 
     constructor(options: BleControllerOptions) {
@@ -112,6 +115,9 @@ export class BleController implements ProtocolHandler {
                     state.device = undefined;
                 }
                 this.#ensureDevice(state);
+
+                if (part && this.#bodyPartWaits.get(endpointId)?.bodyPart === part)
+                    this.#bodyPartWaits.get(endpointId)?.resolve();
                 break;
             }
             // take priority over "sensor" if available, includes mag status and tap count
@@ -120,7 +126,7 @@ export class BleController implements ProtocolHandler {
                 this.#onSensor2(state, data);
                 break;
             case "sensor":
-                if (!state.sensor2Seen) this.#onSensor(state, data);
+                if (!state.sensor2Seen && !(state.model && hasSensor2(state.model, state.version))) this.#onSensor(state, data);
                 break;
             case "magnetometer": {
                 const device = this.#ensureDevice(state);
@@ -212,6 +218,7 @@ export class BleController implements ProtocolHandler {
 
     forgetEndpoint(endpointId: string): void {
         this.#states.delete(endpointId);
+        this.#bodyPartWaits.delete(endpointId);
         for (const key of this.#lastButtonPress.keys()) {
             if (key.startsWith(endpointId)) this.#lastButtonPress.delete(key);
         }
@@ -224,6 +231,54 @@ export class BleController implements ProtocolHandler {
 
         await this.#write(endpointId, "wireless-mode", new Uint8Array([2]));
         this.#log.info(`Powering off BLE ${endpointId}`);
+    }
+
+    // the tracker stores the body part itself and notifies it back, which also refreshes the trackers here
+    async setBodyPart(endpointId: string, bodyPart: BodyPart): Promise<void> {
+        const state = this.#state(endpointId);
+        const device = this.#ensureDevice(state);
+        if (!device) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown BLE tracker on "${endpointId}"`);
+
+        const id = trackerIdOfBodyPart(bodyPart);
+        if (id === undefined || id > MAX_BLE_BODY_PART_ID) {
+            throw new HaritoraXError("NOT_SUPPORTED", `"${bodyPart}" can't be assigned to a tracker over BLE`);
+        }
+
+        // older firmware doesn't notify, and no tracker notifies when it already has that body part
+        const confirms = bodyPartNotifies(device.model, device.version) && state.bodyPart !== bodyPart;
+        const confirmed = confirms
+            ? new Promise<boolean>((resolve) => {
+                  const timer = setTimeout(() => {
+                      this.#bodyPartWaits.delete(endpointId);
+                      resolve(false);
+                  }, BODY_PART_TIMEOUT_MS);
+
+                  this.#bodyPartWaits.set(endpointId, {
+                      bodyPart,
+                      resolve: () => {
+                          clearTimeout(timer);
+                          this.#bodyPartWaits.delete(endpointId);
+                          resolve(true);
+                      },
+                  });
+              })
+            : undefined;
+
+        try {
+            await this.#write(endpointId, "body-part-write", new Uint8Array([id]));
+        } catch (error) {
+            this.#bodyPartWaits.delete(endpointId);
+            throw error;
+        }
+
+        if (confirmed && !(await confirmed)) {
+            throw new HaritoraXError(
+                "TIMEOUT",
+                `${device.deviceId} did not confirm the body part "${bodyPart}" in time. Its firmware may ignore the change, check its version`,
+            );
+        }
+
+        this.#log.info(`Set body part of BLE ${endpointId} to ${bodyPart}`);
     }
 
     // swaps to GX dongle
@@ -266,13 +321,10 @@ export class BleController implements ProtocolHandler {
         this.#ensureImuCount(state, device, slices.length);
 
         for (const slice of slices) {
-            if (slice.payload.length < 14) continue;
-
             const tracker = device.trackers[slice.index];
             if (!tracker || !this.#registry.trackerSeen(tracker.trackerId)) continue;
 
-            const range = slice.payload.length === 16 ? bleUint16(slice.payload, 14) : undefined;
-            this.#emitImu(device, tracker, slice.index, slice.role, slice.payload.slice(0, 14), undefined, range);
+            this.#emitImu(device, tracker, slice.index, slice.role, slice.payload, undefined, slice.range);
         }
     }
 
@@ -298,6 +350,8 @@ export class BleController implements ProtocolHandler {
         if (decoded.magStatus) this.#registry.setMag(tracker.trackerId, decoded.magStatus);
         if (decoded.tap !== undefined) this.#registry.setTap(tracker.trackerId, decoded.tap);
 
+        const distance = decodeRange(device.model, range);
+
         this.#emitter.emit("imu", {
             trackerId: tracker.trackerId,
             deviceId: device.deviceId,
@@ -305,7 +359,7 @@ export class BleController implements ProtocolHandler {
             role,
             rotation: decoded.rotation,
             acceleration: decoded.acceleration,
-            ...(range === undefined ? {} : { ankleAngle: range }),
+            ...(distance === undefined ? {} : { range: distance }),
             timestamp: Date.now(),
         });
     }

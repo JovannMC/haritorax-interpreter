@@ -35,7 +35,8 @@ export type BleCharacteristic =
     | "sensor-mode"
     | "wireless-mode"
     | "auto-calibration"
-    | "body-part";
+    | "body-part"
+    | "body-part-write";
 
 const BLE_CHARACTERISTICS: Readonly<Record<string, BleCharacteristic>> = Object.freeze({
     "2a29": "manufacturer",
@@ -61,6 +62,8 @@ const BLE_CHARACTERISTICS: Readonly<Record<string, BleCharacteristic>> = Object.
     ef84c30090a911eda1eb0242ac120002: "wireless-mode",
     ef84c30590a911eda1eb0242ac120002: "auto-calibration",
     ef84c30190a911eda1eb0242ac120002: "body-part",
+    // write the body part id (1-15) here, the tracker confirms by notifying "body-part"
+    ef84c30490a911eda1eb0242ac120002: "body-part-write",
 });
 
 export function bleCharacteristicFromUuid(uuid: string): BleCharacteristic | undefined {
@@ -96,20 +99,30 @@ export interface BleImuSlice {
     payload: Uint8Array;
     index: number;
     role: ImuRole;
+    // raw range sensor value (see decodeRange)
+    range?: number;
 }
 
+// frames of the `sensor` characteristic, which has no status word:
+// 14 bytes [IMU0 14]
+// 16 bytes [IMU0 14][range 2]
+// 28 bytes [IMU0 14][IMU1 14]
+// 30 bytes [IMU0 14][range 2][IMU1 14]
 export function splitBleImu(data: Uint8Array): BleImuSlice[] {
-    const base64Length = Math.ceil(data.length / 3) * 4;
+    if (data.length < 14) return [];
 
-    if (base64Length >= 40) {
-        const thigh = base64Length === 40 ? data.slice(14, 29) : data.slice(18, 32);
-        return [
-            { payload: data.slice(0, 14), index: 0, role: "ankle" },
-            { payload: thigh, index: 1, role: "knee" },
-        ];
+    const hasRange = data.length === 16 || data.length === 30;
+    const range = hasRange ? bleUint16(data, 14) : undefined;
+    const slices: BleImuSlice[] = [
+        { payload: data.slice(0, 14), index: 0, role: "ankle", ...(range === undefined ? {} : { range }) },
+    ];
+
+    const secondOffset = hasRange ? 16 : 14;
+    if (data.length >= secondOffset + 14) {
+        slices.push({ payload: data.slice(secondOffset, secondOffset + 14), index: 1, role: "knee" });
     }
 
-    return [{ payload: data, index: 0, role: "ankle" }];
+    return slices;
 }
 
 export function bleText(data: Uint8Array): string {
@@ -169,11 +182,11 @@ export interface BleSensor2Slice {
     status: number;
     index: number;
     role: ImuRole;
+    // raw range sensor value (see decodeRange)
     range?: number;
 }
 
-
-// 16 bytes = single IMU, 18 bytes = single IMU + range, 30 bytes = dual IMU, 32 bytes = dual IMU + range
+// see splitBleImu, but sensor2 frames have a status word at bytes 14-15
 export function splitBleSensor2(data: Uint8Array): BleSensor2Slice[] {
     const status = readImuStatusWord(data);
     if (status === undefined) return [];
@@ -191,10 +204,9 @@ export function splitBleSensor2(data: Uint8Array): BleSensor2Slice[] {
                 { payload: data.slice(16, 30), status, index: 1, role: "knee" },
             ];
         case 32:
-            // 32 -= dual imu and range
             return [
                 { payload: ankle, status, index: 0, role: "ankle", range },
-                { payload: data.slice(16, 30), status, index: 1, role: "knee" },
+                { payload: data.slice(18, 32), status, index: 1, role: "knee" },
             ];
         default:
             return [];

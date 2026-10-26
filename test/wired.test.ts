@@ -84,14 +84,15 @@ function asciiText(bytes: Uint8Array): string {
     return text;
 }
 
-function imuPayload(count: number, ankle?: [number, number]): string {
+// range values are the raw 16-bit values the tracker sends for the left and right ankle
+function imuPayload(count: number, range?: [number, number]): string {
     const leg = decodeBase64(LEG).slice(0, 14);
-    const bytes = new Uint8Array(count * 14 + (ankle ? 4 : 0));
+    const bytes = new Uint8Array(count * 14 + (range ? 4 : 0));
 
     for (let index = 0; index < count; index++) bytes.set(leg, index * 14);
-    if (ankle) {
-        bytes[count * 14] = ankle[0] & 0xff;
-        bytes[count * 14 + 2] = ankle[1] & 0xff;
+    if (range) {
+        new DataView(bytes.buffer).setUint16(count * 14, range[0], true);
+        new DataView(bytes.buffer).setUint16(count * 14 + 2, range[1], true);
     }
 
     return encodeBase64(bytes);
@@ -214,9 +215,54 @@ describe("wired device", () => {
         const samples: string[] = [];
         app.on("imu", (sample) => samples.push(sample.trackerId));
 
-        serial.emitFrame(`h:${imuPayload(8, [10, -20])}`);
+        serial.emitFrame(`h:${imuPayload(8, [700, 1200])}`);
 
         assert.equal(samples.length, 8);
+    });
+
+    it("reads the range in millimetres from every frame letter that carries it", async () => {
+        const { app, serial } = await connected();
+        serial.emitFrame(STATE_5);
+        serial.emitFrame(INFO);
+
+        const ranges: Array<[string, number | undefined]> = [];
+        app.on("imu", (sample) => ranges.push([sample.bodyPart, sample.range]));
+
+        // 5 IMUs with range is still an "x" frame, only the length tells them apart
+        serial.emitFrame(`x:${imuPayload(5, [700, 1200])}`);
+        assert.deepEqual(
+            ranges.filter(([, range]) => range !== undefined),
+            [
+                ["leftAnkle", 700],
+                ["rightAnkle", 1200],
+            ],
+        );
+
+        // an error code (negative value) is no reading, and so is a frame without range
+        ranges.length = 0;
+        serial.emitFrame(`x:${imuPayload(5, [0xff0b, 0xffff])}`);
+        serial.emitFrame(`x:${imuPayload(5)}`);
+        assert.ok(ranges.every(([, range]) => range === undefined));
+        assert.equal(ranges.length, 10);
+    });
+
+    it("reads the 7-tracker frame with range", async () => {
+        const { app, serial } = await connected();
+        serial.emitFrame(
+            's:{"imu_mode":1,"imu_num":7,"magf_status":"0123012","speed_mode":2,"dcal_flags":"04","detected":"04004C6C"}',
+        );
+        serial.emitFrame(INFO);
+
+        const samples: Array<number | undefined> = [];
+        app.on("imu", (sample) => samples.push(sample.range));
+
+        serial.emitFrame(`f:${imuPayload(7, [300, 400])}`);
+
+        assert.equal(samples.length, 7);
+        assert.deepEqual(
+            samples.filter((range) => range !== undefined),
+            [300, 400],
+        );
     });
 
     it("emits battery and device-scoped button events", async () => {
@@ -257,8 +303,9 @@ describe("wired device", () => {
 
         await app.setSettings("0108013", settings);
 
+        // sensor mode 1 is the one that uses the magnetometer, which is imu mode 2 on a wired tracker
         assert.deepEqual(serial.writes, [
-            `${ENDPOINT}:sensor imu mode 1\r\n`,
+            `${ENDPOINT}:sensor imu mode 2\r\n`,
             `${ENDPOINT}:system speed mode 2\r\n`,
             `${ENDPOINT}:sensor cal flags 3\r\nsensor restart\r\n`,
             `${ENDPOINT}:param sensor range\r\nparam save\r\nsensor restart\r\n`,
@@ -284,18 +331,22 @@ describe("wired device", () => {
 });
 
 describe("wired protocol", () => {
-    it("reads left and right ankle values from the trailing buffer", () => {
-        const slices = splitWiredImu(imuPayload(6, [10, -20]), 6, true);
+    it("reads left and right ankle range values from the trailing buffer", () => {
+        const slices = splitWiredImu(imuPayload(6, [700, 1200]), 6);
 
         assert.equal(slices.length, 6);
-        assert.equal(slices[2]?.ankleAngle, 10);
-        assert.equal(slices[4]?.ankleAngle, -20);
-        assert.equal(slices[0]?.ankleAngle, undefined);
-        assert.equal(slices[5]?.ankleAngle, undefined);
+        assert.equal(slices[2]?.range, 700);
+        assert.equal(slices[4]?.range, 1200);
+        assert.equal(slices[0]?.range, undefined);
+        assert.equal(slices[5]?.range, undefined);
+
+        // the range is detected from the length, whatever the frame letter was
+        assert.equal(splitWiredImu(imuPayload(6), 6)[2]?.range, undefined);
+        assert.equal(splitWiredImu(imuPayload(5, [700, 1200]), 5)[2]?.range, 700);
     });
 
     it("ignores a payload shorter than the tracker count", () => {
-        assert.deepEqual(splitWiredImu(encodeBase64(new Uint8Array(14)), 2, false), []);
+        assert.deepEqual(splitWiredImu(encodeBase64(new Uint8Array(14)), 2), []);
     });
 
     it("maps button ids", () => {
@@ -314,7 +365,7 @@ describe("wired protocol", () => {
                 ankleMotionDetection: true,
             }),
             [
-                "sensor imu mode 1\r\n",
+                "sensor imu mode 2\r\n",
                 "system speed mode 2\r\n",
                 "sensor cal flags 7\r\nsensor restart\r\n",
                 "param sensor range\r\nparam save\r\nsensor restart\r\n",
@@ -329,7 +380,7 @@ describe("wired protocol", () => {
                 ankleMotionDetection: false,
             }),
             [
-                "sensor imu mode 2\r\n",
+                "sensor imu mode 1\r\n",
                 "system speed mode 1\r\n",
                 "sensor cal flags 0\r\nsensor restart\r\n",
                 "param sensor basic\r\nparam save\r\nsensor restart\r\n",

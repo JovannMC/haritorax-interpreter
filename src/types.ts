@@ -38,7 +38,8 @@ export interface ImuSample {
     role: ImuRole;
     rotation: Quaternion;
     acceleration: Vector;
-    ankleAngle?: number;
+    // distance from the range sensor in mm
+    range?: number;
     timestamp: number;
 }
 
@@ -107,12 +108,14 @@ export interface TrackerSnapshot {
 }
 
 export interface DeviceSnapshot {
-    // serial number, e.g. "A2E987"
+    // serial number, e.g. "A00000"
     deviceId: string;
     endpointId: string;
     slot: string;
     imuCount: number;
     model: TrackerModel;
+    // firmware version reported by the device e.g. "1.0.5"
+    version?: string;
     connection: ConnectionKind;
     trackers: TrackerSnapshot[];
     battery?: BatteryInfo;
