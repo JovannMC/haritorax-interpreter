@@ -1,6 +1,7 @@
 export interface ProtocolHandler {
     // ASCII
-    handleFrame(endpointId: string, name: string, slot: string | undefined, payload: string): void;
+    // rawName keeps the device's case, for the few frames where case is the difference (wired `X:` vs `x:`)
+    handleFrame(endpointId: string, name: string, slot: string | undefined, payload: string, rawName?: string): void;
     // binary data (BLE only)
     handleBinaryFrame?(endpointId: string, characteristic: string, data: Uint8Array): void;
 

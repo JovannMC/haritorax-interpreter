@@ -40,8 +40,10 @@ export class WiredController implements ProtocolHandler {
         this.#write = options.write;
     }
 
-    handleFrame(endpointId: string, name: string, slot: string | undefined, payload: string): void {
+    handleFrame(endpointId: string, name: string, slot: string | undefined, payload: string, rawName?: string): void {
         if (slot) return;
+        // `x:` is the float frame (report_type 1, not decoded yet). `X:` and the other IMU letters are upper case
+        if (rawName === "x") return;
 
         // i still hate how IMU data used so many different identifiers, that made me go crazy back then i remember
         switch (name) {

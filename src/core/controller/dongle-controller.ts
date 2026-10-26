@@ -30,6 +30,7 @@ import { decodeImu, decodeRange } from "../../protocol/codec/imu.js";
 import {
     bodyPartNeedsUnlock,
     commandHoldMs,
+    dongleCarriesTwoImus,
     dongleMayDropCommands,
     dongleReportsAccelAccuracy,
 } from "../../protocol/firmware.js";
@@ -51,6 +52,7 @@ export interface DongleControllerOptions {
     write: (endpointId: string, command: string) => Promise<void>;
     onChannel: (endpointId: string, channel: number) => void;
     buttonDebounceMs?: number;
+    pairingTimeoutMs?: number;
 }
 
 export class DongleController {
@@ -68,6 +70,7 @@ export class DongleController {
     readonly #buttons = new Map<string, DongleButtonState>();
     readonly #lastButtonPress = new Map<string, number>();
     readonly #buttonDebounceMs: number;
+    readonly #pairingTimeoutMs: number;
     readonly #pairings = new PairingTracker();
     readonly #dongleVersions = new Map<string, string>();
     // endpoints that are in pairing mode
@@ -83,6 +86,7 @@ export class DongleController {
         this.#write = options.write;
         this.#onChannel = options.onChannel;
         this.#buttonDebounceMs = options.buttonDebounceMs ?? 200;
+        this.#pairingTimeoutMs = options.pairingTimeoutMs ?? PAIRING_TIMEOUT_MS;
     }
 
     /*
@@ -95,7 +99,7 @@ export class DongleController {
             throw new HaritoraXError("BUSY", `Pairing is already in progress on ${endpointId}`);
         }
 
-        const completion = this.#pairings.wait(endpointId, PAIRING_TIMEOUT_MS);
+        const completion = this.#pairings.wait(endpointId, this.#pairingTimeoutMs);
         const session = { slot: portId, armed: false };
         this.#pairingSlots.set(endpointId, session);
 
@@ -265,7 +269,7 @@ export class DongleController {
         if (!(await confirmed)) {
             throw new HaritoraXError(
                 "TIMEOUT",
-                `${device.deviceId} did not confirm the body part "${bodyPart}",  firmware may have rejected it`,
+                `${device.deviceId} did not confirm the body part "${bodyPart}", firmware may have rejected it`,
             );
         }
 
@@ -421,7 +425,7 @@ export class DongleController {
             // make sure to not mark tracker lost if its BLE (not serial/dongle)
             if (device.connection !== this.#connectionKind(endpointId)) return;
 
-            this.#registry.markTrackerLost(tracker.trackerId, "remote");
+            if (!this.#registry.markTrackerLost(tracker.trackerId, "remote")) return;
             this.#log.warn(`Tracker ${tracker.trackerId} lost, dongle ${endpointId}:${slot} is searching`);
             return;
         }
@@ -456,6 +460,13 @@ export class DongleController {
             connection: this.#connectionKind(endpointId),
             parts,
         });
+
+        const dongleVersion = this.#dongleVersions.get(endpointId);
+        if (model === "x2" && imuCount >= 2 && dongleCarriesTwoImus(dongleVersion) === false) {
+            this.#log.warn(
+                `${serial} has two IMUs, but dongle firmware ${dongleVersion} can't carry them. Update the dongle to 1.0.26 or newer`,
+            );
+        }
     }
 
     // "r0:"/"r1:" replies identify the tracker currently paired to that slot and button states
@@ -490,8 +501,7 @@ export class DongleController {
 
         // parse and emit button state changes on every `r(x):` frame
         const buttonKey = endpointSlotKey(endpointId, slot);
-        const buttonState = this.#buttons.get(buttonKey) ?? { main: 0, sub: 0 };
-        const updated = parseDongleButtons(payload, buttonState);
+        const updated = parseDongleButtons(payload, this.#buttons.get(buttonKey));
         this.#buttons.set(buttonKey, updated);
 
         if (!updated.pressed || !device) return;

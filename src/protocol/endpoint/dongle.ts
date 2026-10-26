@@ -16,6 +16,8 @@ const TRACKER_PARTS: Readonly<Record<string, BodyPart>> = Object.freeze({
     b: "head",
     c: "leftFoot",
     d: "rightFoot",
+    e: "leftHand",
+    f: "rightHand",
 });
 
 export function isDongleSlot(slot: string): slot is "0" | "1" {
@@ -207,7 +209,7 @@ export function dongleSettingsCommand(slot: string, settings: TrackerSettings, c
     return `o${slot}:000${attach}${fps}${sensor}010${correction}0${cmd}${ankle}`;
 }
 
-// the tracker applies a body part sent through the dongle only after seeing 0x0A, 0x1F, <id>, 0x00 in the attach point digits.
+// the tracker applies a body part sent through the dongle only after seeing 0x0A, 0x1F, <id>, 0x00 in the attach point bits.
 // firmware without that requirement gets the id alone (the caller decides with bodyPartNeedsUnlock)
 export function bodyPartCommands(slot: string, settings: TrackerSettings, trackerId: number, unlock: boolean): string[] {
     const steps = unlock ? [0x0a, 0x1f, trackerId, 0x00] : [trackerId];
@@ -215,17 +217,26 @@ export function bodyPartCommands(slot: string, settings: TrackerSettings, tracke
 }
 
 // e.g. `r0:110060800a00`
-// main button pressed 7 times, sub button pressed 9 times
-export function parseDongleButtons(payload: string, previous: DongleButtonState): DongleButtonState {
-    const main = Number.parseInt(payload.charAt(6), 16);
-    const sub = Number.parseInt(payload.charAt(9), 16);
+// bits 6 and 9 count main and sub button presses (from any event, 0-15)
+// bits 7-8 and 10-11 hold the last event code (00 short, 02 medium, 04 held)
+// TODO: expose that event code maybe, more bindings yay
+export function parseDongleButtons(payload: string, previous: DongleButtonState | undefined): DongleButtonState {
+    const main = counterDigit(payload, 6);
+    const sub = counterDigit(payload, 9);
+    const result: DongleButtonState = { main, sub };
 
-    const result: DongleButtonState = { main: Number.isNaN(main) ? 0 : main, sub: Number.isNaN(sub) ? 0 : sub };
+    // ignore first frame (may have previous counts)
+    if (!previous) return result;
 
-    if (result.main !== 0 && result.main !== previous.main) result.pressed = "main";
-    else if (result.sub !== 0 && result.sub !== previous.sub) result.pressed = "sub";
+    if (main !== previous.main) result.pressed = "main";
+    else if (sub !== previous.sub) result.pressed = "sub";
 
     return result;
+}
+
+function counterDigit(payload: string, index: number): number {
+    const digit = Number.parseInt(payload.charAt(index), 16);
+    return Number.isNaN(digit) ? 0 : digit;
 }
 
 export function isButtonDebounced(

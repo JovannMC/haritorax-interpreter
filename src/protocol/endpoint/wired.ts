@@ -2,20 +2,19 @@ import { fromByteArray as encodeBase64, toByteArray as decodeBase64 } from "base
 import { magStatusFromByte } from "../codec/imu.js";
 import type { BodyPart, MagStatus, TrackerSettings } from "../../types.js";
 
-const WIRED_PARTS: readonly BodyPart[] = Object.freeze([
-    "chest",
-    "leftKnee",
-    "leftAnkle",
-    "rightKnee",
-    "rightAnkle",
-    "hip",
-    "leftElbow",
-    "rightElbow",
-]);
+const WIRED_BASE_PARTS: readonly BodyPart[] = Object.freeze(["chest", "leftKnee", "leftAnkle", "rightKnee", "rightAnkle"]);
 
-const WIRED_MIN_IMUS = 5;
 const WIRED_IMU_BYTES = 14;
 const WIRED_RANGE_BYTES = 4;
+
+export function wiredPartsFor(imuCount: number): BodyPart[] {
+    const base = [...WIRED_BASE_PARTS];
+    if (imuCount === 6) return [...base, "hip"];
+    if (imuCount === 7) return [...base, "leftElbow", "rightElbow"];
+    if (imuCount === 8) return [...base, "leftElbow", "rightElbow", "hip"];
+
+    return base;
+}
 
 export interface WiredState {
     imuCount: number;
@@ -36,9 +35,8 @@ export function parseWiredState(payload: string): WiredState | undefined {
         const data = JSON.parse(payload) as Record<string, unknown>;
         const imuCount = typeof data["imu_num"] === "number" ? data["imu_num"] : undefined;
         if (imuCount === undefined || !Number.isInteger(imuCount)) return undefined;
-        if (imuCount < WIRED_MIN_IMUS || imuCount > WIRED_PARTS.length) return undefined;
 
-        const parts = WIRED_PARTS.slice(0, imuCount);
+        const parts = wiredPartsFor(imuCount);
         const magField = typeof data["magf_status"] === "string" ? data["magf_status"] : "";
         const magStatuses = parts.map((_, index) => {
             const value = Number.parseInt(magField.charAt(index), 10);
@@ -60,9 +58,10 @@ export function splitWiredImu(payload: string, partCount: number): WiredImuSlice
     const rangeOffset = partCount * WIRED_IMU_BYTES;
     const view = hasRange ? new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength) : undefined;
 
+    const parts = wiredPartsFor(partCount);
     const slices: WiredImuSlice[] = [];
     for (let index = 0; index < partCount; index++) {
-        const part = WIRED_PARTS[index];
+        const part = parts[index];
         let range: number | undefined;
 
         if (view && part === "leftAnkle") range = view.getUint16(rangeOffset, true);

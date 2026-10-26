@@ -281,9 +281,9 @@ export class DeviceRegistry {
         });
     }
 
-    markTrackerLost(trackerId: string, reason: DisconnectReason): void {
+    markTrackerLost(trackerId: string, reason: DisconnectReason): boolean {
         const state = this.#trackers.get(trackerId);
-        if (!state || !state.snapshot.connected) return;
+        if (!state || !state.snapshot.connected) return false;
 
         clearTrackerTimeout(state);
         state.snapshot.connected = false;
@@ -296,6 +296,7 @@ export class DeviceRegistry {
             reason,
         });
         this.#emitDevices();
+        return true;
     }
 
     removeDevicesAtEndpoint(endpointId: string, reason: DisconnectReason): void {

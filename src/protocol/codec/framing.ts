@@ -1,5 +1,8 @@
 export interface LineFrame {
+    // lowercased, so the dongle and BLE frames match whatever case they use
     identifier: string;
+    // the identifier as the device sent it. wired IMU frames are upper case (`X:`), and the float frame is lower case (`x:`)
+    rawIdentifier: string;
     payload: string;
 }
 
@@ -19,10 +22,12 @@ export function parseLine(bytes: Uint8Array): LineFrame {
     const text = asciiDecode(bytes);
     const colon = text.indexOf(":");
 
-    if (colon === -1) return { identifier: text.toLowerCase(), payload: "" };
+    if (colon === -1) return { identifier: text.toLowerCase(), rawIdentifier: text, payload: "" };
 
+    const rawIdentifier = text.slice(0, colon);
     return {
-        identifier: text.slice(0, colon).toLowerCase(),
+        identifier: rawIdentifier.toLowerCase(),
+        rawIdentifier,
         payload: text.slice(colon + 1),
     };
 }

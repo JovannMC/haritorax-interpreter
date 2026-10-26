@@ -7,6 +7,7 @@ import {
     bodyPartNotifies,
     commandHoldMs,
     compareFirmwareVersions,
+    dongleCarriesTwoImus,
     dongleMayDropCommands,
     dongleReportsAccelAccuracy,
     factoryAttachPoint,
@@ -58,6 +59,12 @@ describe("firmware rules", () => {
         assert.equal(commandHoldMs(undefined), 600);
 
         assert.equal(commandHoldMs("1.0.28"), 150);
+    });
+
+    it("knows which dongles carry two-IMU HX2 frames", () => {
+        assert.equal(dongleCarriesTwoImus("1.0.19"), false);
+        assert.equal(dongleCarriesTwoImus("1.0.26"), true);
+        assert.equal(dongleCarriesTwoImus(undefined), undefined);
     });
 
     it("warns only when the tracker needs repeats and the dongle won't repeat", () => {

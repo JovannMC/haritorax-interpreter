@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { fromByteArray as encodeBase64, toByteArray as decodeBase64 } from "base64-js";
 import { createHaritoraX } from "../dist/index.js";
 import type { Frame, ListOptions } from "../dist/connections/contract.js";
-import { parseWiredButton, splitWiredImu, wiredSettingsCommands } from "../dist/protocol/endpoint/wired.js";
+import { parseWiredButton, splitWiredImu, wiredPartsFor, wiredSettingsCommands } from "../dist/protocol/endpoint/wired.js";
 import type { DisconnectReason, EndpointDescriptor, TrackerSettings, Unsubscribe } from "../dist/types.js";
 
 const ENDPOINT = "/dev/rfcomm0";
@@ -185,7 +185,7 @@ describe("wired device", () => {
         const samples: Array<{ trackerId: string; bodyPart: string; role: string }> = [];
         app.on("imu", (sample) => samples.push(sample));
 
-        serial.emitFrame(`x:${imuPayload(5)}`);
+        serial.emitFrame(`X:${imuPayload(5)}`);
 
         assert.deepEqual(
             samples.map((sample) => sample.trackerId),
@@ -209,13 +209,13 @@ describe("wired device", () => {
         assert.equal(device.imuCount, 8);
         assert.deepEqual(
             device.trackers.map((tracker) => tracker.bodyPart),
-            ["chest", "leftKnee", "leftAnkle", "rightKnee", "rightAnkle", "hip", "leftElbow", "rightElbow"],
+            ["chest", "leftKnee", "leftAnkle", "rightKnee", "rightAnkle", "leftElbow", "rightElbow", "hip"],
         );
 
         const samples: string[] = [];
         app.on("imu", (sample) => samples.push(sample.trackerId));
 
-        serial.emitFrame(`h:${imuPayload(8, [700, 1200])}`);
+        serial.emitFrame(`H:${imuPayload(8, [700, 1200])}`);
 
         assert.equal(samples.length, 8);
     });
@@ -228,8 +228,8 @@ describe("wired device", () => {
         const ranges: Array<[string, number | undefined]> = [];
         app.on("imu", (sample) => ranges.push([sample.bodyPart, sample.range]));
 
-        // 5 IMUs with range is still an "x" frame, only the length tells them apart
-        serial.emitFrame(`x:${imuPayload(5, [700, 1200])}`);
+        // 5 IMUs with range is still an "X" frame, only the length tells them apart
+        serial.emitFrame(`X:${imuPayload(5, [700, 1200])}`);
         assert.deepEqual(
             ranges.filter(([, range]) => range !== undefined),
             [
@@ -240,8 +240,8 @@ describe("wired device", () => {
 
         // an error code (negative value) is no reading, and so is a frame without range
         ranges.length = 0;
-        serial.emitFrame(`x:${imuPayload(5, [0xff0b, 0xffff])}`);
-        serial.emitFrame(`x:${imuPayload(5)}`);
+        serial.emitFrame(`X:${imuPayload(5, [0xff0b, 0xffff])}`);
+        serial.emitFrame(`X:${imuPayload(5)}`);
         assert.ok(ranges.every(([, range]) => range === undefined));
         assert.equal(ranges.length, 10);
     });
@@ -256,7 +256,7 @@ describe("wired device", () => {
         const samples: Array<number | undefined> = [];
         app.on("imu", (sample) => samples.push(sample.range));
 
-        serial.emitFrame(`f:${imuPayload(7, [300, 400])}`);
+        serial.emitFrame(`F:${imuPayload(7, [300, 400])}`);
 
         assert.equal(samples.length, 7);
         assert.deepEqual(
@@ -331,6 +331,28 @@ describe("wired device", () => {
 });
 
 describe("wired protocol", () => {
+    it("orders the parts by slot, with the hip last on 8 trackers and absent on 7", () => {
+        assert.equal(wiredPartsFor(6).at(-1), "hip");
+        assert.deepEqual(wiredPartsFor(7).slice(5), ["leftElbow", "rightElbow"]);
+        assert.ok(!wiredPartsFor(7).includes("hip"));
+        assert.deepEqual(wiredPartsFor(8).slice(5), ["leftElbow", "rightElbow", "hip"]);
+    });
+
+    it("ignores the lower case x float frame, which is not X", async () => {
+        const { app, serial } = await connected();
+        serial.emitFrame(STATE_5);
+        serial.emitFrame(INFO);
+
+        const samples: string[] = [];
+        app.on("imu", (sample) => samples.push(sample.trackerId));
+
+        serial.emitFrame(`x:${imuPayload(5)}`);
+        assert.equal(samples.length, 0);
+
+        serial.emitFrame(`X:${imuPayload(5)}`);
+        assert.equal(samples.length, 5);
+    });
+
     it("reads left and right ankle range values from the trailing buffer", () => {
         const slices = splitWiredImu(imuPayload(6, [700, 1200]), 6);
 

@@ -11,6 +11,8 @@ export type BodyPart =
     | "rightElbow"
     | "leftWrist"
     | "rightWrist"
+    | "leftHand"
+    | "rightHand"
     | "head"
     | "leftFoot"
     | "rightFoot"

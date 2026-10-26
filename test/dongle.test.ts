@@ -254,7 +254,9 @@ describe("dongle protocol", () => {
         assert.equal(bodyPartOfTracker("b"), "head");
         assert.equal(bodyPartOfTracker("c"), "leftFoot");
         assert.equal(bodyPartOfTracker("d"), "rightFoot");
-        assert.equal(bodyPartOfTracker("e"), undefined);
+        assert.equal(bodyPartOfTracker("e"), "leftHand");
+        assert.equal(bodyPartOfTracker("f"), "rightHand");
+        assert.equal(bodyPartOfTracker("0"), undefined);
     });
 
     it("derives ankle + knee for dual-IMU devices", () => {
@@ -407,6 +409,47 @@ describe("settings writing", () => {
             .catch((err: unknown) => err);
 
         assert.equal((error as { code?: string }).code, "DEVICE_NOT_FOUND");
+    });
+});
+
+describe("button counters", () => {
+    // digit 4 is the tracker id, digits 6 and 9 are the main and sub event counters
+    const counters = (main: string, sub = "0") => `r0:110010${main}00${sub}00`;
+
+    it("sets the baseline on the first frame instead of reporting a press", async () => {
+        const { app, serial } = await connected();
+        const buttons: string[] = [];
+        app.on("button", (event) => buttons.push(event.button));
+
+        serial.emitFrame(INFO);
+        serial.emitFrame(counters("7"));
+        assert.deepEqual(buttons, []);
+
+        serial.emitFrame(counters("8"));
+        assert.deepEqual(buttons, ["main"]);
+    });
+
+    it("counts a wrap from 15 back to 0 as an event", async () => {
+        const { app, serial } = await connected();
+        const buttons: string[] = [];
+        app.on("button", (event) => buttons.push(event.button));
+
+        serial.emitFrame(INFO);
+        serial.emitFrame(counters("f"));
+        serial.emitFrame(counters("0"));
+        assert.deepEqual(buttons, ["main"]);
+    });
+
+    it("reports the sub counter separately, and not again while unchanged", async () => {
+        const { app, serial } = await connected();
+        const buttons: string[] = [];
+        app.on("button", (event) => buttons.push(event.button));
+
+        serial.emitFrame(INFO);
+        serial.emitFrame(counters("0", "0"));
+        serial.emitFrame(counters("0", "3"));
+        serial.emitFrame(counters("0", "3"));
+        assert.deepEqual(buttons, ["sub"]);
     });
 });
 

@@ -65,6 +65,7 @@ export class HaritoraX {
             connectionKind,
             write: (endpointId, command) => this.#writeCommand(endpointId, command),
             onChannel: (endpointId, channel) => this.#applyChannel(endpointId, channel),
+            pairingTimeoutMs: options.pairingTimeoutMs,
         });
         this.#wired = new WiredController({
             emitter: this.#emitter,
@@ -379,7 +380,7 @@ export class HaritoraX {
 
             const line = parseLine(frame.data);
             identifier = line.identifier;
-            const { payload } = line;
+            const { payload, rawIdentifier } = line;
 
             if (this.#log.enabled("debug")) {
                 this.#log.debug(`Frame ${identifier || "(none)"} from ${frame.endpointId}`, {
@@ -392,7 +393,7 @@ export class HaritoraX {
             if (!parsed) return;
 
             const handler = this.#handlers.get(frame.endpointId) ?? this.#dongle;
-            handler.handleFrame(frame.endpointId, parsed.name, parsed.slot, payload);
+            handler.handleFrame(frame.endpointId, parsed.name, parsed.slot, payload, rawIdentifier.replace(/\d+$/, ""));
         } catch (error) {
             this.#log.warn(`Failed to handle "${identifier || "(unknown)"}" from ${frame.endpointId}`, {
                 error: String(error),
@@ -460,4 +461,6 @@ export interface HaritoraXOptions {
     connections?: Connection[];
     logLevel?: LogLevel;
     onLog?: LogSink;
+    // how long pairing waits for the dongle to report the slot as paired, default 30 s
+    pairingTimeoutMs?: number;
 }

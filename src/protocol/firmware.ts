@@ -32,6 +32,8 @@ export function firmwareAtLeast(version: string | undefined, minimum: string): b
  * dongle/serial stuff
  */
 
+// from this dongle version, the dongle carries HX2 two-IMU frames (30/32 bytes). 1.0.19 can't
+const DONGLE_TWO_IMU = "1.0.26";
 // from this dongle version, `r(x):` grows to 14 bits where bits 12-13 carry the accel accuracy of the IMUs' accelerometers
 const DONGLE_ACCEL_ACCURACY = "1.0.29";
 // from this dongle version, the dongle keeps re-sending a pending command. older ones send it once
@@ -47,6 +49,10 @@ const CONFIRMED_COMMAND_HOLD_MS = 600;
 
 export function dongleReportsAccelAccuracy(dongleVersion: string | undefined): boolean | undefined {
     return firmwareAtLeast(dongleVersion, DONGLE_ACCEL_ACCURACY);
+}
+
+export function dongleCarriesTwoImus(dongleVersion: string | undefined): boolean | undefined {
+    return firmwareAtLeast(dongleVersion, DONGLE_TWO_IMU);
 }
 
 export function dongleMayDropCommands(trackerVersion: string | undefined, dongleVersion: string | undefined): boolean {

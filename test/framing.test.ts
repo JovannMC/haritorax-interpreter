@@ -34,6 +34,13 @@ describe("serial framing", () => {
         assert.equal(frame.payload, "{");
     });
 
+    it("keeps the raw identifier's case, so X: and x: stay apart", () => {
+        assert.equal(parseLine(asciiEncode("X:AA")).rawIdentifier, "X");
+        assert.equal(parseLine(asciiEncode("x:AA")).rawIdentifier, "x");
+        assert.equal(parseLine(asciiEncode("x:AA")).identifier, "x");
+        assert.equal(parseLine(asciiEncode("DONGLE")).rawIdentifier, "DONGLE");
+    });
+
     it("extracts the dongle slot from an identifier", () => {
         assert.equal(parseLine(asciiEncode("X1:AA")).identifier, "x1");
     });
