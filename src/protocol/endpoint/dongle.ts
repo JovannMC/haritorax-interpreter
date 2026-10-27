@@ -66,6 +66,11 @@ export function isSlotPaired(register: DongleRegister, slot: "0" | "1"): boolean
     return (register.paired & (1 << Number(slot))) !== 0;
 }
 
+// the "unpaired" mask marks slots with no stored tracker ID, the "paired" mask is only pairings since boot so it can't show the current state
+export function isSlotUnpaired(register: DongleRegister, slot: "0" | "1"): boolean {
+    return (register.unpaired & (1 << Number(slot))) !== 0;
+}
+
 // receiving "r0:110070200000"
 // carries the tracker id in the 5th character
 export function parseTrackerId(payload: string): string | undefined {

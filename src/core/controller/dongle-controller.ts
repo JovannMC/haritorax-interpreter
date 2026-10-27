@@ -9,11 +9,12 @@ import {
     bodyPartsFor,
     decodeTrackerRssi,
     DongleButtonState,
+    DongleRegister,
     dongleSettingsCommand,
     isButtonDebounced,
     isDongleSlot,
     isRssiLost,
-    isSlotPaired,
+    isSlotUnpaired,
     isValidChannel,
     pairCommands,
     parseChannel,
@@ -75,7 +76,9 @@ export class DongleController {
     readonly #pairings = new PairingTracker();
     readonly #dongleVersions = new Map<string, string>();
     // endpoints that are in pairing mode
-    readonly #pairingSlots = new Map<string, { slot: "0" | "1"; armed: boolean }>();
+    readonly #pairingSlots = new Map<string, { slot: "0" | "1"; armed: boolean; wasUnpaired: boolean }>();
+    // last `r:` register per endpoint
+    readonly #registers = new Map<string, DongleRegister>();
     readonly #bodyPartWaits = new Map<string, { bodyPart: BodyPart; resolve: () => void }>();
     // last `oN:` frame the dongle echoed per endpoint:slot, the base for settings writes
     readonly #settingsEchoes = new Map<string, string>();
@@ -106,7 +109,7 @@ export class DongleController {
         }
 
         const completion = this.#pairings.wait(endpointId, this.#pairingTimeoutMs);
-        const session = { slot: portId, armed: false };
+        const session = { slot: portId, armed: false, wasUnpaired: false };
         this.#pairingSlots.set(endpointId, session);
 
         let result: Awaited<typeof completion> | undefined;
@@ -117,6 +120,7 @@ export class DongleController {
             await this.#write(endpointId, reset);
             await delay(PAIRING_COMMAND_DELAY_MS);
 
+            session.wasUnpaired = this.#isUnpaired(endpointId, portId);
             session.armed = true;
             await this.#write(endpointId, hold);
 
@@ -340,6 +344,7 @@ export class DongleController {
         this.#pairingSlots.delete(endpointId);
 
         this.#stopPings(endpointId);
+        this.#registers.delete(endpointId);
         this.#latencies.delete(endpointId);
         this.#pingSentAt.delete(endpointId);
 
@@ -433,17 +438,9 @@ export class DongleController {
         }
 
         if (identifier === "r") {
-            const session = this.#pairingSlots.get(endpointId);
             const register = parseDongleRegister(payload);
-
-            if (
-                session?.armed &&
-                register &&
-                isSlotPaired(register, session.slot) &&
-                this.#pairings.settle(endpointId, "paired")
-            ) {
-                this.#log.info(`Pairing completed on ${endpointId}:${session.slot}`);
-            }
+            if (register) this.#registers.set(endpointId, register);
+            this.#tryCompletePairing(endpointId);
         }
     }
 
@@ -570,6 +567,22 @@ export class DongleController {
             chargeStatus: parsed.chargeStatus,
             timestamp: Date.now(),
         });
+    }
+
+    #isUnpaired(endpointId: string, slot: "0" | "1"): boolean {
+        const register = this.#registers.get(endpointId);
+        return register !== undefined && isSlotUnpaired(register, slot);
+    }
+
+    // pairing completes when the slot goes from "unpaired" to having a stored tracker ID during the attempt. A slot that already has one needs unpairing first
+    #tryCompletePairing(endpointId: string): void {
+        const session = this.#pairingSlots.get(endpointId);
+        if (!session?.armed || !session.wasUnpaired) return;
+        if (this.#isUnpaired(endpointId, session.slot) || !this.#registers.has(endpointId)) return;
+
+        if (this.#pairings.settle(endpointId, "paired")) {
+            this.#log.info(`Pairing completed on ${endpointId}:${session.slot}`);
+        }
     }
 
     #echo(endpointId: string, slot: string): string | undefined {

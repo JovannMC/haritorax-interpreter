@@ -75,17 +75,23 @@ export function parseWiredState(payload: string): WiredState | undefined {
     }
 }
 
+export interface WiredImuBytes {
+    payload: Uint8Array;
+    index: number;
+    // raw range sensor value (see decodeRange)
+    range?: number;
+}
+
 // frames are 14 bytes per IMU, followed by two 16-bit range values (left ankle, right ankle) when ankle motion detection is on
-export function splitWiredImu(payload: string, partCount: number): WiredImuSlice[] {
-    const bytes = decodeBase64(payload);
+export function splitWiredImuBytes(bytes: Uint8Array, partCount: number, hasRange?: boolean): WiredImuBytes[] {
     if (partCount <= 0 || bytes.length < partCount * WIRED_IMU_BYTES) return [];
 
-    const hasRange = bytes.length >= partCount * WIRED_IMU_BYTES + WIRED_RANGE_BYTES;
     const rangeOffset = partCount * WIRED_IMU_BYTES;
-    const view = hasRange ? new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength) : undefined;
+    const withRange = (hasRange ?? true) && bytes.length >= rangeOffset + WIRED_RANGE_BYTES;
+    const view = withRange ? new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength) : undefined;
 
     const parts = wiredPartsFor(partCount);
-    const slices: WiredImuSlice[] = [];
+    const slices: WiredImuBytes[] = [];
     for (let index = 0; index < partCount; index++) {
         const part = parts[index];
         let range: number | undefined;
@@ -95,13 +101,20 @@ export function splitWiredImu(payload: string, partCount: number): WiredImuSlice
 
         const start = index * WIRED_IMU_BYTES;
         slices.push({
-            payload: encodeBase64(bytes.slice(start, start + WIRED_IMU_BYTES)),
+            payload: bytes.slice(start, start + WIRED_IMU_BYTES),
             index,
             ...(range === undefined ? {} : { range }),
         });
     }
 
     return slices;
+}
+
+export function splitWiredImu(payload: string, partCount: number): WiredImuSlice[] {
+    return splitWiredImuBytes(decodeBase64(payload), partCount).map((slice) => ({
+        ...slice,
+        payload: encodeBase64(slice.payload),
+    }));
 }
 
 // `x:` frames (report_type 1) carry 7 float32 per IMU, no range: quaternion i, j, k, real, then acceleration x, y, z

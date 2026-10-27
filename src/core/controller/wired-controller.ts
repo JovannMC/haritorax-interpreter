@@ -94,7 +94,9 @@ export class WiredController implements ProtocolHandler {
         }
 
         for (const device of this.#registry.listDevices()) {
-            if (device.model === "wired") this.#registry.setSettings(device.deviceId, settings);
+            if (device.model === "wired" && endpointIds.includes(device.endpointId)) {
+                this.#registry.setSettings(device.deviceId, settings);
+            }
         }
 
         this.#log.info(`Applied wired settings to ${endpointIds.length} endpoint(s)`);

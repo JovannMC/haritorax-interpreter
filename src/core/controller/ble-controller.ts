@@ -20,10 +20,12 @@ import {
     bleSettingValues,
     bleText,
     bleUint8,
+    bleWiredMagStatusAt,
     splitBleImu,
     splitBleSensor2,
     type BleCharacteristic,
 } from "../../protocol/endpoint/ble.js";
+import { splitWiredImuBytes, wiredPartsFor } from "../../protocol/endpoint/wired.js";
 import type {
     BatteryInfo,
     BodyPart,
@@ -126,13 +128,15 @@ export class BleController implements ProtocolHandler {
                 this.#onSensor2(state, data);
                 break;
             case "sensor":
-                if (!state.sensor2Seen && !(state.model && hasSensor2(state.model, state.version))) this.#onSensor(state, data);
+                if (state.model === "wired") this.#onWiredSensor(state, data);
+                else if (!state.sensor2Seen && !(state.model && hasSensor2(state.model, state.version)))
+                    this.#onSensor(state, data);
                 break;
             case "magnetometer": {
                 const device = this.#ensureDevice(state);
                 if (!device) return;
                 for (const [index, tracker] of device.trackers.entries()) {
-                    const status = bleMagStatusAt(data, index);
+                    const status = state.model === "wired" ? bleWiredMagStatusAt(data, index) : bleMagStatusAt(data, index);
                     if (status) this.#registry.setMag(tracker.trackerId, status);
                 }
                 break;
@@ -160,13 +164,13 @@ export class BleController implements ProtocolHandler {
                 this.#maybeBattery(state);
                 break;
             case "main-button":
-                this.#onButton(state, "main");
+                if (state.model !== "wired") this.#onButton(state, "main");
                 break;
             case "secondary-button":
-                this.#onButton(state, "sub");
+                if (!isNoWiredEvent(state, data)) this.#onButton(state, state.model === "wired" ? "main" : "sub");
                 break;
             case "tertiary-button":
-                this.#onButton(state, "sub2");
+                if (!isNoWiredEvent(state, data)) this.#onButton(state, state.model === "wired" ? "sub" : "sub2");
                 break;
             case "sensor-mode":
                 state.settings.sensorMode = bleSensorMode(data);
@@ -176,7 +180,8 @@ export class BleController implements ProtocolHandler {
                 state.settings.fpsMode = bleFpsMode(data);
                 this.#maybeSettings(state);
                 break;
-            case "auto-calibration": {
+            case "auto-calibration":
+            case "wired-auto-calibration": {
                 const value = bleUint8(data);
                 if (value === undefined) return;
                 state.settings.correction = bleAutoCorrection(value);
@@ -203,7 +208,15 @@ export class BleController implements ProtocolHandler {
         const values = bleSettingValues(settings);
         await this.#write(endpointId, "sensor-mode", new Uint8Array([values.sensorMode]));
         await this.#write(endpointId, "fps", new Uint8Array([values.fpsMode]));
-        await this.#write(endpointId, "auto-calibration", new Uint8Array([values.autoCorrection]));
+
+        if (device.model !== "wired") {
+            await this.#write(endpointId, "auto-calibration", new Uint8Array([values.autoCorrection]));
+        } else if (state.settings.correction !== undefined) {
+            await this.#write(endpointId, "wired-auto-calibration", new Uint8Array([values.autoCorrection]));
+        } else {
+            this.#log.debug(`${endpointId} has no calibration characteristic, skipped`);
+        }
+
         await this.#write(endpointId, "tof", new Uint8Array([values.tof]));
 
         state.settings = {
@@ -291,6 +304,14 @@ export class BleController implements ProtocolHandler {
         this.#log.info(`Switching BLE ${endpointId} to serial`);
     }
 
+    // wired trackers stay silent over BLE until sensor data control has 1 written to it
+    async start(endpointId: string): Promise<void> {
+        if (this.#states.get(endpointId)?.model !== "wired") return;
+
+        await this.#write(endpointId, "sensor-data-control", new Uint8Array([1]));
+        this.#log.info(`Started sensor data on BLE ${endpointId}`);
+    }
+
     dispose(): void {
         this.#states.clear();
         this.#lastButtonPress.clear();
@@ -325,6 +346,18 @@ export class BleController implements ProtocolHandler {
             if (!tracker || !this.#registry.trackerSeen(tracker.trackerId)) continue;
 
             this.#emitImu(device, tracker, slice.index, slice.role, slice.payload, undefined, slice.range);
+        }
+    }
+
+    #onWiredSensor(state: BleState, data: Uint8Array): void {
+        const device = this.#ensureDevice(state);
+        if (!device) return;
+
+        for (const slice of splitWiredImuBytes(data, device.trackers.length, state.settings.ankle === true)) {
+            const tracker = device.trackers[slice.index];
+            if (!tracker || !this.#registry.trackerSeen(tracker.trackerId)) continue;
+
+            this.#emitImu(device, tracker, slice.index, "single", slice.payload, undefined, slice.range);
         }
     }
 
@@ -444,6 +477,7 @@ export class BleController implements ProtocolHandler {
 
     #parts(state: BleState): BodyPart[] {
         const count = state.imuCount ?? 1;
+        if (state.model === "wired") return wiredPartsFor(count);
         if (!state.bodyPart) return Array.from({ length: count }, () => "unassigned");
 
         return bodyPartsFor(state.bodyPart, count);
@@ -470,6 +504,11 @@ export class BleController implements ProtocolHandler {
 
         return state;
     }
+}
+
+// the button characteristics of a wired tracker hold `ff` as the event type until the first press
+function isNoWiredEvent(state: BleState, data: Uint8Array): boolean {
+    return state.model === "wired" && data[4] === 0xff;
 }
 
 interface BleState {

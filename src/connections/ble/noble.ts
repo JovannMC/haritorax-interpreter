@@ -29,6 +29,7 @@ const INITIAL_READS: readonly BleCharacteristic[] = Object.freeze([
     "sensor-mode",
     "fps",
     "auto-calibration",
+    "wired-auto-calibration",
     "tof",
     "battery-level",
     "battery-voltage",

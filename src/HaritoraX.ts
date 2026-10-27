@@ -121,8 +121,24 @@ export class HaritoraX {
         this.#endpointOwners.clear();
         this.#handlers.clear();
 
+        // wired tracker over BLE still shows BTSPP device, so prioritize BLE over serial for wired trackers
+        const wiredOnBle = results.some(({ found }) =>
+            found.some((descriptor) => descriptor.connection === "ble" && descriptor.model === "wired"),
+        );
+        let skippedWired = 0;
+
         for (const { connection, found } of results) {
             for (const descriptor of found) {
+                if (
+                    wiredOnBle &&
+                    descriptor.connection === "serial" &&
+                    descriptor.model === "wired" &&
+                    !this.#open.has(descriptor.id)
+                ) {
+                    skippedWired++;
+                    continue;
+                }
+
                 merged.set(descriptor.id, descriptor);
                 this.#endpointOwners.set(descriptor.id, connection);
 
@@ -134,6 +150,7 @@ export class HaritoraX {
         }
 
         this.#endpoints = [...merged.values()];
+        if (skippedWired > 0) this.#log.info(`Using BLE for the wired tracker, ignored ${skippedWired} wired serial port(s)`);
 
         this.#log.info(`Discovered ${this.#endpoints.length} endpoint(s)`, {
             ids: this.#endpoints.map((descriptor) => descriptor.id).join(","),
@@ -189,7 +206,9 @@ export class HaritoraX {
 
         if (device.model === "wired") {
             const endpointIds = this.#endpoints
-                .filter((endpoint) => endpoint.model === "wired" && this.#open.has(endpoint.id))
+                .filter(
+                    (endpoint) => endpoint.model === "wired" && endpoint.connection === "serial" && this.#open.has(endpoint.id),
+                )
                 .map((endpoint) => endpoint.id);
 
             await this.#wired.setSettings(endpointIds, settings);
@@ -311,6 +330,12 @@ export class HaritoraX {
         this.#open.add(endpointId);
 
         const descriptor = this.#endpoints.find((endpoint) => endpoint.id === endpointId);
+        if (descriptor?.connection === "ble") {
+            await this.#ble.start(endpointId).catch((error: unknown) => {
+                this.#log.warn(`Could not start sensor data on ${endpointId}`, { error: String(error) });
+            });
+        }
+
         this.#emitter.emit("endpoint:connected", {
             endpointId,
             connection: connection.kind,

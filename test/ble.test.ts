@@ -2,16 +2,18 @@ import assert from "node:assert/strict";
 import { describe, it, mock } from "node:test";
 import { createHaritoraX } from "../dist/index.js";
 import { BleConnection, type BleBackend, type BlePeripheralSummary } from "../dist/connections/ble/index.js";
-import type { ListOptions } from "../dist/connections/contract.js";
+import type { Connection, Frame, ListOptions } from "../dist/connections/contract.js";
 import {
     bleBodyPart,
     bleCharacteristicFromUuid,
     bleSettingValues,
+    bleWiredMagStatusAt,
     parseBleDeviceName,
     splitBleImu,
     splitBleSensor2,
 } from "../dist/protocol/endpoint/ble.js";
 import type { BleCharacteristic } from "../dist/protocol/endpoint/ble.js";
+import { splitWiredImuBytes } from "../dist/protocol/endpoint/wired.js";
 import type { DisconnectReason, TrackerSettings, Unsubscribe } from "../dist/types.js";
 
 function bytes(text: string): Uint8Array {
@@ -49,6 +51,8 @@ class FakeBleBackend implements BleBackend {
     ];
     readonly writes: Array<{ endpointId: string; characteristic: BleCharacteristic; data: number[] }> = [];
     readonly opened = new Set<string>();
+    // the real backend reads the device information while opening, a test can emit it from here
+    onOpen: (() => void) | undefined;
 
     readonly #dataHandlers = new Set<(endpointId: string, characteristic: BleCharacteristic, data: Uint8Array) => void>();
     readonly #lostHandlers = new Set<(endpointId: string, reason: DisconnectReason) => void>();
@@ -60,6 +64,7 @@ class FakeBleBackend implements BleBackend {
 
     open(peripheralId: string): Promise<void> {
         this.opened.add(peripheralId);
+        this.onOpen?.();
         return Promise.resolve();
     }
 
@@ -178,6 +183,10 @@ describe("BLE protocol", () => {
         assert.equal(bleCharacteristicFromUuid("00DBF1C6-90AA-11ED-A1EB-0242AC120002"), "sensor");
         assert.equal(bleCharacteristicFromUuid("00dbf07c90aa11eda1eb0242ac120002"), "number-of-imu");
         assert.equal(bleCharacteristicFromUuid("1234"), undefined);
+        // standard characteristics also come as the full 128-bit UUID, as the wired tracker's read capture shows
+        assert.equal(bleCharacteristicFromUuid("00002a19-0000-1000-8000-00805f9b34fb"), "battery-level");
+        assert.equal(bleCharacteristicFromUuid("00002a28-0000-1000-8000-00805f9b34fb"), "software-revision");
+        assert.equal(bleCharacteristicFromUuid("00002a99-0000-1000-8000-00805f9b34fb"), undefined);
     });
 
     it("slices single and dual IMU payloads like v3", () => {
@@ -598,5 +607,350 @@ describe("setting the body part over BLE", () => {
 
         const error = await app.setBodyPart("C1M8W0", "unassigned").catch((reason: unknown) => reason);
         assert.equal((error as { code?: string }).code, "NOT_SUPPORTED");
+    });
+});
+
+// wired tracker (MC2B) used over BLE
+function wiredIdentity(options: { calibration?: boolean } = {}): Array<[BleCharacteristic, Uint8Array]> {
+    const frames: Array<[BleCharacteristic, Uint8Array]> = [
+        ["serial-number", hex("303230363532310000000000")],
+        ["software-revision", hex("312e372e31300000000000000000")],
+        ["number-of-imu", byte(6)],
+        ["model-number", hex("4d43324200000000")],
+        ["magnetometer", hex("0000000000000000")],
+        ["sensor-mode", byte(8)],
+        ["fps", byte(2)],
+        ["tof", byte(0)],
+        ["battery-level", byte(0x41)],
+        ["battery-voltage", hex("100f")],
+        ["charge-status", byte(0)],
+    ];
+    if (options.calibration !== false) frames.push(["wired-auto-calibration", byte(7)]);
+
+    return frames;
+}
+
+async function connectedWired(options: { calibration?: boolean } = {}) {
+    const backend = new FakeBleBackend();
+    backend.peripherals[0] = { id: "ble-1", localName: "HaritoraX1.1B-0206521", rssi: -60 };
+
+    const connection = new BleConnection(backend, { scanTimeoutMs: 1 });
+    const app = createHaritoraX({ connections: [connection], logLevel: "silent" });
+
+    backend.onOpen = () => {
+        for (const [characteristic, data] of wiredIdentity(options)) backend.emit("ble-1", characteristic, data);
+    };
+
+    await app.discover();
+    await app.connect("ble-1");
+
+    return { app, backend };
+}
+
+// 6 IMUs of 14 bytes, then the two range values when the range sensor is on
+function wiredSensorFrame(ranges?: [number, number], padTo = 0): Uint8Array {
+    const frame = new Uint8Array(Math.max(padTo, 6 * 14 + (ranges ? 4 : 0)));
+    for (let index = 0; index < 6; index++) frame.set(SINGLE_IMU, index * 14);
+    if (ranges) {
+        const view = new DataView(frame.buffer);
+        view.setUint16(84, ranges[0], true);
+        view.setUint16(86, ranges[1], true);
+    }
+
+    return frame;
+}
+
+// a serial connection with one wired tracker on COM9, the way a Bluetooth Classic SPP port shows up
+function wiredSerialStub() {
+    const writes: string[] = [];
+    let handler: ((frame: Frame) => void) | undefined;
+    const connection: Connection = {
+        kind: "serial",
+        list: () =>
+            Promise.resolve([{ id: "COM9", connection: "serial", displayName: "HaritoraX Wired (COM9)", model: "wired" }]),
+        open: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+        write: (_endpointId, data) => {
+            writes.push(String.fromCharCode(...data));
+            return Promise.resolve();
+        },
+        onData: (onFrame) => {
+            handler = onFrame;
+            return () => undefined;
+        },
+        onLost: () => () => undefined,
+        dispose: () => Promise.resolve(),
+    };
+
+    return { connection, writes, emit: (text: string) => handler?.({ endpointId: "COM9", data: bytes(text) }) };
+}
+
+describe("wired tracker over BLE", () => {
+    it("recognises the wired tracker names and characteristics", () => {
+        assert.deepEqual(parseBleDeviceName("HaritoraX1.1B-0206521"), {
+            model: "wired",
+            localName: "HaritoraX1.1B-0206521",
+        });
+        assert.equal(parseBleDeviceName("HaritoraX1.1-0108013")?.model, "wired");
+        assert.equal(parseBleDeviceName("HaritoraX-0000001")?.model, "wired");
+        assert.equal(parseBleDeviceName("HaritoraXW-A2E987")?.model, "wireless");
+        assert.equal(parseBleDeviceName("HaritoraX1.1B-"), undefined);
+
+        assert.equal(bleCharacteristicFromUuid("ef844766-90a9-11ed-a1eb-0242ac120002"), "sensor-data-control");
+        assert.equal(bleCharacteristicFromUuid("ef844900-90a9-11ed-a1eb-0242ac120002"), "wired-auto-calibration");
+    });
+
+    it("registers the tracker from its device information", async () => {
+        const { app } = await connectedWired();
+
+        const device = app.getDevice("0206521");
+        assert.equal(device?.model, "wired");
+        assert.equal(device?.version, "1.7.10");
+        assert.equal(device?.connection, "ble");
+        assert.equal(device?.imuCount, 6);
+        assert.deepEqual(
+            device?.trackers.map((tracker) => tracker.bodyPart),
+            ["chest", "leftKnee", "leftAnkle", "rightKnee", "rightAnkle", "hip"],
+        );
+        assert.deepEqual(device?.settings, {
+            sensorMode: 2,
+            fpsMode: 100,
+            sensorAutoCorrection: ["accel", "gyro", "mag"],
+            ankleMotionDetection: false,
+        });
+        assert.equal(device?.battery?.level, 65);
+        assert.equal(device?.battery?.voltage, 3856);
+        assert.equal(device?.battery?.chargeStatus, "discharging");
+    });
+
+    it("starts the sensor data after connecting, which only wired trackers need", async () => {
+        const { backend } = await connectedWired();
+        assert.deepEqual(
+            backend.writes.filter((write) => write.characteristic === "sensor-data-control"),
+            [{ endpointId: "ble-1", characteristic: "sensor-data-control", data: [1] }],
+        );
+
+        const hx2 = await connected();
+        assert.deepEqual(
+            hx2.backend.writes.filter((write) => write.characteristic === "sensor-data-control"),
+            [],
+        );
+    });
+
+    it("emits a single-role sample per IMU, with no range while the range sensor is off", async () => {
+        const { app, backend } = await connectedWired();
+
+        const samples: Array<{ trackerId: string; bodyPart: string; role: string; range?: number }> = [];
+        app.on("imu", (sample) => samples.push(sample));
+
+        backend.emit("ble-1", "sensor", wiredSensorFrame());
+        assert.deepEqual(
+            samples.map((sample) => [sample.trackerId, sample.bodyPart, sample.role]),
+            [
+                ["0206521:0", "chest", "single"],
+                ["0206521:1", "leftKnee", "single"],
+                ["0206521:2", "leftAnkle", "single"],
+                ["0206521:3", "rightKnee", "single"],
+                ["0206521:4", "rightAnkle", "single"],
+                ["0206521:5", "hip", "single"],
+            ],
+        );
+        assert.ok(samples.every((sample) => sample.range === undefined));
+
+        // a notification can be longer than the frame, like the 116 bytes the characteristic holds. The extra bytes aren't range
+        samples.length = 0;
+        backend.emit("ble-1", "sensor", wiredSensorFrame(undefined, 116));
+        assert.equal(samples.length, 6);
+        assert.ok(samples.every((sample) => sample.range === undefined));
+    });
+
+    it("reads the ankle range while the range sensor is on", async () => {
+        const { app, backend } = await connectedWired();
+        backend.emit("ble-1", "tof", byte(1));
+
+        const ranges: Array<[string, number | undefined]> = [];
+        app.on("imu", (sample) => ranges.push([sample.bodyPart, sample.range]));
+
+        backend.emit("ble-1", "sensor", wiredSensorFrame([700, 1200]));
+        assert.deepEqual(
+            ranges.filter(([, range]) => range !== undefined),
+            [
+                ["leftAnkle", 700],
+                ["rightAnkle", 1200],
+            ],
+        );
+    });
+
+    it("reads the magnetometer status from ASCII digits and ignores bytes that aren't digits", async () => {
+        const { app, backend } = await connectedWired();
+
+        const mags: string[] = [];
+        app.on("mag", (event) => mags.push(`${event.trackerId}:${event.status}`));
+
+        // before streaming the characteristic holds zeros, which aren't a reading
+        backend.emit("ble-1", "magnetometer", hex("0000000000000000"));
+        assert.deepEqual(mags, []);
+
+        backend.emit("ble-1", "magnetometer", bytes("01230123"));
+        assert.deepEqual(mags, [
+            "0206521:0:veryBad",
+            "0206521:1:bad",
+            "0206521:2:okay",
+            "0206521:3:great",
+            "0206521:4:veryBad",
+            "0206521:5:bad",
+        ]);
+
+        assert.equal(bleWiredMagStatusAt(bytes("3"), 0), "great");
+        assert.equal(bleWiredMagStatusAt(bytes("4"), 0), undefined);
+        assert.equal(bleWiredMagStatusAt(bytes("0"), 1), undefined);
+    });
+
+    it("maps the left and right buttons and ignores the power button", async () => {
+        const { app, backend } = await connectedWired();
+
+        const buttons: string[] = [];
+        app.on("button", (event) => buttons.push(event.button));
+
+        // nothing was pressed yet: the event type is ff
+        backend.emit("ble-1", "secondary-button", hex("ffffffffff"));
+        backend.emit("ble-1", "tertiary-button", hex("ffffffffff"));
+        assert.deepEqual(buttons, []);
+
+        // [u32 start time][event type], the power button is the first one
+        backend.emit("ble-1", "main-button", hex("e803000000"));
+        backend.emit("ble-1", "secondary-button", hex("e803000000"));
+        backend.emit("ble-1", "tertiary-button", hex("d007000000"));
+        assert.deepEqual(buttons, ["main", "sub"]);
+    });
+
+    it("writes the settings to the wired characteristics", async () => {
+        const { app, backend } = await connectedWired();
+        backend.writes.length = 0;
+
+        await app.setSettings("0206521", {
+            sensorMode: 1,
+            fpsMode: 50,
+            sensorAutoCorrection: ["accel", "mag"],
+            ankleMotionDetection: true,
+        });
+
+        assert.deepEqual(
+            backend.writes.map((write) => [write.characteristic, write.data]),
+            [
+                ["sensor-mode", [5]],
+                ["fps", [1]],
+                ["wired-auto-calibration", [5]],
+                ["tof", [1]],
+            ],
+        );
+    });
+
+    it("skips the calibration write when the tracker has no such characteristic", async () => {
+        const { app, backend } = await connectedWired({ calibration: false });
+        assert.equal(app.getDevice("0206521")?.settings, undefined);
+        backend.writes.length = 0;
+
+        await app.setSettings("0206521", {
+            sensorMode: 2,
+            fpsMode: 100,
+            sensorAutoCorrection: [],
+            ankleMotionDetection: false,
+        });
+
+        assert.deepEqual(
+            backend.writes.map((write) => write.characteristic),
+            ["sensor-mode", "fps", "tof"],
+        );
+    });
+
+    it("uses the range bytes only when told they are there", () => {
+        const frame = wiredSensorFrame([700, 1200], 116);
+
+        assert.equal(splitWiredImuBytes(frame, 6, false)[2]?.range, undefined);
+        assert.equal(splitWiredImuBytes(frame, 6, true)[2]?.range, 700);
+        assert.equal(splitWiredImuBytes(frame, 6, true)[4]?.range, 1200);
+        // with nothing said the length decides, like it does for the text frames
+        assert.equal(splitWiredImuBytes(wiredSensorFrame(), 6)[2]?.range, undefined);
+        assert.deepEqual(splitWiredImuBytes(new Uint8Array(20), 6), []);
+    });
+
+    it("uses BLE only when it sees the wired tracker, and keeps the serial port when it doesn't", async () => {
+        const stub = wiredSerialStub();
+        const backend = new FakeBleBackend();
+        backend.peripherals[0] = { id: "ble-1", localName: "HaritoraX1.1B-0206521", rssi: -60 };
+        const app = createHaritoraX({
+            connections: [stub.connection, new BleConnection(backend, { scanTimeoutMs: 1 })],
+            logLevel: "silent",
+        });
+
+        // the wired tracker is on Bluetooth Classic and advertises over BLE as well
+        assert.deepEqual(
+            (await app.discover()).map((endpoint) => endpoint.id),
+            ["ble-1"],
+        );
+        await assert.rejects(app.connect("COM9"), (error: { code?: string }) => error.code === "DEVICE_NOT_FOUND");
+
+        // nothing on BLE: the serial port is all there is
+        backend.peripherals[0] = { id: "other", localName: "JBL Flip 4", rssi: -80 };
+        assert.deepEqual(
+            (await app.discover()).map((endpoint) => endpoint.id),
+            ["COM9"],
+        );
+    });
+
+    it("doesn't drop a wired serial port that is already connected", async () => {
+        const stub = wiredSerialStub();
+        const backend = new FakeBleBackend();
+        backend.peripherals.length = 0;
+        const app = createHaritoraX({
+            connections: [stub.connection, new BleConnection(backend, { scanTimeoutMs: 1 })],
+            logLevel: "silent",
+        });
+
+        await app.discover();
+        await app.connect("COM9");
+
+        backend.peripherals.push({ id: "ble-1", localName: "HaritoraX1.1B-0206521", rssi: -60 });
+        assert.deepEqual((await app.discover()).map((endpoint) => endpoint.id).sort(), ["COM9", "ble-1"]);
+    });
+
+    it("keeps text commands off the BLE endpoint when a serial wired tracker changes settings", async () => {
+        const stub = wiredSerialStub();
+        const backend = new FakeBleBackend();
+        backend.peripherals.length = 0;
+        backend.onOpen = () => {
+            for (const [characteristic, data] of wiredIdentity()) backend.emit("ble-1", characteristic, data);
+        };
+        const app = createHaritoraX({
+            connections: [stub.connection, new BleConnection(backend, { scanTimeoutMs: 1 })],
+            logLevel: "silent",
+        });
+
+        // a serial session that is already running when a wired tracker shows up over BLE
+        await app.discover();
+        await app.connect("COM9");
+        stub.emit('s:{"imu_mode":1,"imu_num":5,"magf_status":"33333"}');
+        stub.emit('i:{"model":"MC2","version":"1.7.8","serial no":"0108013"}');
+
+        backend.peripherals.push({ id: "ble-1", localName: "HaritoraX1.1B-0206521", rssi: -60 });
+        await app.discover();
+        await app.connect("ble-1");
+        assert.equal(app.getDevice("0108013")?.connection, "serial");
+        assert.equal(app.getDevice("0206521")?.connection, "ble");
+        backend.writes.length = 0;
+
+        await app.setSettings("0108013", {
+            sensorMode: 1,
+            fpsMode: 100,
+            sensorAutoCorrection: [],
+            ankleMotionDetection: false,
+        });
+
+        assert.ok(stub.writes.length > 0);
+        assert.deepEqual(backend.writes, []);
+        // the BLE tracker was not written to, so its settings are not claimed as applied
+        assert.equal(app.getDevice("0206521")?.settings?.fpsMode, 100);
+        assert.equal(app.getDevice("0206521")?.settings?.sensorAutoCorrection.length, 3);
     });
 });

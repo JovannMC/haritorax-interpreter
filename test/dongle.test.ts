@@ -641,7 +641,7 @@ async function flush(): Promise<void> {
 }
 
 describe("pairing", () => {
-    it("pairs a slot once the dongle reports the slot as paired, then goes back to sensing", async () => {
+    it("pairs a slot once its unpaired mark clears during the attempt, then goes back to sensing", async () => {
         const { app, serial } = await connected();
         serial.emitFrame("o:3040");
 
@@ -650,25 +650,23 @@ describe("pairing", () => {
 
         mock.timers.enable({ apis: ["setTimeout"] });
         try {
+            // slot 0 has no stored tracker, so its unpaired mark (bit 0) is set before the attempt
+            serial.emitFrame("r:301");
             const pending = app.pair("COM4", 0);
             await flush();
             assert.deepEqual(serial.writes, ["COM4:o:1140"]);
 
-            // a register from before the reset has been processed doesn't count, and neither does sensing mode
-            serial.emitFrame("r:310");
             mock.timers.tick(1_000);
             await flush();
             assert.deepEqual(serial.writes, ["COM4:o:1140", "COM4:o:1040"]);
 
-            serial.emitFrame("r:100");
-            serial.emitFrame("r:300");
-            // the other slot being paired isn't this slot
-            serial.emitFrame("r:120");
+            // slot 0 still has no tracker
+            serial.emitFrame("r:301");
             await flush();
             assert.deepEqual(paired, []);
 
-            // the dongle stays in pairing mode (1) and sets the slot's bit
-            serial.emitFrame("r:110");
+            // the tracker is stored on slot 0: its unpaired mark clears and the paired bit is set
+            serial.emitFrame("r:310");
             await pending;
         } finally {
             mock.timers.reset();
@@ -678,19 +676,51 @@ describe("pairing", () => {
         assert.deepEqual(paired, [{ endpointId: "COM4", slot: "0" }]);
     });
 
-    it("pairs the second slot on its own bit", async () => {
+    it("times out when the slot already had a stored tracker before the attempt", async () => {
+        const { app, serial } = await connected();
+        serial.emitFrame("o:3040");
+
+        const paired: Array<{ endpointId: string; slot: string }> = [];
+        app.on("paired", (event) => paired.push(event));
+
+        mock.timers.enable({ apis: ["setTimeout"] });
+        try {
+            // slot 0 has a stored tracker (unpaired mark clear), so pairing needs an unpair first
+            serial.emitFrame("r:310");
+            const pending = app.pair("COM4", 0).catch((error: unknown) => error);
+            await flush();
+            mock.timers.tick(1_000);
+            await flush();
+
+            serial.emitFrame("r:310");
+            await flush();
+            assert.deepEqual(paired, []);
+
+            mock.timers.tick(30_000);
+            const error = await pending;
+            assert.equal((error as { code?: string }).code, "TIMEOUT");
+        } finally {
+            mock.timers.reset();
+        }
+
+        assert.deepEqual(paired, []);
+    });
+
+    it("pairs the second slot on its own unpaired mark", async () => {
         const { app, serial } = await connected();
         serial.emitFrame("o:3040");
 
         mock.timers.enable({ apis: ["setTimeout"] });
         try {
+            // slot 1 has no stored tracker (bit 1 set), slot 0 is unpaired too
+            serial.emitFrame("r:303");
             const pending = app.pair("COM4", 1);
             await flush();
             mock.timers.tick(1_000);
             await flush();
 
-            serial.emitFrame("r:210"); // slot 0's bit
-            serial.emitFrame("r:220"); // slot 1's bit
+            serial.emitFrame("r:303"); // still unpaired on slot 1
+            serial.emitFrame("r:320"); // slot 1 stored, its unpaired mark cleared
             await pending;
         } finally {
             mock.timers.reset();

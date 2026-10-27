@@ -36,7 +36,9 @@ export type BleCharacteristic =
     | "wireless-mode"
     | "auto-calibration"
     | "body-part"
-    | "body-part-write";
+    | "body-part-write"
+    | "sensor-data-control"
+    | "wired-auto-calibration";
 
 const BLE_CHARACTERISTICS: Readonly<Record<string, BleCharacteristic>> = Object.freeze({
     "2a29": "manufacturer",
@@ -62,12 +64,20 @@ const BLE_CHARACTERISTICS: Readonly<Record<string, BleCharacteristic>> = Object.
     ef84c30090a911eda1eb0242ac120002: "wireless-mode",
     ef84c30590a911eda1eb0242ac120002: "auto-calibration",
     ef84c30190a911eda1eb0242ac120002: "body-part",
-    // write the body part id (1-15) here, the tracker confirms by notifying "body-part"
+    // writing body part here, tracker confirms by notifying "body-part"
     ef84c30490a911eda1eb0242ac120002: "body-part-write",
+    // wired trackers only, only sends data when this is set to 1
+    ef84476690a911eda1eb0242ac120002: "sensor-data-control",
+    // wired trackers only, for "sensor auto correction" flags (dcal_flags in serial)
+    ef84490090a911eda1eb0242ac120002: "wired-auto-calibration",
 });
 
 export function bleCharacteristicFromUuid(uuid: string): BleCharacteristic | undefined {
-    return BLE_CHARACTERISTICS[uuid.toLowerCase().replace(/-/g, "")];
+    const key = uuid.toLowerCase().replace(/-/g, "");
+    // standard characteristics use the 16-bit form inside the Bluetooth base UUID, some backends give the full 128-bit one
+    const standard = /^0000([0-9a-f]{4})00001000800000805f9b34fb$/.exec(key);
+
+    return BLE_CHARACTERISTICS[standard?.[1] ?? key];
 }
 
 export interface BleDeviceName {
@@ -75,10 +85,12 @@ export interface BleDeviceName {
     localName: string;
 }
 
-// TODO: haritorax wired as well, it has BLE as an option
 const BLE_NAME_PREFIXES: ReadonlyArray<{ prefix: string; model: TrackerModel }> = Object.freeze([
     { prefix: "haritoraxw-", model: "wireless" },
     { prefix: "haritorax2-", model: "x2" },
+    { prefix: "haritorax1.1b-", model: "wired" },
+    { prefix: "haritorax1.1-", model: "wired" },
+    { prefix: "haritorax-", model: "wired" },
 ]);
 
 export function parseBleDeviceName(localName: string | undefined): BleDeviceName | undefined {
@@ -217,6 +229,14 @@ export function splitBleSensor2(data: Uint8Array): BleSensor2Slice[] {
 export function bleMagStatusAt(data: Uint8Array, index: number): MagStatus | undefined {
     const value = data[index];
     return value === undefined ? undefined : magStatusFromByte(value);
+}
+
+// wired trackers send the `magf_status` digits of their `s:` frame as ASCII ("0" to "3")
+export function bleWiredMagStatusAt(data: Uint8Array, index: number): MagStatus | undefined {
+    const value = data[index];
+    if (value === undefined || value < 0x30 || value > 0x33) return undefined;
+
+    return magStatusFromByte(value - 0x30);
 }
 
 export function bleUint16(data: Uint8Array, offset: number): number | undefined {
