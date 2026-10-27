@@ -36,6 +36,8 @@ export function firmwareAtLeast(version: string | undefined, minimum: string): b
 const DONGLE_TWO_IMU = "1.0.26";
 // from this dongle version, `r(x):` grows to 14 bits where bits 12-13 carry the accel accuracy of the IMUs' accelerometers
 const DONGLE_ACCEL_ACCURACY = "1.0.29";
+// from this dongle version, the dongle clears a pending command (modeChange) itself after 0.5 s
+const DONGLE_SELF_CLEARS = "1.0.29";
 // from this dongle version, the dongle keeps re-sending a pending command. older ones send it once
 const DONGLE_REPEATS_COMMANDS = "1.1.1";
 // from this tracker version, a command only takes effect after 4 consecutive settings packets
@@ -53,6 +55,10 @@ export function dongleReportsAccelAccuracy(dongleVersion: string | undefined): b
 
 export function dongleCarriesTwoImus(dongleVersion: string | undefined): boolean | undefined {
     return firmwareAtLeast(dongleVersion, DONGLE_TWO_IMU);
+}
+
+export function dongleSelfClearsCommands(dongleVersion: string | undefined): boolean | undefined {
+    return firmwareAtLeast(dongleVersion, DONGLE_SELF_CLEARS);
 }
 
 export function dongleMayDropCommands(trackerVersion: string | undefined, dongleVersion: string | undefined): boolean {
@@ -84,6 +90,8 @@ const BODY_PART_NOTIFY: PerModel = Object.freeze({ wireless: "1.0.27" });
 
 // only true once the version proves the tracker sends sensor2, an unknown version has to be detected from the traffic
 export function hasSensor2(model: TrackerModel, trackerVersion: string | undefined): boolean {
+    if (model === "x2") return true;
+
     const since = SENSOR2[model];
     return since !== undefined && firmwareAtLeast(trackerVersion, since) === true;
 }

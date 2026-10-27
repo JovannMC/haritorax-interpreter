@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import { decodeImu, decodeRange, magStatusFromByte, readImuStatusWord } from "../dist/protocol/codec/imu.js";
 import { fromByteArray as encodeBase64, toByteArray as decodeBase64 } from "base64-js";
 import { decodeSettings, modelFromFirmware, parseBattery, parseInfo } from "../dist/protocol/codec/messages.js";
+import { splitWiredFloatImu } from "../dist/protocol/endpoint/wired.js";
 
 interface Fixture {
     model: "wireless" | "x2" | "wired";
@@ -170,6 +171,8 @@ describe("messages", () => {
             model: "mc3s",
             serialNumber: "A2E987",
             imuCount: undefined,
+            comm: undefined,
+            commNext: undefined,
         });
     });
 
@@ -179,6 +182,8 @@ describe("messages", () => {
             model: "mc3s",
             serialNumber: "A00000",
             imuCount: 1,
+            comm: undefined,
+            commNext: undefined,
         });
     });
 
@@ -226,5 +231,27 @@ describe("messages", () => {
 
     it("rejects a short settings string", () => {
         assert.equal(decodeSettings("0000"), undefined);
+    });
+});
+
+describe("wired float frames", () => {
+    it("decodes a float frame to the same sample as the X frame it stands for", () => {
+        // Q14 quaternion integers, then 1/256 m/s² accelerations
+        const ints = [1000, -2000, 300, 16000, 512, -256, 4096];
+
+        const xBytes = new Uint8Array(14);
+        const xView = new DataView(xBytes.buffer);
+        ints.forEach((value, i) => xView.setInt16(i * 2, value, true));
+
+        const floats = ints.map((value, i) => (i < 4 ? value / 16384 : value / 256));
+        const floatBytes = new Uint8Array(28);
+        const floatView = new DataView(floatBytes.buffer);
+        floats.forEach((value, i) => floatView.setFloat32(i * 4, value, true));
+
+        const fromX = decodeImu(encodeBase64(xBytes), "wired");
+        const [slice] = splitWiredFloatImu(encodeBase64(floatBytes), 1);
+        const fromFloat = slice ? decodeImu(slice.payload, "wired") : undefined;
+
+        assert.deepEqual(fromFloat, fromX);
     });
 });

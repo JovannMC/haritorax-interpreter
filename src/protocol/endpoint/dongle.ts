@@ -190,30 +190,63 @@ export function unpairCommands(channel: number, slot: "0" | "1"): readonly strin
     return Object.freeze([`o:30${channel.toString(16)}2`, setChannelCommand(channel)]);
 }
 
-// sending "o(x):00000" + fps + sensor mode + "010" + auto-correction + "0" + command + ankle motion detection
-// e.g. "o0:00000110107000" for 100fps, sensor mode 1, accel+gyro+mag sensor auto correction, no ankle motion detection. for slot 0.
-// bit 12 is command, 0 = normal, 1 = switch to BLE, 2 = power off
-// bits 3-4 are the body part id the tracker should use, 0 leaves it alone
-export function dongleSettingsCommand(slot: string, settings: TrackerSettings, command?: number, attachPoint?: number): string {
+// bits in dongle settings and what they're for according to firmware
+// 0 - led
+// 1 - calibrationReseting
+// 2 - calibrationMode
+// 3-4 - attachPoint
+// 5 - speedMode
+// 6 - imuMode
+// 7 - sensorOrderMode
+// 8 - gyroRate
+// 9 - noMag
+// 10 - dcal
+// 11 - magSt
+// 12 - modeChange
+// 13 - rangeSensorEnable
+const SETTINGS_DIGITS = 14;
+const DEFAULT_SETTINGS = "00000000100000";
+
+export function dongleSettingsCommand(
+    slot: string,
+    settings: TrackerSettings,
+    command?: number,
+    attachPoint?: number,
+    echo?: string,
+): string {
+    const digits = (echo !== undefined && echo.length === SETTINGS_DIGITS ? echo : DEFAULT_SETTINGS).split("");
+
     let correction = 0;
     if (settings.sensorAutoCorrection.includes("accel")) correction |= 1;
     if (settings.sensorAutoCorrection.includes("gyro")) correction |= 2;
     if (settings.sensorAutoCorrection.includes("mag")) correction |= 4;
 
-    const fps = settings.fpsMode === 100 ? 1 : 0;
-    const sensor = settings.sensorMode === 1 ? 1 : 0;
-    const ankle = settings.ankleMotionDetection ? 1 : 0;
-    const cmd = command ?? 0;
-    const attach = (attachPoint ?? 0).toString(16).padStart(2, "0");
+    digits[5] = settings.fpsMode === 100 ? "1" : "0";
+    digits[6] = settings.sensorMode === 1 ? "1" : "0";
+    digits[10] = correction.toString(16);
+    digits[12] = String(command ?? 0);
+    digits[13] = settings.ankleMotionDetection ? "1" : "0";
 
-    return `o${slot}:000${attach}${fps}${sensor}010${correction}0${cmd}${ankle}`;
+    if (attachPoint !== undefined) {
+        const attach = attachPoint.toString(16).padStart(2, "0");
+        digits[3] = attach.charAt(0);
+        digits[4] = attach.charAt(1);
+    }
+
+    return `o${slot}:${digits.join("")}`;
 }
 
-// the tracker applies a body part sent through the dongle only after seeing 0x0A, 0x1F, <id>, 0x00 in the attach point bits.
+// the tracker applies a body part sent through the dongle only after seeing 0x0A, 0x1F, <id>, 0x00 in the attach point digits.
 // firmware without that requirement gets the id alone (the caller decides with bodyPartNeedsUnlock)
-export function bodyPartCommands(slot: string, settings: TrackerSettings, trackerId: number, unlock: boolean): string[] {
+export function bodyPartCommands(
+    slot: string,
+    settings: TrackerSettings,
+    trackerId: number,
+    unlock: boolean,
+    echo?: string,
+): string[] {
     const steps = unlock ? [0x0a, 0x1f, trackerId, 0x00] : [trackerId];
-    return steps.map((attachPoint) => dongleSettingsCommand(slot, settings, undefined, attachPoint));
+    return steps.map((attachPoint) => dongleSettingsCommand(slot, settings, undefined, attachPoint, echo));
 }
 
 // e.g. `r0:110060800a00`

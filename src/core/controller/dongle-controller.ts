@@ -42,6 +42,7 @@ const PAIRING_COMMAND_DELAY_MS = 1_000;
 const PAIRING_TIMEOUT_MS = 30_000;
 const BODY_PART_STEP_DELAY_MS = 200;
 const BODY_PART_TIMEOUT_MS = 2_000;
+const PING_INTERVAL_MS = 1_000;
 
 export interface DongleControllerOptions {
     emitter: Emitter;
@@ -76,6 +77,11 @@ export class DongleController {
     // endpoints that are in pairing mode
     readonly #pairingSlots = new Map<string, { slot: "0" | "1"; armed: boolean }>();
     readonly #bodyPartWaits = new Map<string, { bodyPart: BodyPart; resolve: () => void }>();
+    // last `oN:` frame the dongle echoed per endpoint:slot, the base for settings writes
+    readonly #settingsEchoes = new Map<string, string>();
+    readonly #latencies = new Map<string, number>();
+    readonly #pingSentAt = new Map<string, number>();
+    readonly #pingTimers = new Map<string, ReturnType<typeof setInterval>>();
 
     constructor(options: DongleControllerOptions) {
         this.#emitter = options.emitter;
@@ -155,6 +161,11 @@ export class DongleController {
         return this.#channels.get(endpointId);
     }
 
+    // round trip to the dongle in ms, from the last `i:` ping
+    getLatency(endpointId: string): number | undefined {
+        return this.#latencies.get(endpointId);
+    }
+
     async setChannel(endpointId: string, channel: number): Promise<void> {
         if (!isValidChannel(channel)) {
             throw new HaritoraXError("NOT_SUPPORTED", `Channel must be an integer between 1 and 10, got ${channel}`);
@@ -162,6 +173,13 @@ export class DongleController {
 
         if (!this.#isOpen(endpointId)) {
             throw new HaritoraXError("NOT_CONNECTED", `${endpointId} is not connected`);
+        }
+
+        // don't allow setting dupe channels lol
+        for (const [otherId, otherChannel] of this.#channels) {
+            if (otherId !== endpointId && otherChannel === channel) {
+                throw new HaritoraXError("NOT_SUPPORTED", `Channel ${channel} is already used by ${otherId}`);
+            }
         }
 
         await this.#write(endpointId, setChannelCommand(channel));
@@ -173,7 +191,7 @@ export class DongleController {
             throw new HaritoraXError("NOT_CONNECTED", `${endpointId} is not connected`);
         }
 
-        await this.#write(endpointId, dongleSettingsCommand(slot, settings));
+        await this.#write(endpointId, dongleSettingsCommand(slot, settings, undefined, undefined, this.#echo(endpointId, slot)));
 
         const device = this.#registry.deviceAt(endpointId, slot);
         if (device) this.#registry.setSettings(device.deviceId, settings);
@@ -186,8 +204,9 @@ export class DongleController {
             throw new HaritoraXError("NOT_CONNECTED", `${endpointId} is not connected`);
         }
 
-        const command = dongleSettingsCommand(slot, settings, 2);
-        const restore = dongleSettingsCommand(slot, settings, 0);
+        const echo = this.#echo(endpointId, slot);
+        const command = dongleSettingsCommand(slot, settings, 2, undefined, echo);
+        const restore = dongleSettingsCommand(slot, settings, 0, undefined, echo);
         await this.#write(endpointId, command);
         await delay(this.#commandHoldMs(endpointId, slot));
         await this.#write(endpointId, restore);
@@ -201,8 +220,9 @@ export class DongleController {
             throw new HaritoraXError("NOT_CONNECTED", `${endpointId} is not connected`);
         }
 
-        const command = dongleSettingsCommand(slot, settings, 1);
-        const restore = dongleSettingsCommand(slot, settings, 0);
+        const echo = this.#echo(endpointId, slot);
+        const command = dongleSettingsCommand(slot, settings, 1, undefined, echo);
+        const restore = dongleSettingsCommand(slot, settings, 0, undefined, echo);
         await this.#write(endpointId, command);
         await delay(this.#commandHoldMs(endpointId, slot));
         await this.#write(endpointId, restore);
@@ -254,7 +274,7 @@ export class DongleController {
         });
 
         try {
-            const commands = bodyPartCommands(slot, settings, trackerId, unlock);
+            const commands = bodyPartCommands(slot, settings, trackerId, unlock, this.#echo(endpointId, slot));
             for (const [index, command] of commands.entries()) {
                 if (index > 0) await delay(BODY_PART_STEP_DELAY_MS);
                 await this.#write(endpointId, command);
@@ -319,7 +339,14 @@ export class DongleController {
         this.#pairings.cancel(endpointId);
         this.#pairingSlots.delete(endpointId);
 
+        this.#stopPings(endpointId);
+        this.#latencies.delete(endpointId);
+        this.#pingSentAt.delete(endpointId);
+
         const prefix = `${endpointId}:`;
+        for (const key of [...this.#settingsEchoes.keys()]) {
+            if (key.startsWith(prefix)) this.#settingsEchoes.delete(key);
+        }
         for (const key of [...this.#identities.keys()]) {
             if (key.startsWith(prefix)) {
                 this.#identities.delete(key);
@@ -333,6 +360,10 @@ export class DongleController {
     }
 
     dispose(): void {
+        for (const endpointId of [...this.#pingTimers.keys()]) this.#stopPings(endpointId);
+        this.#latencies.clear();
+        this.#pingSentAt.clear();
+        this.#settingsEchoes.clear();
         this.#pairings.cancelAll();
         this.#pairingSlots.clear();
         this.#dongleVersions.clear();
@@ -389,6 +420,9 @@ export class DongleController {
         if (identifier === "i") {
             const info = parseInfo(payload);
             if (info?.version) this.#dongleVersions.set(endpointId, info.version);
+
+            this.#onPingReply(endpointId);
+            this.#startPings(endpointId);
             return;
         }
 
@@ -538,8 +572,23 @@ export class DongleController {
         });
     }
 
+    #echo(endpointId: string, slot: string): string | undefined {
+        return this.#settingsEchoes.get(endpointSlotKey(endpointId, slot));
+    }
+
     #onSettings(endpointId: string, slot: string, payload: string): void {
+        const key = endpointSlotKey(endpointId, slot);
+        const first = !this.#settingsEchoes.has(key);
+        if (payload.length === 14) this.#settingsEchoes.set(key, payload);
+
+        // clear leftover power-off / switch to BLE command, so it doesn't keep the tracker off or on BLE after a reconnect
         const settings = decodeSettings(payload);
+        if (first && settings && payload.length === 14 && payload.charAt(12) !== "0") {
+            this.#write(endpointId, dongleSettingsCommand(slot, settings, 0, undefined, payload)).catch((error: unknown) => {
+                this.#log.warn(`Could not clear the leftover command on ${endpointId}:${slot}`, { error: String(error) });
+            });
+        }
+
         if (!settings) return;
 
         const device = this.#registry.deviceAt(endpointId, slot);
@@ -590,6 +639,38 @@ export class DongleController {
 
         if (decoded.magStatus) this.#registry.setMag(tracker.trackerId, decoded.magStatus);
         if (decoded.tap !== undefined) this.#registry.setTap(tracker.trackerId, decoded.tap);
+    }
+
+    #onPingReply(endpointId: string): void {
+        const sent = this.#pingSentAt.get(endpointId);
+        if (sent === undefined) return;
+
+        this.#pingSentAt.delete(endpointId);
+        this.#latencies.set(endpointId, Date.now() - sent);
+    }
+
+    #startPings(endpointId: string): void {
+        if (this.#pingTimers.has(endpointId)) return;
+
+        const timer = setInterval(() => {
+            if (!this.#isOpen(endpointId)) return;
+
+            this.#pingSentAt.set(endpointId, Date.now());
+            this.#write(endpointId, "i:").catch((error: unknown) => {
+                this.#log.debug(`Latency ping to ${endpointId} failed`, { error: String(error) });
+            });
+        }, PING_INTERVAL_MS);
+        timer.unref();
+
+        this.#pingTimers.set(endpointId, timer);
+    }
+
+    #stopPings(endpointId: string): void {
+        const timer = this.#pingTimers.get(endpointId);
+        if (timer === undefined) return;
+
+        clearInterval(timer);
+        this.#pingTimers.delete(endpointId);
     }
 
     #updateChannel(endpointId: string, channel: number): void {

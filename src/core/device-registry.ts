@@ -11,6 +11,7 @@ import type {
     TrackerModel,
     TrackerSettings,
     TrackerSnapshot,
+    WiredComm,
 } from "../types.js";
 
 const TRACKER_TIMEOUT_MS = 10_000;
@@ -30,6 +31,8 @@ export interface DeviceRegistration {
     reportedImuCount: number | undefined;
     connection: ConnectionKind;
     parts: readonly BodyPart[];
+    comm?: WiredComm;
+    commNext?: WiredComm;
 }
 
 export class DeviceRegistry {
@@ -133,6 +136,8 @@ export class DeviceRegistry {
             imuCount,
             model: input.model,
             ...(input.version ? { version: input.version } : {}),
+            ...(input.comm === undefined ? {} : { comm: input.comm }),
+            ...(input.commNext === undefined ? {} : { commNext: input.commNext }),
             connection: input.connection,
             trackers: this.#createTrackers(deviceId, endpointId, input.parts),
         };

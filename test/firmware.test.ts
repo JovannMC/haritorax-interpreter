@@ -9,6 +9,7 @@ import {
     compareFirmwareVersions,
     dongleCarriesTwoImus,
     dongleMayDropCommands,
+    dongleSelfClearsCommands,
     dongleReportsAccelAccuracy,
     factoryAttachPoint,
     firmwareAtLeast,
@@ -61,6 +62,12 @@ describe("firmware rules", () => {
         assert.equal(commandHoldMs("1.0.28"), 150);
     });
 
+    it("knows which dongles clear a command themselves", () => {
+        assert.equal(dongleSelfClearsCommands("1.0.28"), false);
+        assert.equal(dongleSelfClearsCommands("1.0.29"), true);
+        assert.equal(dongleSelfClearsCommands(undefined), undefined);
+    });
+
     it("knows which dongles carry two-IMU HX2 frames", () => {
         assert.equal(dongleCarriesTwoImus("1.0.19"), false);
         assert.equal(dongleCarriesTwoImus("1.0.26"), true);
@@ -84,8 +91,10 @@ describe("firmware rules", () => {
         assert.equal(hasSensor2("wireless", "1.0.26"), true);
         assert.equal(hasSensor2("wireless", "1.0.25"), false);
         assert.equal(hasSensor2("wireless", "1.0.22"), false);
-        // an unknown version has to be worked out from the traffic
-        assert.equal(hasSensor2("x2", undefined), false);
+        // every HX2 build has sensor2, so an unknown HX2 version needs no traffic check
+        assert.equal(hasSensor2("x2", undefined), true);
+        // an unknown HXW version has to be worked out from the traffic
+        assert.equal(hasSensor2("wireless", undefined), false);
         assert.equal(hasSensor2("wired", "1.7.8"), false);
     });
 

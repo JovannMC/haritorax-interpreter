@@ -85,6 +85,17 @@ function asciiText(bytes: Uint8Array): string {
 }
 
 // range values are the raw 16-bit values the tracker sends for the left and right ankle
+// seven float32 per IMU: quaternion i, j, k, real, then acceleration x, y, z, all for an identity-ish pose
+function floatPayload(count: number): string {
+    const bytes = new Uint8Array(count * 28);
+    const view = new DataView(bytes.buffer);
+    for (let i = 0; i < count; i++) {
+        [0, 0, 0, 1, 0, 0, 1].forEach((value, j) => view.setFloat32(i * 28 + j * 4, value, true));
+    }
+
+    return encodeBase64(bytes);
+}
+
 function imuPayload(count: number, range?: [number, number]): string {
     const leg = decodeBase64(LEG).slice(0, 14);
     const bytes = new Uint8Array(count * 14 + (range ? 4 : 0));
@@ -167,10 +178,20 @@ describe("wired device", () => {
         assert.equal(app.getDevice("0108014")?.model, "wired");
     });
 
-    it("ignores an unsupported imu_num", async () => {
+    it("accepts a tracker count outside the known layouts", async () => {
         const { app, serial } = await connected();
 
         serial.emitFrame('s:{"imu_mode":1,"imu_num":4,"magf_status":"0000"}');
+        serial.emitFrame(INFO);
+
+        assert.equal(app.getDevice("0108013")?.imuCount, 4);
+        assert.equal(app.getDevice("0108013")?.trackers.length, 4);
+    });
+
+    it("ignores a state with no trackers", async () => {
+        const { app, serial } = await connected();
+
+        serial.emitFrame('s:{"imu_mode":1,"imu_num":0,"magf_status":""}');
         serial.emitFrame(INFO);
 
         assert.equal(app.getDevice("0108013"), undefined);
@@ -338,7 +359,7 @@ describe("wired protocol", () => {
         assert.deepEqual(wiredPartsFor(8).slice(5), ["leftElbow", "rightElbow", "hip"]);
     });
 
-    it("ignores the lower case x float frame, which is not X", async () => {
+    it("decodes the lower case x float frames for every tracker", async () => {
         const { app, serial } = await connected();
         serial.emitFrame(STATE_5);
         serial.emitFrame(INFO);
@@ -346,11 +367,33 @@ describe("wired protocol", () => {
         const samples: string[] = [];
         app.on("imu", (sample) => samples.push(sample.trackerId));
 
-        serial.emitFrame(`x:${imuPayload(5)}`);
-        assert.equal(samples.length, 0);
-
-        serial.emitFrame(`X:${imuPayload(5)}`);
+        serial.emitFrame(`x:${floatPayload(5)}`);
         assert.equal(samples.length, 5);
+    });
+
+    it("reads the tracker's own imu mode, speed and calibration from s:", async () => {
+        const { app, serial } = await connected();
+        serial.emitFrame(STATE_5);
+        serial.emitFrame(INFO);
+
+        serial.emitFrame(
+            's:{"imu_mode":2,"imu_num":5,"magf_status":"33333","speed_mode":1,"dcal_flags":"5","detected":"04004C4C"}',
+        );
+        assert.deepEqual(app.getDevice("0108013")?.settings, {
+            sensorMode: 1,
+            fpsMode: 50,
+            sensorAutoCorrection: ["accel", "mag"],
+            ankleMotionDetection: false,
+        });
+    });
+
+    it("reports the link the wired tracker uses and the one it switches to", async () => {
+        const { app, serial } = await connected();
+        serial.emitFrame(STATE_5);
+        serial.emitFrame(INFO);
+
+        assert.equal(app.getDevice("0108013")?.comm, "BLT");
+        assert.equal(app.getDevice("0108013")?.commNext, "BTSPP");
     });
 
     it("reads left and right ankle range values from the trailing buffer", () => {

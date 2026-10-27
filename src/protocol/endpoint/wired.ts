@@ -8,18 +8,29 @@ const WIRED_IMU_BYTES = 14;
 const WIRED_RANGE_BYTES = 4;
 
 export function wiredPartsFor(imuCount: number): BodyPart[] {
-    const base = [...WIRED_BASE_PARTS];
-    if (imuCount === 6) return [...base, "hip"];
-    if (imuCount === 7) return [...base, "leftElbow", "rightElbow"];
-    if (imuCount === 8) return [...base, "leftElbow", "rightElbow", "hip"];
+    // allow any amount, lol
+    const extra: BodyPart[] =
+        imuCount === 6
+            ? ["hip"]
+            : imuCount === 7
+              ? ["leftElbow", "rightElbow"]
+              : imuCount === 8
+                ? ["leftElbow", "rightElbow", "hip"]
+                : [];
+    const parts: BodyPart[] = [...WIRED_BASE_PARTS, ...extra];
+    while (parts.length < imuCount) parts.push("unassigned");
 
-    return base;
+    return parts.slice(0, imuCount);
 }
 
 export interface WiredState {
     imuCount: number;
     parts: readonly BodyPart[];
     magStatuses: (MagStatus | undefined)[];
+    imuMode?: number;
+    speedMode?: number;
+    dcalFlags?: number;
+    detected?: string;
 }
 
 export interface WiredImuSlice {
@@ -35,6 +46,7 @@ export function parseWiredState(payload: string): WiredState | undefined {
         const data = JSON.parse(payload) as Record<string, unknown>;
         const imuCount = typeof data["imu_num"] === "number" ? data["imu_num"] : undefined;
         if (imuCount === undefined || !Number.isInteger(imuCount)) return undefined;
+        if (imuCount < 1) return undefined;
 
         const parts = wiredPartsFor(imuCount);
         const magField = typeof data["magf_status"] === "string" ? data["magf_status"] : "";
@@ -43,7 +55,21 @@ export function parseWiredState(payload: string): WiredState | undefined {
             return Number.isNaN(value) ? undefined : magStatusFromByte(value);
         });
 
-        return { imuCount, parts, magStatuses };
+        const imuMode = typeof data["imu_mode"] === "number" ? data["imu_mode"] : undefined;
+        const speedMode = typeof data["speed_mode"] === "number" ? data["speed_mode"] : undefined;
+        const dcalField = typeof data["dcal_flags"] === "string" ? data["dcal_flags"] : undefined;
+        const dcalFlags = dcalField === undefined ? undefined : Number.parseInt(dcalField, 16);
+        const detected = typeof data["detected"] === "string" ? data["detected"] : undefined;
+
+        return {
+            imuCount,
+            parts,
+            magStatuses,
+            imuMode,
+            speedMode,
+            dcalFlags,
+            detected,
+        };
     } catch {
         return undefined;
     }
@@ -73,6 +99,31 @@ export function splitWiredImu(payload: string, partCount: number): WiredImuSlice
             index,
             ...(range === undefined ? {} : { range }),
         });
+    }
+
+    return slices;
+}
+
+// `x:` frames (report_type 1) carry 7 float32 per IMU, no range: quaternion i, j, k, real, then acceleration x, y, z
+// this should never show up on real trackers unless someone else found the command and changed it themselves, for some reason
+export function splitWiredFloatImu(payload: string, partCount: number): WiredImuSlice[] {
+    const bytes = decodeBase64(payload);
+    const size = 7 * 4;
+    if (partCount <= 0 || bytes.length < partCount * size) return [];
+
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const toInt16 = (value: number) => Math.max(-32768, Math.min(32767, Math.round(value)));
+
+    const slices: WiredImuSlice[] = [];
+    for (let index = 0; index < partCount; index++) {
+        const at = index * size;
+        const out = new Uint8Array(WIRED_IMU_BYTES);
+        const dv = new DataView(out.buffer);
+
+        for (let i = 0; i < 4; i++) dv.setInt16(i * 2, toInt16(view.getFloat32(at + i * 4, true) * 16384), true);
+        for (let i = 0; i < 3; i++) dv.setInt16(8 + i * 2, toInt16(view.getFloat32(at + (4 + i) * 4, true) * 256), true);
+
+        slices.push({ payload: encodeBase64(out), index });
     }
 
     return slices;

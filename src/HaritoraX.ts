@@ -207,6 +207,10 @@ export class HaritoraX {
         return this.#dongle.getChannel(endpointId);
     }
 
+    getLatency(endpointId: string): number | undefined {
+        return this.#dongle.getLatency(endpointId);
+    }
+
     setChannel(endpointId: string, channel: number): Promise<void> {
         return this.#dongle.setChannel(endpointId, channel);
     }

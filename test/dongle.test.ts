@@ -1099,3 +1099,79 @@ describe("setting the body part over a dongle", () => {
         assert.equal(await code(noSettings.app.setBodyPart("C1MGN3", "chest")), "READ_FAILED");
     });
 });
+
+describe("settings echo", () => {
+    // the dongle's stored `oN:` frame, with led 1, gyro rate 2 and mag stabilised (digits 0, 8 and 11)
+    const ECHO = ["1", "0", "0", "0", "0", "0", "0", "0", "2", "0", "0", "1", "0", "0"].join("");
+
+    it("keeps the digits the dongle echoed and changes only the ones it sets", async () => {
+        const { app, serial } = await connected();
+        serial.emitFrame(INFO);
+        serial.emitFrame(`o0:${ECHO}`);
+
+        await app.setSettings("A2E987", {
+            sensorMode: 1,
+            fpsMode: 100,
+            sensorAutoCorrection: ["accel"],
+            ankleMotionDetection: true,
+        });
+
+        // led (0), gyro rate (8) and magSt (11) come from the echo. speed, imu mode, dcal and range are the new settings
+        assert.deepEqual(
+            serial.writes.filter((write) => write.startsWith("COM4:o0:")),
+            ["COM4:o0:10000110201101"],
+        );
+    });
+
+    it("clears a leftover power-off once per slot, from the first echo", async () => {
+        const { serial } = await connected();
+        const echo = (mode: string) => `${"00000000100000".slice(0, 12)}${mode}0`;
+
+        serial.emitFrame(`o0:${echo("2")}`);
+        serial.emitFrame(`o0:${echo("2")}`);
+        assert.deepEqual(
+            serial.writes.filter((write) => write.startsWith("COM4:o0:")),
+            ["COM4:o0:00000000100000"],
+        );
+
+        // an echo with no leftover command isn't written again
+        serial.emitFrame(`o1:${echo("0")}`);
+        assert.deepEqual(
+            serial.writes.filter((write) => write.startsWith("COM4:o1:")),
+            [],
+        );
+    });
+});
+
+describe("dongle channels and latency", () => {
+    it("refuses a channel another dongle already uses", async () => {
+        const first = memoryConnection("COM4");
+        const second = memoryConnection("COM5");
+        const app = createHaritoraX({ connections: [first, second], logLevel: "silent" });
+
+        await app.discover();
+        await app.connect("COM4");
+        await app.connect("COM5");
+        first.emitFrame("o:3040");
+        second.emitFrame("o:3040");
+
+        const error = await app.setChannel("COM5", 4).catch((err: unknown) => err);
+        assert.equal((error as { code?: string }).code, "NOT_SUPPORTED");
+        assert.equal(app.getChannel("COM5"), 4);
+
+        await app.setChannel("COM5", 5);
+        assert.equal(app.getChannel("COM5"), 5);
+    });
+
+    it("pings the dongle once a second and measures the round trip", async () => {
+        const { app, serial } = await connected();
+
+        serial.emitFrame('i:{"version":"1.0.29","model":"gx6"}');
+        await new Promise((resolve) => setTimeout(resolve, 1_100));
+        assert.ok(serial.writes.includes("COM4:i:"));
+
+        serial.emitFrame('i:{"version":"1.0.29","model":"gx6"}');
+        const latency = app.getLatency("COM4");
+        assert.ok(latency !== undefined && latency >= 0 && latency < 1_000);
+    });
+});

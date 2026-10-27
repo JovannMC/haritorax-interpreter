@@ -7,11 +7,13 @@ import { modelFromFirmware, parseBattery, parseInfo, type ParsedInfo } from "../
 import {
     parseWiredButton,
     parseWiredState,
+    splitWiredFloatImu,
     splitWiredImu,
     wiredSettingsCommands,
+    type WiredImuSlice,
     type WiredState,
 } from "../../protocol/endpoint/wired.js";
-import type { ConnectionKind, TrackerSettings } from "../../types.js";
+import type { ConnectionKind, DeviceSnapshot, SensorAutoCorrection, TrackerSettings } from "../../types.js";
 
 const WIRED_SLOT = "0";
 
@@ -42,8 +44,11 @@ export class WiredController implements ProtocolHandler {
 
     handleFrame(endpointId: string, name: string, slot: string | undefined, payload: string, rawName?: string): void {
         if (slot) return;
-        // `x:` is the float frame (report_type 1, not decoded yet). `X:` and the other IMU letters are upper case
-        if (rawName === "x") return;
+        // `X:` is regular IMU frame, `x:` is float IMU frame (report_type 1)
+        if (rawName === "x") {
+            this.#onFloatImu(endpointId, payload);
+            return;
+        }
 
         // i still hate how IMU data used so many different identifiers, that made me go crazy back then i remember
         switch (name) {
@@ -118,6 +123,7 @@ export class WiredController implements ProtocolHandler {
         if (device) {
             this.#registry.setTrackers(device.deviceId, state.parts);
             this.#applyMag(device.deviceId, state);
+            this.#applyState(device, state);
             return;
         }
 
@@ -136,9 +142,12 @@ export class WiredController implements ProtocolHandler {
             reportedImuCount: info.imuCount,
             connection: this.#connectionKind(endpointId),
             parts: state.parts,
+            comm: info.comm,
+            commNext: info.commNext,
         });
 
         this.#applyMag(device.deviceId, state);
+        this.#applyState(device, state);
     }
 
     #onBattery(endpointId: string, payload: string): void {
@@ -171,7 +180,17 @@ export class WiredController implements ProtocolHandler {
         const device = this.#registry.deviceAt(endpointId, WIRED_SLOT);
         if (!device || device.trackers.length === 0) return;
 
-        const slices = splitWiredImu(payload, device.trackers.length);
+        this.#emitImu(device, splitWiredImu(payload, device.trackers.length));
+    }
+
+    #onFloatImu(endpointId: string, payload: string): void {
+        const device = this.#registry.deviceAt(endpointId, WIRED_SLOT);
+        if (!device || device.trackers.length === 0) return;
+
+        this.#emitImu(device, splitWiredFloatImu(payload, device.trackers.length));
+    }
+
+    #emitImu(device: DeviceSnapshot, slices: readonly WiredImuSlice[]): void {
         for (const slice of slices) {
             const tracker = device.trackers[slice.index];
             if (!tracker) continue;
@@ -192,6 +211,24 @@ export class WiredController implements ProtocolHandler {
                 timestamp: Date.now(),
             });
         }
+    }
+
+    #applyState(device: DeviceSnapshot, state: WiredState): void {
+        const current = device.settings;
+        const correction = state.dcalFlags;
+        const sensorAutoCorrection: SensorAutoCorrection[] =
+            correction === undefined
+                ? (current?.sensorAutoCorrection ?? [])
+                : (["accel", "gyro", "mag"] as const).filter((_, i) => correction & (1 << i));
+
+        const settings: TrackerSettings = {
+            sensorMode: state.imuMode === undefined ? (current?.sensorMode ?? 1) : state.imuMode === 2 ? 1 : 2,
+            fpsMode: state.speedMode === undefined ? (current?.fpsMode ?? 100) : state.speedMode === 1 ? 50 : 100,
+            sensorAutoCorrection,
+            ankleMotionDetection: current?.ankleMotionDetection ?? false,
+        };
+
+        this.#registry.setSettings(device.deviceId, settings);
     }
 
     #applyMag(deviceId: string, state: WiredState): void {

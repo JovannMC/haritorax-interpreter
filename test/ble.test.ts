@@ -327,31 +327,6 @@ describe("BLE device", () => {
         assert.equal(app.getTracker("A2E987:0")?.bodyPart, "leftElbow");
     });
 
-    it("reads sensor for firmware without sensor2, for single and dual payloads", async () => {
-        const { app, backend } = await connected({ ...HX2_DEVICE, version: "0.9.0" });
-
-        const samples: Array<{ trackerId: string; role: string }> = [];
-        app.on("imu", (sample) => samples.push({ trackerId: sample.trackerId, role: sample.role }));
-
-        backend.emit("ble-1", "sensor", SINGLE_IMU);
-        assert.deepEqual(samples, [{ trackerId: "C1M8W0:0", role: "ankle" }]);
-
-        const dual = new Uint8Array(28);
-        dual.set(SINGLE_IMU, 0);
-        dual.set(SINGLE_IMU, 14);
-        backend.emit("ble-1", "sensor", dual);
-
-        assert.deepEqual(
-            samples.map((sample) => [sample.trackerId, sample.role]),
-            [
-                ["C1M8W0:0", "ankle"],
-                ["C1M8W0:0", "ankle"],
-                ["C1M8W0:1", "knee"],
-            ],
-        );
-        assert.equal(app.getTracker("C1M8W0:1")?.bodyPart, "unassigned");
-    });
-
     it("skips sensor from the start once the firmware version proves sensor2 exists", async () => {
         const { app, backend } = await connected();
 
@@ -380,8 +355,8 @@ describe("BLE device", () => {
         assert.deepEqual(currentSamples, []);
     });
 
-    it("reads sensor while the version is unknown, until sensor2 shows up", async () => {
-        const { app, backend } = await connected({ ...HX2_DEVICE, version: "" });
+    it("reads sensor while the HXW version is unknown, until sensor2 shows up", async () => {
+        const { app, backend } = await connected({ ...HXW_DEVICE, version: "" });
 
         const samples: string[] = [];
         app.on("imu", (sample) => samples.push(sample.trackerId));
@@ -448,20 +423,23 @@ describe("BLE device", () => {
         assert.deepEqual(hxwRanges, [700, undefined, undefined]);
     });
 
-    it("reads the range from sensor frames too", async () => {
-        const { app, backend } = await connected({ ...HX2_DEVICE, version: "0.9.0" });
+    it("reads the range from sensor2 frames that carry it", async () => {
+        const { app, backend } = await connected();
 
         const ranges: Array<number | undefined> = [];
         app.on("imu", (sample) => ranges.push(sample.range));
 
-        const withRange = new Uint8Array(16);
+        // 16 bytes is IMU + status, 18 adds the range at byte 16
+        const withoutRange = new Uint8Array(16);
+        withoutRange.set(SINGLE_IMU, 0);
+        const withRange = new Uint8Array(18);
         withRange.set(SINGLE_IMU, 0);
-        withRange.set([(700 << 5) & 0xff, (700 << 5) >> 8], 14);
+        withRange.set([(700 << 5) & 0xff, (700 << 5) >> 8], 16);
 
-        backend.emit("ble-1", "sensor", SINGLE_IMU);
-        backend.emit("ble-1", "sensor", withRange);
+        backend.emit("ble-1", "sensor2", withoutRange);
+        backend.emit("ble-1", "sensor2", withRange);
 
-        // a 14-byte frame has no range, its last bytes are acceleration
+        // a 16-byte frame has no range
         assert.deepEqual(ranges, [undefined, 700]);
     });
 

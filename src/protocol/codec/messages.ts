@@ -1,11 +1,21 @@
 import { HaritoraXError } from "../../lib/errors.js";
-import type { BatteryInfo, FpsMode, SensorAutoCorrection, SensorMode, TrackerModel, TrackerSettings } from "../../types.js";
+import type {
+    BatteryInfo,
+    FpsMode,
+    SensorAutoCorrection,
+    SensorMode,
+    TrackerModel,
+    TrackerSettings,
+    WiredComm,
+} from "../../types.js";
 
 export interface ParsedInfo {
     version: string;
     model: string;
     serialNumber: string;
     imuCount?: number;
+    comm?: WiredComm;
+    commNext?: WiredComm;
 }
 
 export function parseInfo(payload: string): ParsedInfo | undefined {
@@ -15,9 +25,18 @@ export function parseInfo(payload: string): ParsedInfo | undefined {
         const model = typeof data["model"] === "string" ? data["model"] : "";
         const serialNumber = typeof data["serial no"] === "string" ? data["serial no"] : "";
         const imuCount = typeof data["imu_num"] === "number" ? data["imu_num"] : undefined;
+        const comm = typeof data["comm"] === "string" ? (data["comm"] as WiredComm) : undefined;
+        const commNext = typeof data["comm_next"] === "string" ? (data["comm_next"] as WiredComm) : undefined;
 
         if (!model) return undefined;
-        return { version, model, serialNumber, imuCount };
+        return {
+            version,
+            model,
+            serialNumber,
+            imuCount,
+            comm,
+            commNext,
+        };
     } catch {
         return undefined;
     }

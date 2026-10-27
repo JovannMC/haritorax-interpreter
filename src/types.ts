@@ -122,7 +122,13 @@ export interface DeviceSnapshot {
     trackers: TrackerSnapshot[];
     battery?: BatteryInfo;
     settings?: TrackerSettings;
+    // for wired trackers, the link in use and the one it switches to on next boot(?)
+    comm?: WiredComm;
+    commNext?: WiredComm;
 }
+
+// 0, 1, 2, 3, 4, others
+export type WiredComm = "BLT" | "BTSPP" | "BLE" | "ESPNOW" | "UART" | "Unknown";
 
 export type LogLevel = "silent" | "error" | "warn" | "info" | "debug" | "trace";
 
