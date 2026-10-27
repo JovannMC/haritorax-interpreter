@@ -13,7 +13,7 @@ function create() {
 
 function registration(overrides: Partial<DeviceRegistration> = {}): DeviceRegistration {
     return {
-        deviceId: "A2E987",
+        deviceId: "AAAAA7",
         endpointId: "COM4",
         slot: "0",
         model: "wireless",
@@ -38,17 +38,17 @@ describe("device registry", () => {
         emitter.on("tracker:connected", ({ trackerId }) => connected.push(trackerId));
         emitter.on("identified", ({ trackerId, bodyPart }) => identified.push(`${trackerId}:${bodyPart}`));
 
-        registry.setTrackers("A2E987", ["leftAnkle", "leftKnee"]);
+        registry.setTrackers("AAAAA7", ["leftAnkle", "leftKnee"]);
 
-        const updated = registry.getDevice("A2E987");
+        const updated = registry.getDevice("AAAAA7");
         assert.ok(updated);
         assert.equal(updated, device);
         assert.equal(updated.trackers[0], first);
         assert.equal(updated.imuCount, 2);
-        assert.deepEqual(connected, ["A2E987:1"]);
-        assert.deepEqual(identified, ["A2E987:0:leftAnkle"]);
-        assert.equal(registry.getBodyPart("A2E987:0"), "leftAnkle");
-        assert.equal(registry.getBodyPart("A2E987:1"), "leftKnee");
+        assert.deepEqual(connected, ["AAAAA7:1"]);
+        assert.deepEqual(identified, ["AAAAA7:0:leftAnkle"]);
+        assert.equal(registry.getBodyPart("AAAAA7:0"), "leftAnkle");
+        assert.equal(registry.getBodyPart("AAAAA7:1"), "leftKnee");
     });
 
     it("shrinks the tracker list and disconnects the removed tracker", () => {
@@ -58,17 +58,17 @@ describe("device registry", () => {
         const disconnected: string[] = [];
         emitter.on("tracker:disconnected", ({ trackerId, reason }) => disconnected.push(`${trackerId}:${reason}`));
 
-        registry.setTrackers("A2E987", ["leftAnkle"]);
+        registry.setTrackers("AAAAA7", ["leftAnkle"]);
 
-        const device = registry.getDevice("A2E987");
+        const device = registry.getDevice("AAAAA7");
         assert.ok(device);
         assert.equal(device.imuCount, 1);
         assert.deepEqual(
             device.trackers.map((tracker) => tracker.trackerId),
-            ["A2E987:0"],
+            ["AAAAA7:0"],
         );
-        assert.deepEqual(disconnected, ["A2E987:1:requested"]);
-        assert.equal(registry.getTracker("A2E987:1"), undefined);
+        assert.deepEqual(disconnected, ["AAAAA7:1:requested"]);
+        assert.equal(registry.getTracker("AAAAA7:1"), undefined);
     });
 
     it("updates body parts in place", () => {
@@ -78,10 +78,10 @@ describe("device registry", () => {
         const identified: string[] = [];
         emitter.on("identified", ({ deviceId, trackerId, bodyPart }) => identified.push(`${deviceId}:${trackerId}:${bodyPart}`));
 
-        registry.setTrackers("A2E987", ["chest"]);
+        registry.setTrackers("AAAAA7", ["chest"]);
 
-        assert.equal(registry.getBodyPart("A2E987:0"), "chest");
-        assert.deepEqual(identified, ["A2E987:A2E987:0:chest"]);
+        assert.equal(registry.getBodyPart("AAAAA7:0"), "chest");
+        assert.deepEqual(identified, ["AAAAA7:AAAAA7:0:chest"]);
     });
 
     it("disconnects trackers before devices when an endpoint goes away", () => {
@@ -96,7 +96,7 @@ describe("device registry", () => {
 
         registry.removeDevicesAtEndpoint("COM4", "requested");
 
-        assert.deepEqual(order, ["tracker:A2E987:0", "tracker:B1TEST:0", "device:A2E987", "device:B1TEST", "devices:0"]);
+        assert.deepEqual(order, ["tracker:AAAAA7:0", "tracker:B1TEST:0", "device:AAAAA7", "device:B1TEST", "devices:0"]);
         assert.deepEqual(registry.listDevices(), []);
     });
 
@@ -110,12 +110,12 @@ describe("device registry", () => {
             emitter.on("tracker:disconnected", ({ trackerId, reason }) => disconnected.push(`${trackerId}:${reason}`));
 
             mock.timers.tick(5_000);
-            registry.trackerSeen("A2E987:0");
+            registry.trackerSeen("AAAAA7:0");
             mock.timers.tick(5_000);
             assert.deepEqual(disconnected, []);
 
             mock.timers.tick(5_000);
-            assert.deepEqual(disconnected, ["A2E987:0:timeout"]);
+            assert.deepEqual(disconnected, ["AAAAA7:0:timeout"]);
         } finally {
             mock.timers.reset();
         }
@@ -135,10 +135,10 @@ describe("device registry", () => {
             ankleMotionDetection: true,
         };
 
-        registry.setSettings("A2E987", settings);
+        registry.setSettings("AAAAA7", settings);
         // same values, different array order
-        registry.setSettings("A2E987", { ...settings, sensorAutoCorrection: ["gyro", "accel"] });
-        registry.setSettings("A2E987", { ...settings, fpsMode: 50 });
+        registry.setSettings("AAAAA7", { ...settings, sensorAutoCorrection: ["gyro", "accel"] });
+        registry.setSettings("AAAAA7", { ...settings, fpsMode: 50 });
 
         assert.equal(events.length, 2);
         assert.deepEqual(events[0], settings);

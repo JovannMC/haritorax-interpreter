@@ -123,7 +123,7 @@ describe("serial connection", () => {
             { path: "/dev/rfcomm0" },
             { path: "COM7", manufacturer: "HaritoraX" },
             { path: "COM8", manufacturer: "Other" },
-            { path: "COM9", serialNumber: "HaritoraX-0506200" },
+            { path: "COM9", serialNumber: "HaritoraX-0000020" },
         ];
 
         // Each wired candidate answers the probe's knock with a valid info packet.

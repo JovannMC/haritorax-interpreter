@@ -166,10 +166,10 @@ describe("base64", () => {
 
 describe("messages", () => {
     it("parses tracker info, including the spaced field name", () => {
-        assert.deepEqual(parseInfo('{"version":"1.0.22","model":"mc3s","serial no":"A2E987"}'), {
+        assert.deepEqual(parseInfo('{"version":"1.0.22","model":"mc3s","serial no":"AAAAA7"}'), {
             version: "1.0.22",
             model: "mc3s",
-            serialNumber: "A2E987",
+            serialNumber: "AAAAA7",
             imuCount: undefined,
             comm: undefined,
             commNext: undefined,

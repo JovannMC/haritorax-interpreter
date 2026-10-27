@@ -7,8 +7,8 @@ import { parseWiredButton, splitWiredImu, wiredPartsFor, wiredSettingsCommands }
 import type { DisconnectReason, EndpointDescriptor, TrackerSettings, Unsubscribe } from "../dist/types.js";
 
 const ENDPOINT = "/dev/rfcomm0";
-const INFO = 'i:{"model":"MC2","version":"1.7.8","serial no":"0108013","comm":"BLT","comm_next":"BTSPP"}';
-const INFO_MC2B = 'i:{"model":"MC2B","version":"1.7.10","serial no":"0108014","comm":"BLT","comm_next":"BTSPP"}';
+const INFO = 'i:{"model":"MC2","version":"1.7.8","serial no":"0000003","comm":"BLT","comm_next":"BTSPP"}';
+const INFO_MC2B = 'i:{"model":"MC2B","version":"1.7.10","serial no":"0000004","comm":"BLT","comm_next":"BTSPP"}';
 const STATE_5 = 's:{"imu_mode":1,"imu_num":5,"magf_status":"01230","speed_mode":2,"dcal_flags":"04","detected":"04004C4C"}';
 const STATE_6 = 's:{"imu_mode":1,"imu_num":6,"magf_status":"012301","speed_mode":2,"dcal_flags":"04","detected":"04004C6C"}';
 const STATE_8 = 's:{"imu_mode":1,"imu_num":8,"magf_status":"01230123","speed_mode":2,"dcal_flags":"04","detected":"04004C6C"}';
@@ -131,21 +131,21 @@ describe("wired device", () => {
         serial.emitFrame(STATE_6);
         serial.emitFrame(INFO);
 
-        const device = app.getDevice("0108013");
+        const device = app.getDevice("0000003");
         assert.ok(device);
         assert.equal(device.model, "wired");
         assert.equal(device.slot, "0");
         assert.equal(device.imuCount, 6);
         assert.deepEqual(
             device.trackers.map((tracker) => tracker.trackerId),
-            ["0108013:0", "0108013:1", "0108013:2", "0108013:3", "0108013:4", "0108013:5"],
+            ["0000003:0", "0000003:1", "0000003:2", "0000003:3", "0000003:4", "0000003:5"],
         );
         assert.deepEqual(
             device.trackers.map((tracker) => tracker.bodyPart),
             ["chest", "leftKnee", "leftAnkle", "rightKnee", "rightAnkle", "hip"],
         );
-        assert.deepEqual(connectedEvents, ["0108013:wired:0:6"]);
-        assert.equal(app.getBodyPart("0108013:2"), "leftAnkle");
+        assert.deepEqual(connectedEvents, ["0000003:wired:0:6"]);
+        assert.equal(app.getBodyPart("0000003:2"), "leftAnkle");
         assert.deepEqual(
             device.trackers.map((tracker) => tracker.mag),
             ["veryBad", "bad", "okay", "great", "veryBad", "bad"],
@@ -156,11 +156,11 @@ describe("wired device", () => {
         const { app, serial } = await connected();
 
         serial.emitFrame(INFO);
-        assert.equal(app.getDevice("0108013"), undefined);
+        assert.equal(app.getDevice("0000003"), undefined);
 
         serial.emitFrame(STATE_5);
 
-        const device = app.getDevice("0108013");
+        const device = app.getDevice("0000003");
         assert.ok(device);
         assert.equal(device.imuCount, 5);
         assert.deepEqual(
@@ -175,7 +175,7 @@ describe("wired device", () => {
         serial.emitFrame(STATE_5);
         serial.emitFrame(INFO_MC2B);
 
-        assert.equal(app.getDevice("0108014")?.model, "wired");
+        assert.equal(app.getDevice("0000004")?.model, "wired");
     });
 
     it("accepts a tracker count outside the known layouts", async () => {
@@ -184,8 +184,8 @@ describe("wired device", () => {
         serial.emitFrame('s:{"imu_mode":1,"imu_num":4,"magf_status":"0000"}');
         serial.emitFrame(INFO);
 
-        assert.equal(app.getDevice("0108013")?.imuCount, 4);
-        assert.equal(app.getDevice("0108013")?.trackers.length, 4);
+        assert.equal(app.getDevice("0000003")?.imuCount, 4);
+        assert.equal(app.getDevice("0000003")?.trackers.length, 4);
     });
 
     it("ignores a state with no trackers", async () => {
@@ -194,7 +194,7 @@ describe("wired device", () => {
         serial.emitFrame('s:{"imu_mode":1,"imu_num":0,"magf_status":""}');
         serial.emitFrame(INFO);
 
-        assert.equal(app.getDevice("0108013"), undefined);
+        assert.equal(app.getDevice("0000003"), undefined);
     });
 
     it("emits single-role IMU samples for every tracker", async () => {
@@ -210,7 +210,7 @@ describe("wired device", () => {
 
         assert.deepEqual(
             samples.map((sample) => sample.trackerId),
-            ["0108013:0", "0108013:1", "0108013:2", "0108013:3", "0108013:4"],
+            ["0000003:0", "0000003:1", "0000003:2", "0000003:3", "0000003:4"],
         );
         assert.deepEqual(
             samples.map((sample) => sample.bodyPart),
@@ -225,7 +225,7 @@ describe("wired device", () => {
         serial.emitFrame(STATE_8);
         serial.emitFrame(INFO);
 
-        const device = app.getDevice("0108013");
+        const device = app.getDevice("0000003");
         assert.ok(device);
         assert.equal(device.imuCount, 8);
         assert.deepEqual(
@@ -300,12 +300,12 @@ describe("wired device", () => {
         serial.emitFrame('v:{"battery voltage":3917,"battery remaining":74,"charge status":"Discharging"}');
         serial.emitFrame('t:{"id":"button2","type":"click","start_time":6937744,"option":""}');
 
-        assert.equal(app.getDevice("0108013")?.battery?.level, 74);
+        assert.equal(app.getDevice("0000003")?.battery?.level, 74);
         assert.deepEqual(
             batteries.map((battery) => [battery.deviceId, battery.level]),
-            [["0108013", 74]],
+            [["0000003", 74]],
         );
-        assert.deepEqual(buttons, [{ deviceId: "0108013", button: "sub" }]);
+        assert.deepEqual(buttons, [{ deviceId: "0000003", button: "sub" }]);
     });
 
     it("writes wired settings to every open wired endpoint", async () => {
@@ -322,7 +322,7 @@ describe("wired device", () => {
         const events: TrackerSettings[] = [];
         app.on("settings", (event) => events.push(event.settings));
 
-        await app.setSettings("0108013", settings);
+        await app.setSettings("0000003", settings);
 
         // sensor mode 1 is the one that uses the magnetometer, which is imu mode 2 on a wired tracker
         assert.deepEqual(serial.writes, [
@@ -331,7 +331,7 @@ describe("wired device", () => {
             `${ENDPOINT}:sensor cal flags 3\r\nsensor restart\r\n`,
             `${ENDPOINT}:param sensor range\r\nparam save\r\nsensor restart\r\n`,
         ]);
-        assert.deepEqual(app.getDevice("0108013")?.settings, settings);
+        assert.deepEqual(app.getDevice("0000003")?.settings, settings);
         assert.deepEqual(events, [settings]);
     });
 
@@ -379,7 +379,7 @@ describe("wired protocol", () => {
         serial.emitFrame(
             's:{"imu_mode":2,"imu_num":5,"magf_status":"33333","speed_mode":1,"dcal_flags":"5","detected":"04004C4C"}',
         );
-        assert.deepEqual(app.getDevice("0108013")?.settings, {
+        assert.deepEqual(app.getDevice("0000003")?.settings, {
             sensorMode: 1,
             fpsMode: 50,
             sensorAutoCorrection: ["accel", "mag"],
@@ -392,8 +392,8 @@ describe("wired protocol", () => {
         serial.emitFrame(STATE_5);
         serial.emitFrame(INFO);
 
-        assert.equal(app.getDevice("0108013")?.comm, "BLT");
-        assert.equal(app.getDevice("0108013")?.commNext, "BTSPP");
+        assert.equal(app.getDevice("0000003")?.comm, "BLT");
+        assert.equal(app.getDevice("0000003")?.commNext, "BTSPP");
     });
 
     it("reads left and right ankle range values from the trailing buffer", () => {

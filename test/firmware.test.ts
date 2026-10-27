@@ -122,9 +122,9 @@ describe("firmware rules", () => {
 
 describe("general firmware rules", () => {
     it("reads the factory body part from the last serial symbol", () => {
-        assert.equal(factoryAttachPoint("C1HLW1"), 1);
-        assert.equal(factoryAttachPoint("C1MGN3"), 3);
-        assert.equal(factoryAttachPoint("C1M8W0"), 0);
+        assert.equal(factoryAttachPoint("DDDDD1"), 1);
+        assert.equal(factoryAttachPoint("CCCCC3"), 3);
+        assert.equal(factoryAttachPoint("BBBBB0"), 0);
         assert.equal(factoryAttachPoint("C1MGNJ"), 18);
         assert.equal(factoryAttachPoint("c1hlw1"), 1);
         assert.equal(factoryAttachPoint("C1HLWI"), undefined);
@@ -134,23 +134,23 @@ describe("general firmware rules", () => {
 
     it("knows which tracker still refuses a body-part change because of its base", () => {
         // the HX2 trackers with a base here (1.0.5, chest and leg combo) are locked, an extra (serial ends in 0) never is
-        assert.equal(bodyPartBaseLocked("x2", "1.0.5", "C1HLW1"), true);
-        assert.equal(bodyPartBaseLocked("x2", "1.0.5", "C1MGN3"), true);
-        assert.equal(bodyPartBaseLocked("x2", "1.0.5", "C1M8W0"), false);
-        assert.equal(bodyPartBaseLocked("x2", "1.0.23", "C1HLW1"), true);
-        assert.equal(bodyPartBaseLocked("x2", "1.0.24", "C1HLW1"), false);
-        assert.equal(bodyPartBaseLocked("x2", "1.0.30", "C1HLW1"), false);
+        assert.equal(bodyPartBaseLocked("x2", "1.0.5", "DDDDD1"), true);
+        assert.equal(bodyPartBaseLocked("x2", "1.0.5", "CCCCC3"), true);
+        assert.equal(bodyPartBaseLocked("x2", "1.0.5", "BBBBB0"), false);
+        assert.equal(bodyPartBaseLocked("x2", "1.0.23", "DDDDD1"), true);
+        assert.equal(bodyPartBaseLocked("x2", "1.0.24", "DDDDD1"), false);
+        assert.equal(bodyPartBaseLocked("x2", "1.0.30", "DDDDD1"), false);
 
-        assert.equal(bodyPartBaseLocked("wireless", "1.0.26", "A2E987"), true);
-        assert.equal(bodyPartBaseLocked("wireless", "1.0.27", "A2E987"), true);
-        assert.equal(bodyPartBaseLocked("wireless", "1.0.28", "A2E987"), false);
-        assert.equal(bodyPartBaseLocked("wireless", "1.0.27", "A2E980"), false);
+        assert.equal(bodyPartBaseLocked("wireless", "1.0.26", "AAAAA7"), true);
+        assert.equal(bodyPartBaseLocked("wireless", "1.0.27", "AAAAA7"), true);
+        assert.equal(bodyPartBaseLocked("wireless", "1.0.28", "AAAAA7"), false);
+        assert.equal(bodyPartBaseLocked("wireless", "1.0.27", "AAAAA0"), false);
 
         // builds that were never checked answer unknown, not a guess
-        assert.equal(bodyPartBaseLocked("wireless", "1.0.22", "A2E987"), true);
-        assert.equal(bodyPartBaseLocked("x2", undefined, "C1HLW1"), undefined);
+        assert.equal(bodyPartBaseLocked("wireless", "1.0.22", "AAAAA7"), true);
+        assert.equal(bodyPartBaseLocked("x2", undefined, "DDDDD1"), undefined);
         assert.equal(bodyPartBaseLocked("x2", "1.0.30", undefined), undefined);
-        assert.equal(bodyPartBaseLocked("wired", "1.7.8", "C1HLW1"), false);
+        assert.equal(bodyPartBaseLocked("wired", "1.7.8", "DDDDD1"), false);
     });
 
     it("names the first build without the base lock", () => {

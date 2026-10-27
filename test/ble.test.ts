@@ -35,18 +35,18 @@ function hex(text: string): Uint8Array {
     return result;
 }
 
-// captured from a HaritoraX2-C1M8W0 (HaritoraX2-C1M8W0-read.txt)
+// captured from a HaritoraX2-BBBBB0 (HaritoraX2-BBBBB0-read.txt)
 const SINGLE_IMU = hex("9400fe01c0085d3f7dff3c00fc07");
 // captured from a two-IMU HaritoraX 2 over BLE (the same instant, so sensor and sensor2 carry the same IMU data)
 const SENSOR_2IMU = hex("00db0afb3b00fc33020181f89a02551d31fdb2fecc3875008b069e04");
 const SENSOR2_2IMU = hex("00db0afb3b00fc33020181f89a020201551d31fdb2fecc3875008b069e04");
 
 // HXW reports its model as "MC3" over BLE, the dongle calls it "mc3s"
-const HXW_DEVICE: FakeDevice = { localName: "HaritoraXW-A2E987", serial: "A2E987", model: "MC3", version: "1.0.28" };
+const HXW_DEVICE: FakeDevice = { localName: "HaritoraXW-AAAAA7", serial: "AAAAA7", model: "MC3", version: "1.0.28" };
 
 class FakeBleBackend implements BleBackend {
     readonly peripherals: BlePeripheralSummary[] = [
-        { id: "ble-1", localName: "HaritoraX2-C1M8W0", rssi: -52 },
+        { id: "ble-1", localName: "HaritoraX2-BBBBB0", rssi: -52 },
         { id: "other", localName: "JBL Flip 4", rssi: -80 },
     ];
     readonly writes: Array<{ endpointId: string; characteristic: BleCharacteristic; data: number[] }> = [];
@@ -124,7 +124,7 @@ interface FakeDevice {
     version: string;
 }
 
-const HX2_DEVICE: FakeDevice = { localName: "HaritoraX2-C1M8W0", serial: "C1M8W0", model: "MC4B", version: "1.0.30" };
+const HX2_DEVICE: FakeDevice = { localName: "HaritoraX2-BBBBB0", serial: "BBBBB0", model: "MC4B", version: "1.0.30" };
 
 function identityFrames(device: FakeDevice): Array<[BleCharacteristic, Uint8Array]> {
     return [
@@ -166,9 +166,9 @@ async function connected(device: FakeDevice = HX2_DEVICE) {
 
 describe("BLE protocol", () => {
     it("parses HaritoraXW/HaritoraX2 local names", () => {
-        assert.deepEqual(parseBleDeviceName("HaritoraX2-C1M8W0"), {
+        assert.deepEqual(parseBleDeviceName("HaritoraX2-BBBBB0"), {
             model: "x2",
-            localName: "HaritoraX2-C1M8W0",
+            localName: "HaritoraX2-BBBBB0",
         });
         assert.deepEqual(parseBleDeviceName("haritoraxw-ABC123"), {
             model: "wireless",
@@ -295,26 +295,26 @@ describe("BLE device", () => {
             [["ble-1", "x2", "ble"]],
         );
         assert.equal(found[0]?.rssi, -52);
-        assert.equal(found[0]?.displayName, "HaritoraX2-C1M8W0");
+        assert.equal(found[0]?.displayName, "HaritoraX2-BBBBB0");
     });
 
     it("registers a device, trackers, settings and battery from initial reads", async () => {
         const { app, infos } = await connected();
 
         assert.equal(infos.length, 1);
-        assert.equal(infos[0]?.deviceId, "C1M8W0");
+        assert.equal(infos[0]?.deviceId, "BBBBB0");
         assert.equal(infos[0]?.version, "1.0.30");
         assert.equal(infos[0]?.model, "MC4B");
         assert.equal(infos[0]?.imuCount, 1);
 
-        const device = app.getDevice("C1M8W0");
+        const device = app.getDevice("BBBBB0");
         assert.ok(device);
         assert.equal(device.model, "x2");
         assert.equal(device.connection, "ble");
         assert.equal(device.imuCount, 1);
         assert.deepEqual(
             device.trackers.map((tracker) => [tracker.trackerId, tracker.bodyPart]),
-            [["C1M8W0:0", "leftElbow"]],
+            [["BBBBB0:0", "leftElbow"]],
         );
         assert.deepEqual(device.settings, {
             sensorMode: 2,
@@ -330,10 +330,10 @@ describe("BLE device", () => {
     it("registers an HXW over BLE, which reports its model as MC3", async () => {
         const { app } = await connected(HXW_DEVICE);
 
-        const device = app.getDevice("A2E987");
+        const device = app.getDevice("AAAAA7");
         assert.equal(device?.model, "wireless");
         assert.equal(device?.version, "1.0.28");
-        assert.equal(app.getTracker("A2E987:0")?.bodyPart, "leftElbow");
+        assert.equal(app.getTracker("AAAAA7:0")?.bodyPart, "leftElbow");
     });
 
     it("skips sensor from the start once the firmware version proves sensor2 exists", async () => {
@@ -347,7 +347,7 @@ describe("BLE device", () => {
         assert.deepEqual(samples, []);
 
         backend.emit("ble-1", "sensor2", SENSOR2_2IMU.slice(0, 16));
-        assert.deepEqual(samples, ["C1M8W0:0"]);
+        assert.deepEqual(samples, ["BBBBB0:0"]);
     });
 
     it("gates sensor2 on the HXW firmware version", async () => {
@@ -355,7 +355,7 @@ describe("BLE device", () => {
         const oldSamples: string[] = [];
         old.app.on("imu", (sample) => oldSamples.push(sample.trackerId));
         old.backend.emit("ble-1", "sensor", SINGLE_IMU);
-        assert.deepEqual(oldSamples, ["A2E987:0"]);
+        assert.deepEqual(oldSamples, ["AAAAA7:0"]);
 
         const current = await connected(HXW_DEVICE);
         const currentSamples: string[] = [];
@@ -395,12 +395,12 @@ describe("BLE device", () => {
         assert.deepEqual(
             samples.map((sample) => [sample.trackerId, sample.role]),
             [
-                ["C1M8W0:0", "ankle"],
-                ["C1M8W0:1", "knee"],
+                ["BBBBB0:0", "ankle"],
+                ["BBBBB0:1", "knee"],
             ],
         );
         assert.deepEqual(taps, [0, 0]);
-        assert.equal(app.getTracker("C1M8W0:1")?.mag, "bad");
+        assert.equal(app.getTracker("BBBBB0:1")?.mag, "bad");
     });
 
     it("reports the range in millimetres, decoded for the tracker model", async () => {
@@ -464,10 +464,10 @@ describe("BLE device", () => {
         backend.emit("ble-1", "secondary-button", byte(1));
         backend.emit("ble-1", "battery-level", byte(70));
 
-        assert.deepEqual(mags, ["C1M8W0:0:great"]);
-        assert.deepEqual(buttons, [{ deviceId: "C1M8W0", button: "sub" }]);
-        assert.equal(app.getDevice("C1M8W0")?.battery?.level, 70);
-        assert.equal(app.getDevice("C1M8W0")?.battery?.voltage, 4032);
+        assert.deepEqual(mags, ["BBBBB0:0:great"]);
+        assert.deepEqual(buttons, [{ deviceId: "BBBBB0", button: "sub" }]);
+        assert.equal(app.getDevice("BBBBB0")?.battery?.level, 70);
+        assert.equal(app.getDevice("BBBBB0")?.battery?.voltage, 4032);
     });
 
     it("emits mag, tap and accel accuracy from sensor2 and 00dbc401", async () => {
@@ -497,8 +497,8 @@ describe("BLE device", () => {
         // mag was already "okay" from the magnetometer characteristic at connect, so only the drop to 0 is a change
         assert.deepEqual(mags, ["veryBad"]);
         assert.deepEqual(accuracy, [3]);
-        assert.equal(app.getTracker("C1M8W0:0")?.tap, 0);
-        assert.equal(app.getTracker("C1M8W0:0")?.accelAccuracy, 3);
+        assert.equal(app.getTracker("BBBBB0:0")?.tap, 0);
+        assert.equal(app.getTracker("BBBBB0:0")?.accelAccuracy, 3);
     });
 
     it("writes BLE settings to the setting characteristics", async () => {
@@ -510,7 +510,7 @@ describe("BLE device", () => {
             sensorAutoCorrection: ["accel", "gyro", "mag"],
             ankleMotionDetection: true,
         };
-        await app.setSettings("C1M8W0", settings);
+        await app.setSettings("BBBBB0", settings);
 
         assert.deepEqual(backend.writes, [
             { endpointId: "ble-1", characteristic: "sensor-mode", data: [5] },
@@ -518,7 +518,7 @@ describe("BLE device", () => {
             { endpointId: "ble-1", characteristic: "auto-calibration", data: [7] },
             { endpointId: "ble-1", characteristic: "tof", data: [1] },
         ]);
-        assert.deepEqual(app.getDevice("C1M8W0")?.settings, settings);
+        assert.deepEqual(app.getDevice("BBBBB0")?.settings, settings);
     });
 
     it("drops the device when the peripheral disconnects", async () => {
@@ -542,7 +542,7 @@ describe("setting the body part over BLE", () => {
     it("writes the id and waits for the tracker to notify the new body part", async () => {
         const { app, backend } = await connected();
 
-        const pending = app.setBodyPart("C1M8W0", "rightAnkle");
+        const pending = app.setBodyPart("BBBBB0", "rightAnkle");
         await settle();
         assert.deepEqual(backend.writes.at(-1), { endpointId: "ble-1", characteristic: "body-part-write", data: [5] });
 
@@ -550,7 +550,7 @@ describe("setting the body part over BLE", () => {
         backend.emit("ble-1", "body-part", byte(5));
         await pending;
 
-        assert.equal(app.getBodyPart("C1M8W0:0"), "rightAnkle");
+        assert.equal(app.getBodyPart("BBBBB0:0"), "rightAnkle");
     });
 
     it("fails when the tracker never notifies the body part", async () => {
@@ -558,7 +558,7 @@ describe("setting the body part over BLE", () => {
 
         mock.timers.enable({ apis: ["setTimeout"] });
         try {
-            const pending = app.setBodyPart("C1M8W0", "rightAnkle").catch((error: unknown) => error);
+            const pending = app.setBodyPart("BBBBB0", "rightAnkle").catch((error: unknown) => error);
             await settle();
             mock.timers.tick(2_000);
 
@@ -571,8 +571,8 @@ describe("setting the body part over BLE", () => {
     it("doesn't wait when the tracker already has that body part, it doesn't notify then", async () => {
         const { app, backend } = await connected();
 
-        // C1M8W0 reports left elbow (7)
-        await app.setBodyPart("C1M8W0", "leftElbow");
+        // BBBBB0 reports left elbow (7)
+        await app.setBodyPart("BBBBB0", "leftElbow");
 
         assert.deepEqual(backend.writes.at(-1), { endpointId: "ble-1", characteristic: "body-part-write", data: [7] });
     });
@@ -581,21 +581,21 @@ describe("setting the body part over BLE", () => {
         // an extra (serial ends in 0), so the base lock doesn't stop the write
         const { app, backend } = await connected({
             ...HXW_DEVICE,
-            localName: "HaritoraXW-A2E980",
-            serial: "A2E980",
+            localName: "HaritoraXW-AAAAA0",
+            serial: "AAAAA0",
             version: "1.0.22",
         });
 
-        await app.setBodyPart("A2E980", "leftKnee");
+        await app.setBodyPart("AAAAA0", "leftKnee");
 
         assert.deepEqual(backend.writes.at(-1), { endpointId: "ble-1", characteristic: "body-part-write", data: [2] });
     });
 
     it("refuses a base tracker on firmware that still has the lock, before writing", async () => {
-        // A2E987 ends in 7, so it came with a body part, and 1.0.27 is the last HXW build with the lock
+        // AAAAA7 ends in 7, so it came with a body part, and 1.0.27 is the last HXW build with the lock
         const { app, backend } = await connected({ ...HXW_DEVICE, version: "1.0.27" });
 
-        const error = (await app.setBodyPart("A2E987", "leftKnee").catch((reason: unknown) => reason)) as {
+        const error = (await app.setBodyPart("AAAAA7", "leftKnee").catch((reason: unknown) => reason)) as {
             code?: string;
         };
         assert.equal(error.code, "NOT_SUPPORTED");
@@ -605,7 +605,7 @@ describe("setting the body part over BLE", () => {
     it("rejects a body part a tracker can't have", async () => {
         const { app } = await connected();
 
-        const error = await app.setBodyPart("C1M8W0", "unassigned").catch((reason: unknown) => reason);
+        const error = await app.setBodyPart("BBBBB0", "unassigned").catch((reason: unknown) => reason);
         assert.equal((error as { code?: string }).code, "NOT_SUPPORTED");
     });
 });
@@ -613,7 +613,7 @@ describe("setting the body part over BLE", () => {
 // wired tracker (MC2B) used over BLE
 function wiredIdentity(options: { calibration?: boolean } = {}): Array<[BleCharacteristic, Uint8Array]> {
     const frames: Array<[BleCharacteristic, Uint8Array]> = [
-        ["serial-number", hex("303230363532310000000000")],
+        ["serial-number", hex("303030303032310000000000")],
         ["software-revision", hex("312e372e31300000000000000000")],
         ["number-of-imu", byte(6)],
         ["model-number", hex("4d43324200000000")],
@@ -632,7 +632,7 @@ function wiredIdentity(options: { calibration?: boolean } = {}): Array<[BleChara
 
 async function connectedWired(options: { calibration?: boolean } = {}) {
     const backend = new FakeBleBackend();
-    backend.peripherals[0] = { id: "ble-1", localName: "HaritoraX1.1B-0206521", rssi: -60 };
+    backend.peripherals[0] = { id: "ble-1", localName: "HaritoraX1.1B-0000021", rssi: -60 };
 
     const connection = new BleConnection(backend, { scanTimeoutMs: 1 });
     const app = createHaritoraX({ connections: [connection], logLevel: "silent" });
@@ -687,13 +687,13 @@ function wiredSerialStub() {
 
 describe("wired tracker over BLE", () => {
     it("recognises the wired tracker names and characteristics", () => {
-        assert.deepEqual(parseBleDeviceName("HaritoraX1.1B-0206521"), {
+        assert.deepEqual(parseBleDeviceName("HaritoraX1.1B-0000021"), {
             model: "wired",
-            localName: "HaritoraX1.1B-0206521",
+            localName: "HaritoraX1.1B-0000021",
         });
-        assert.equal(parseBleDeviceName("HaritoraX1.1-0108013")?.model, "wired");
+        assert.equal(parseBleDeviceName("HaritoraX1.1-0000003")?.model, "wired");
         assert.equal(parseBleDeviceName("HaritoraX-0000001")?.model, "wired");
-        assert.equal(parseBleDeviceName("HaritoraXW-A2E987")?.model, "wireless");
+        assert.equal(parseBleDeviceName("HaritoraXW-AAAAA7")?.model, "wireless");
         assert.equal(parseBleDeviceName("HaritoraX1.1B-"), undefined);
 
         assert.equal(bleCharacteristicFromUuid("ef844766-90a9-11ed-a1eb-0242ac120002"), "sensor-data-control");
@@ -703,7 +703,7 @@ describe("wired tracker over BLE", () => {
     it("registers the tracker from its device information", async () => {
         const { app } = await connectedWired();
 
-        const device = app.getDevice("0206521");
+        const device = app.getDevice("0000021");
         assert.equal(device?.model, "wired");
         assert.equal(device?.version, "1.7.10");
         assert.equal(device?.connection, "ble");
@@ -747,12 +747,12 @@ describe("wired tracker over BLE", () => {
         assert.deepEqual(
             samples.map((sample) => [sample.trackerId, sample.bodyPart, sample.role]),
             [
-                ["0206521:0", "chest", "single"],
-                ["0206521:1", "leftKnee", "single"],
-                ["0206521:2", "leftAnkle", "single"],
-                ["0206521:3", "rightKnee", "single"],
-                ["0206521:4", "rightAnkle", "single"],
-                ["0206521:5", "hip", "single"],
+                ["0000021:0", "chest", "single"],
+                ["0000021:1", "leftKnee", "single"],
+                ["0000021:2", "leftAnkle", "single"],
+                ["0000021:3", "rightKnee", "single"],
+                ["0000021:4", "rightAnkle", "single"],
+                ["0000021:5", "hip", "single"],
             ],
         );
         assert.ok(samples.every((sample) => sample.range === undefined));
@@ -793,12 +793,12 @@ describe("wired tracker over BLE", () => {
 
         backend.emit("ble-1", "magnetometer", bytes("01230123"));
         assert.deepEqual(mags, [
-            "0206521:0:veryBad",
-            "0206521:1:bad",
-            "0206521:2:okay",
-            "0206521:3:great",
-            "0206521:4:veryBad",
-            "0206521:5:bad",
+            "0000021:0:veryBad",
+            "0000021:1:bad",
+            "0000021:2:okay",
+            "0000021:3:great",
+            "0000021:4:veryBad",
+            "0000021:5:bad",
         ]);
 
         assert.equal(bleWiredMagStatusAt(bytes("3"), 0), "great");
@@ -828,7 +828,7 @@ describe("wired tracker over BLE", () => {
         const { app, backend } = await connectedWired();
         backend.writes.length = 0;
 
-        await app.setSettings("0206521", {
+        await app.setSettings("0000021", {
             sensorMode: 1,
             fpsMode: 50,
             sensorAutoCorrection: ["accel", "mag"],
@@ -848,10 +848,10 @@ describe("wired tracker over BLE", () => {
 
     it("skips the calibration write when the tracker has no such characteristic", async () => {
         const { app, backend } = await connectedWired({ calibration: false });
-        assert.equal(app.getDevice("0206521")?.settings, undefined);
+        assert.equal(app.getDevice("0000021")?.settings, undefined);
         backend.writes.length = 0;
 
-        await app.setSettings("0206521", {
+        await app.setSettings("0000021", {
             sensorMode: 2,
             fpsMode: 100,
             sensorAutoCorrection: [],
@@ -878,7 +878,7 @@ describe("wired tracker over BLE", () => {
     it("uses BLE only when it sees the wired tracker, and keeps the serial port when it doesn't", async () => {
         const stub = wiredSerialStub();
         const backend = new FakeBleBackend();
-        backend.peripherals[0] = { id: "ble-1", localName: "HaritoraX1.1B-0206521", rssi: -60 };
+        backend.peripherals[0] = { id: "ble-1", localName: "HaritoraX1.1B-0000021", rssi: -60 };
         const app = createHaritoraX({
             connections: [stub.connection, new BleConnection(backend, { scanTimeoutMs: 1 })],
             logLevel: "silent",
@@ -911,7 +911,7 @@ describe("wired tracker over BLE", () => {
         await app.discover();
         await app.connect("COM9");
 
-        backend.peripherals.push({ id: "ble-1", localName: "HaritoraX1.1B-0206521", rssi: -60 });
+        backend.peripherals.push({ id: "ble-1", localName: "HaritoraX1.1B-0000021", rssi: -60 });
         assert.deepEqual((await app.discover()).map((endpoint) => endpoint.id).sort(), ["COM9", "ble-1"]);
     });
 
@@ -931,16 +931,16 @@ describe("wired tracker over BLE", () => {
         await app.discover();
         await app.connect("COM9");
         stub.emit('s:{"imu_mode":1,"imu_num":5,"magf_status":"33333"}');
-        stub.emit('i:{"model":"MC2","version":"1.7.8","serial no":"0108013"}');
+        stub.emit('i:{"model":"MC2","version":"1.7.8","serial no":"0000003"}');
 
-        backend.peripherals.push({ id: "ble-1", localName: "HaritoraX1.1B-0206521", rssi: -60 });
+        backend.peripherals.push({ id: "ble-1", localName: "HaritoraX1.1B-0000021", rssi: -60 });
         await app.discover();
         await app.connect("ble-1");
-        assert.equal(app.getDevice("0108013")?.connection, "serial");
-        assert.equal(app.getDevice("0206521")?.connection, "ble");
+        assert.equal(app.getDevice("0000003")?.connection, "serial");
+        assert.equal(app.getDevice("0000021")?.connection, "ble");
         backend.writes.length = 0;
 
-        await app.setSettings("0108013", {
+        await app.setSettings("0000003", {
             sensorMode: 1,
             fpsMode: 100,
             sensorAutoCorrection: [],
@@ -950,7 +950,7 @@ describe("wired tracker over BLE", () => {
         assert.ok(stub.writes.length > 0);
         assert.deepEqual(backend.writes, []);
         // the BLE tracker was not written to, so its settings are not claimed as applied
-        assert.equal(app.getDevice("0206521")?.settings?.fpsMode, 100);
-        assert.equal(app.getDevice("0206521")?.settings?.sensorAutoCorrection.length, 3);
+        assert.equal(app.getDevice("0000021")?.settings?.fpsMode, 100);
+        assert.equal(app.getDevice("0000021")?.settings?.sensorAutoCorrection.length, 3);
     });
 });
