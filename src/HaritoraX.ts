@@ -118,8 +118,17 @@ export class HaritoraX {
         );
 
         const merged = new Map<string, EndpointDescriptor>();
+
+        // allow previous endpoints to show in list if still open, else they can't be disconected with disconnect() and will never show up in discover() again
+        const previousOwners = new Map(this.#endpointOwners);
+        const previousHandlers = new Map(this.#handlers);
         this.#endpointOwners.clear();
         this.#handlers.clear();
+
+        for (const endpointId of this.#open) {
+            const previous = this.#endpoints.find((descriptor) => descriptor.id === endpointId);
+            if (previous) merged.set(endpointId, previous);
+        }
 
         // wired tracker over BLE still shows BTSPP device, so prioritize BLE over serial for wired trackers
         const wiredOnBle = results.some(({ found }) =>
@@ -147,6 +156,13 @@ export class HaritoraX {
 
                 this.#handlers.set(descriptor.id, handler);
             }
+        }
+
+        for (const endpointId of merged.keys()) {
+            const owner = this.#endpointOwners.get(endpointId) ?? previousOwners.get(endpointId);
+            const handler = this.#handlers.get(endpointId) ?? previousHandlers.get(endpointId);
+            if (owner) this.#endpointOwners.set(endpointId, owner);
+            if (handler) this.#handlers.set(endpointId, handler);
         }
 
         this.#endpoints = [...merged.values()];

@@ -177,6 +177,57 @@ describe("container discovery and connection", () => {
         assert.equal(serial.opened.size, 0);
     });
 
+    it("keeps an open endpoint that a later scan does not see", async () => {
+        // a connected BLE tracker stopped advertising, so the scan finds nothing,
+        // but the endpoint must stay owned and disconnectable
+        const found: EndpointDescriptor[] = [
+            { id: "ble-1", connection: "ble", displayName: "HaritoraX2-BBBBB0" },
+        ];
+        const opened = new Set<string>();
+
+        const ble: Connection = {
+            kind: "ble",
+            list: () => Promise.resolve(found),
+            open: (endpointId) => {
+                opened.add(endpointId);
+                return Promise.resolve();
+            },
+            close: (endpointId) => {
+                opened.delete(endpointId);
+                return Promise.resolve();
+            },
+            write: () => Promise.resolve(),
+            onData: () => () => {},
+            onLost: () => () => {},
+            onRssi: () => () => {},
+            dispose: () => Promise.resolve(),
+        };
+
+        const app = createHaritoraX({ connections: [ble], logLevel: "silent" });
+        const disconnects: Array<{ endpointId: string; reason: string }> = [];
+        app.on("endpoint:disconnected", (event) => disconnects.push(event));
+
+        await app.discover();
+        await app.connect("ble-1");
+
+        found.length = 0;
+        const again = await app.discover();
+
+        assert.deepEqual(
+            app.getEndpoints().map((descriptor) => descriptor.id),
+            ["ble-1"],
+        );
+        assert.deepEqual(
+            again.map((descriptor) => descriptor.id),
+            ["ble-1"],
+        );
+
+        await app.disconnect("ble-1");
+
+        assert.deepEqual(disconnects, [{ endpointId: "ble-1", reason: "requested" }]);
+        assert.equal(opened.size, 0);
+    });
+
     it("surfaces a connection loss as device:disconnected", async () => {
         const serial = memoryConnection(["COM4"]);
         const app = createHaritoraX({ connections: [serial], logLevel: "silent" });
