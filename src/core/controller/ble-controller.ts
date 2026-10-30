@@ -43,6 +43,7 @@ import type {
 const BLE_SLOT = "0";
 const BODY_PART_TIMEOUT_MS = 2_000;
 const MAX_BLE_BODY_PART_ID = 15;
+const SENSOR2_FALLBACK_MS = 250;
 
 export interface BleControllerOptions {
     emitter: Emitter;
@@ -124,13 +125,17 @@ export class BleController implements ProtocolHandler {
             }
             // take priority over "sensor" if available, includes mag status and tap count
             case "sensor2":
-                state.sensor2Seen = true;
                 this.#onSensor2(state, data);
                 break;
             case "sensor":
                 if (state.model === "wired") this.#onWiredSensor(state, data);
-                else if (!state.sensor2Seen && !(state.model && hasSensor2(state.model, state.version)))
-                    this.#onSensor(state, data);
+                else {
+                    const now = Date.now();
+                    state.sensorStartedAt ??= now;
+                    const expectsSensor2 = state.model && hasSensor2(state.model, state.version);
+                    const preferredAt = state.sensor2LastSeen ?? (expectsSensor2 ? state.sensorStartedAt : undefined);
+                    if (preferredAt === undefined || now - preferredAt >= SENSOR2_FALLBACK_MS) this.#onSensor(state, data);
+                }
                 break;
             case "magnetometer": {
                 const device = this.#ensureDevice(state);
@@ -319,10 +324,13 @@ export class BleController implements ProtocolHandler {
 
     // IMU data, mag status, taps, ToF range
     #onSensor2(state: BleState, data: Uint8Array): void {
+        const slices = splitBleSensor2(data);
+        if (slices.length === 0) return;
+        state.sensor2LastSeen = Date.now();
+
         const device = this.#ensureDevice(state);
         if (!device) return;
 
-        const slices = splitBleSensor2(data);
         this.#ensureImuCount(state, device, slices.length);
 
         for (const slice of slices) {
@@ -513,7 +521,8 @@ function isNoWiredEvent(state: BleState, data: Uint8Array): boolean {
 
 interface BleState {
     endpointId: string;
-    sensor2Seen?: boolean;
+    sensorStartedAt?: number;
+    sensor2LastSeen?: number;
     serial?: string;
     model?: TrackerModel;
     device?: DeviceSnapshot;

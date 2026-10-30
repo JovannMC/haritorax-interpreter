@@ -403,6 +403,71 @@ describe("BLE device", () => {
         assert.equal(app.getTracker("BBBBB0:1")?.mag, "bad");
     });
 
+    it("keeps both combo IMUs alive when sensor2 is advertised but never streams", async () => {
+        mock.timers.enable({ apis: ["Date", "setTimeout"] });
+        const { app, backend } = await connected();
+        try {
+            const samples: string[] = [];
+            const lost: string[] = [];
+            app.on("imu", (sample) => samples.push(sample.trackerId));
+            app.on("tracker:disconnected", ({ trackerId }) => lost.push(trackerId));
+
+            backend.emit("ble-1", "sensor", SENSOR_2IMU);
+            assert.deepEqual(samples, []);
+            // Longer than the registry's 10-second inactivity timeout.
+            for (let tick = 0; tick < 120; tick++) {
+                mock.timers.tick(100);
+                backend.emit("ble-1", "sensor", SENSOR_2IMU);
+            }
+            assert.ok(samples.includes("BBBBB0:0"));
+            assert.ok(samples.includes("BBBBB0:1"));
+            assert.deepEqual(lost, []);
+            assert.equal(app.getTracker("BBBBB0:1")?.connected, true);
+        } finally {
+            await app.dispose();
+            mock.timers.reset();
+        }
+    });
+
+    it("falls back after sensor2 stalls and prefers it again when it recovers", async () => {
+        mock.timers.enable({ apis: ["Date", "setTimeout"] });
+        const { app, backend } = await connected();
+        try {
+            const samples: string[] = [];
+            app.on("imu", (sample) => samples.push(sample.trackerId));
+            backend.emit("ble-1", "sensor2", SENSOR2_2IMU);
+            backend.emit("ble-1", "sensor", SENSOR_2IMU);
+            assert.equal(samples.length, 2);
+
+            mock.timers.tick(300);
+            backend.emit("ble-1", "sensor", SENSOR_2IMU);
+            assert.equal(samples.length, 4);
+            backend.emit("ble-1", "sensor2", SENSOR2_2IMU);
+            backend.emit("ble-1", "sensor", SENSOR_2IMU);
+            assert.equal(samples.length, 6);
+        } finally {
+            await app.dispose();
+            mock.timers.reset();
+        }
+    });
+
+    it("does not let malformed sensor2 notifications suppress valid basic frames", async () => {
+        mock.timers.enable({ apis: ["Date", "setTimeout"] });
+        const { app, backend } = await connected();
+        try {
+            const samples: string[] = [];
+            app.on("imu", (sample) => samples.push(sample.trackerId));
+            backend.emit("ble-1", "sensor", SENSOR_2IMU);
+            mock.timers.tick(300);
+            backend.emit("ble-1", "sensor2", new Uint8Array(20));
+            backend.emit("ble-1", "sensor", SENSOR_2IMU);
+            assert.deepEqual(samples, ["BBBBB0:0", "BBBBB0:1"]);
+        } finally {
+            await app.dispose();
+            mock.timers.reset();
+        }
+    });
+
     it("reports the range in millimetres, decoded for the tracker model", async () => {
         const hx2 = await connected();
         const hx2Ranges: Array<number | undefined> = [];
