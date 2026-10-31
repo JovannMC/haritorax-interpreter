@@ -328,7 +328,7 @@ export class BleController implements ProtocolHandler {
         if (slices.length === 0) return;
         state.sensor2LastSeen = Date.now();
 
-        const device = this.#ensureDevice(state);
+        const device = this.#ensureDevice(state, true);
         if (!device) return;
 
         this.#ensureImuCount(state, device, slices.length);
@@ -343,10 +343,12 @@ export class BleController implements ProtocolHandler {
 
     // only IMU data and ToF range
     #onSensor(state: BleState, data: Uint8Array): void {
-        const device = this.#ensureDevice(state);
+        const slices = splitBleImu(data);
+        if (slices.length === 0) return;
+
+        const device = this.#ensureDevice(state, true);
         if (!device) return;
 
-        const slices = splitBleImu(data);
         this.#ensureImuCount(state, device, slices.length);
 
         for (const slice of slices) {
@@ -358,10 +360,13 @@ export class BleController implements ProtocolHandler {
     }
 
     #onWiredSensor(state: BleState, data: Uint8Array): void {
-        const device = this.#ensureDevice(state);
+        const slices = splitWiredImuBytes(data, this.#parts(state).length, state.settings.ankle === true);
+        if (slices.length === 0) return;
+
+        const device = this.#ensureDevice(state, true);
         if (!device) return;
 
-        for (const slice of splitWiredImuBytes(data, device.trackers.length, state.settings.ankle === true)) {
+        for (const slice of slices) {
             const tracker = device.trackers[slice.index];
             if (!tracker || !this.#registry.trackerSeen(tracker.trackerId)) continue;
 
@@ -447,9 +452,10 @@ export class BleController implements ProtocolHandler {
         });
     }
 
-    #ensureDevice(state: BleState): DeviceSnapshot | undefined {
-        // we can cache the device snapshot to return it instead of looking it up in the registry every time
-        if (state.device) return state.device;
+    #ensureDevice(state: BleState, activate = false): DeviceSnapshot | undefined {
+        if (state.device?.endpointId === state.endpointId && this.#registry.getDevice(state.device.deviceId) === state.device)
+            return state.device;
+        state.device = undefined;
         if (!state.serial || !state.model) return undefined;
 
         const parts = this.#parts(state);
@@ -467,19 +473,29 @@ export class BleController implements ProtocolHandler {
             return existing;
         }
 
-        const device = this.#registry.register({
-            deviceId: state.serial,
-            endpointId: state.endpointId,
-            slot: BLE_SLOT,
-            model: state.model,
-            firmwareModel: state.firmwareModel ?? "",
-            version: state.version ?? "",
-            reportedImuCount: state.imuCount,
-            connection: this.#connectionKind(state.endpointId),
-            parts,
-        });
+        const device = this.#registry.register(
+            {
+                deviceId: state.serial,
+                endpointId: state.endpointId,
+                slot: BLE_SLOT,
+                model: state.model,
+                firmwareModel: state.firmwareModel ?? "",
+                version: state.version ?? "",
+                reportedImuCount: state.imuCount,
+                connection: this.#connectionKind(state.endpointId),
+                parts,
+            },
+            activate,
+        );
 
+        if (device.endpointId !== state.endpointId) return undefined;
         state.device = device;
+
+        if (activate) {
+            this.#maybeBattery(state);
+            this.#maybeSettings(state);
+        }
+
         return device;
     }
 

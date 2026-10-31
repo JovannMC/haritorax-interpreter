@@ -134,19 +134,23 @@ export class WiredController implements ProtocolHandler {
     }
 
     #register(endpointId: string, info: ParsedInfo, state: WiredState): void {
-        const device = this.#registry.register({
-            deviceId: info.serialNumber,
-            endpointId,
-            slot: WIRED_SLOT,
-            model: modelFromFirmware(info.model),
-            firmwareModel: info.model,
-            version: info.version,
-            reportedImuCount: info.imuCount,
-            connection: this.#connectionKind(endpointId),
-            parts: state.parts,
-            comm: info.comm,
-            commNext: info.commNext,
-        });
+        const device = this.#registry.register(
+            {
+                deviceId: info.serialNumber,
+                endpointId,
+                slot: WIRED_SLOT,
+                model: modelFromFirmware(info.model),
+                firmwareModel: info.model,
+                version: info.version,
+                reportedImuCount: info.imuCount,
+                connection: this.#connectionKind(endpointId),
+                parts: state.parts,
+                comm: info.comm,
+                commNext: info.commNext,
+            },
+            false,
+        );
+        if (device.endpointId !== endpointId) return;
 
         this.#applyMag(device.deviceId, state);
         this.#applyState(device, state);
@@ -179,17 +183,27 @@ export class WiredController implements ProtocolHandler {
     }
 
     #onImu(endpointId: string, payload: string): void {
-        const device = this.#registry.deviceAt(endpointId, WIRED_SLOT);
-        if (!device || device.trackers.length === 0) return;
+        const input = this.#registry.registrationAt(endpointId, WIRED_SLOT);
+        if (!input) return;
 
-        this.#emitImu(device, splitWiredImu(payload, device.trackers.length));
+        const parts = this.#states.get(endpointId)?.parts ?? input.parts;
+        const slices = splitWiredImu(payload, parts.length);
+        if (slices.length === 0) return;
+
+        const device = this.#registry.deviceAt(endpointId, WIRED_SLOT) ?? this.#registry.register({ ...input, parts });
+        this.#emitImu(device, slices);
     }
 
     #onFloatImu(endpointId: string, payload: string): void {
-        const device = this.#registry.deviceAt(endpointId, WIRED_SLOT);
-        if (!device || device.trackers.length === 0) return;
+        const input = this.#registry.registrationAt(endpointId, WIRED_SLOT);
+        if (!input) return;
 
-        this.#emitImu(device, splitWiredFloatImu(payload, device.trackers.length));
+        const parts = this.#states.get(endpointId)?.parts ?? input.parts;
+        const slices = splitWiredFloatImu(payload, parts.length);
+        if (slices.length === 0) return;
+
+        const device = this.#registry.deviceAt(endpointId, WIRED_SLOT) ?? this.#registry.register({ ...input, parts });
+        this.#emitImu(device, slices);
     }
 
     #emitImu(device: DeviceSnapshot, slices: readonly WiredImuSlice[]): void {

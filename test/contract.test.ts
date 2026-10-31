@@ -180,9 +180,7 @@ describe("container discovery and connection", () => {
     it("keeps an open endpoint that a later scan does not see", async () => {
         // a connected BLE tracker stopped advertising, so the scan finds nothing,
         // but the endpoint must stay owned and disconnectable
-        const found: EndpointDescriptor[] = [
-            { id: "ble-1", connection: "ble", displayName: "HaritoraX2-BBBBB0" },
-        ];
+        const found: EndpointDescriptor[] = [{ id: "ble-1", connection: "ble", displayName: "HaritoraX2-BBBBB0" }];
         const opened = new Set<string>();
 
         const ble: Connection = {
@@ -308,7 +306,10 @@ describe("container discovery and connection", () => {
         finish!();
         const [a, b, c] = await Promise.all([first, second, third]);
 
-        assert.deepEqual(a.map((descriptor) => descriptor.id), ["ble-1"]);
+        assert.deepEqual(
+            a.map((descriptor) => descriptor.id),
+            ["ble-1"],
+        );
         assert.equal(a, b, "every caller gets the same settled result");
         assert.equal(a, c);
 

@@ -456,15 +456,19 @@ export class DongleController {
             // make sure to not mark tracker lost if its BLE (not serial/dongle)
             if (device.connection !== this.#connectionKind(endpointId)) return;
 
-            if (!this.#registry.markTrackerLost(tracker.trackerId, "remote")) return;
-            this.#log.warn(`Tracker ${tracker.trackerId} lost, dongle ${endpointId}:${slot} is searching`);
+            let lost = false;
+            for (const imu of device.trackers) {
+                lost = this.#registry.markTrackerLost(imu.trackerId, "remote") || lost;
+            }
+
+            if (lost) this.#log.warn(`Device ${device.deviceId} lost, dongle ${endpointId}:${slot} is searching`);
+
             return;
         }
 
-        this.#registry.trackerSeen(tracker.trackerId);
-
         const decoded = decodeTrackerRssi(payload);
         if (!decoded) return;
+        this.#registry.trackerSeen(tracker.trackerId);
         this.#registry.setRssi(tracker.trackerId, decoded.dongle, decoded.sensor);
     }
 
@@ -480,17 +484,20 @@ export class DongleController {
         const identity = this.#identities.get(endpointSlotKey(endpointId, slot));
         const parts = identity ? bodyPartsFor(identity.bodyPart, imuCount) : unassignedParts(imuCount);
 
-        this.#registry.register({
-            deviceId: serial,
-            endpointId,
-            slot,
-            model,
-            firmwareModel: parsed.model,
-            version: parsed.version,
-            reportedImuCount: parsed.imuCount,
-            connection: this.#connectionKind(endpointId),
-            parts,
-        });
+        this.#registry.register(
+            {
+                deviceId: serial,
+                endpointId,
+                slot,
+                model,
+                firmwareModel: parsed.model,
+                version: parsed.version,
+                reportedImuCount: parsed.imuCount,
+                connection: this.#connectionKind(endpointId),
+                parts,
+            },
+            false,
+        );
 
         const dongleVersion = this.#dongleVersions.get(endpointId);
         if (model === "x2" && imuCount >= 2 && dongleCarriesTwoImus(dongleVersion) === false) {
@@ -611,10 +618,19 @@ export class DongleController {
     }
 
     #onImu(endpointId: string, slot: string, payload: string): void {
-        const device = this.#registry.deviceAt(endpointId, slot);
-        if (!device) return; // drop packet if device is unidentified still
+        const input = this.#registry.registrationAt(endpointId, slot);
+        if (!input) return; // drop packet if device is unidentified still
+        const slices = splitDongleImu(payload, input.parts.length);
+        if (slices.length === 0) return;
+        const identity = this.#identities.get(endpointSlotKey(endpointId, slot));
+        const device =
+            this.#registry.deviceAt(endpointId, slot) ??
+            this.#registry.register({
+                ...input,
+                parts: identity ? bodyPartsFor(identity.bodyPart, input.parts.length) : input.parts,
+            });
 
-        for (const slice of splitDongleImu(payload, device.trackers.length)) {
+        for (const slice of slices) {
             this.#emitSample(
                 device,
                 slice.index,

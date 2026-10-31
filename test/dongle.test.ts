@@ -596,7 +596,7 @@ describe("tracker identity", () => {
         ]);
     });
 
-    it("keeps a tracker connected while IMU frames arrive despite searching status", async () => {
+    it("disconnects on searching status and reconnects when IMU data resumes", async () => {
         const { app, serial } = await connected();
         mock.timers.enable({ apis: ["setTimeout", "Date"] });
         try {
@@ -605,18 +605,20 @@ describe("tracker identity", () => {
             const reconnected: string[] = [];
             app.on("tracker:disconnected", (event) => disconnected.push({ trackerId: event.trackerId, reason: event.reason }));
             app.on("tracker:connected", (event) => reconnected.push(event.trackerId));
-            for (let i = 0; i < 12; i++) {
-                serial.emitFrame("a0:7f7f7f7f7f7f");
-                serial.emitFrame("x0:QAV1/Is6EBngAaf/bAkCAA==");
-                mock.timers.tick(1_000);
-            }
-            assert.equal(app.getTracker("AAAAA7:0")?.connected, true);
-            assert.deepEqual(disconnected, []);
-            assert.deepEqual(reconnected, []);
+
             serial.emitFrame("a0:7f7f7f7f7f7f");
-            mock.timers.tick(9_000);
             assert.equal(app.getTracker("AAAAA7:0")?.connected, false);
-            assert.deepEqual(disconnected, [{ trackerId: "AAAAA7:0", reason: "timeout" }]);
+            assert.deepEqual(disconnected, [{ trackerId: "AAAAA7:0", reason: "remote" }]);
+
+            serial.emitFrame("x0:QAV1/Is6EBngAaf/bAkCAA==");
+            assert.equal(app.getTracker("AAAAA7:0")?.connected, true);
+            assert.deepEqual(reconnected, ["AAAAA7:0"]);
+
+            mock.timers.tick(10_000);
+            assert.deepEqual(disconnected, [
+                { trackerId: "AAAAA7:0", reason: "remote" },
+                { trackerId: "AAAAA7:0", reason: "timeout" },
+            ]);
         } finally {
             mock.timers.reset();
             await app.dispose();

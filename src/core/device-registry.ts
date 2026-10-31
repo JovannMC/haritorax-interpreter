@@ -41,7 +41,7 @@ export class DeviceRegistry {
 
     // deviceId is the device serial number
     readonly #devices = new Map<string, DeviceSnapshot>();
-    readonly #deviceByEndpointSlot = new Map<string, string>();
+    readonly #registrations = new Map<string, DeviceRegistration>();
     readonly #trackers = new Map<string, TrackerState>();
 
     constructor(options: DeviceRegistryOptions) {
@@ -74,20 +74,26 @@ export class DeviceRegistry {
     }
 
     deviceAt(endpointId: string, slot: string): DeviceSnapshot | undefined {
-        const deviceId = this.#deviceByEndpointSlot.get(endpointSlotKey(endpointId, slot));
-        return deviceId === undefined ? undefined : this.#devices.get(deviceId);
+        const registration = this.registrationAt(endpointId, slot);
+        const device = registration && this.#devices.get(registration.deviceId);
+        return device?.endpointId === endpointId && device.slot === slot ? device : undefined;
+    }
+
+    registrationAt(endpointId: string, slot: string): DeviceRegistration | undefined {
+        return this.#registrations.get(endpointSlotKey(endpointId, slot));
     }
 
     /*
      * device lifecycle
      */
 
-    // create, refresh, move, or replace a device from an info packet
-    register(input: DeviceRegistration): DeviceSnapshot {
+    // create, refresh, move, or replace a device from an info packet (of the same endpoint/slot) or a new registration (of the same deviceId)
+    register(input: DeviceRegistration, activate = true): DeviceSnapshot {
         const { deviceId, endpointId, slot } = input;
         const imuCount = input.parts.length;
         const key = endpointSlotKey(endpointId, slot);
-        const previousSerial = this.#deviceByEndpointSlot.get(key);
+        const previousSerial = this.#registrations.get(key)?.deviceId;
+        this.#registrations.set(key, input);
 
         // if a different serial is on this endpoint/slot, disconnect and replace it
         // e.g. different dongle, different device paired to same slot
@@ -95,7 +101,8 @@ export class DeviceRegistry {
             this.#log.warn(`Replacing device "${previousSerial}" on ${key} with "${deviceId}"`);
 
             const previous = this.#devices.get(previousSerial);
-            if (previous) {
+            if (previous?.endpointId === endpointId && previous.slot === slot) {
+                this.#log.info(`Disconnecting previous device ${previousSerial} on ${key}`);
                 for (const tracker of previous.trackers) this.disconnectTracker(tracker, "requested");
                 this.#devices.delete(previousSerial);
                 this.#emitter.emit("device:disconnected", {
@@ -112,14 +119,26 @@ export class DeviceRegistry {
         if (existing) {
             const oldKey = endpointSlotKey(existing.endpointId, existing.slot);
 
-            // ..so update the endpoint/slot mapping if it changed
             if (oldKey !== key) {
-                this.#deviceByEndpointSlot.delete(oldKey);
-                this.#deviceByEndpointSlot.set(key, deviceId);
+                if (!activate) return existing;
+                this.#log.info(`Moved ${deviceId} from ${oldKey} (${existing.connection}) to ${key} (${input.connection})`);
+
                 existing.endpointId = endpointId;
                 existing.slot = slot;
                 existing.connection = input.connection;
-                for (const tracker of existing.trackers) tracker.endpointId = endpointId;
+
+                for (const tracker of existing.trackers) {
+                    tracker.endpointId = endpointId;
+                    tracker.rssi = undefined;
+                    tracker.sensorRssi = undefined;
+                }
+
+                if (
+                    existing.trackers.length !== input.parts.length ||
+                    existing.trackers.some((tracker, index) => tracker.bodyPart !== input.parts[index])
+                ) {
+                    this.setTrackers(deviceId, input.parts);
+                }
             }
 
             existing.model = input.model;
@@ -143,7 +162,6 @@ export class DeviceRegistry {
         };
 
         this.#devices.set(deviceId, device);
-        this.#deviceByEndpointSlot.set(key, deviceId);
 
         this.#emitter.emit("device:connected", {
             deviceId,
@@ -305,6 +323,10 @@ export class DeviceRegistry {
     }
 
     removeDevicesAtEndpoint(endpointId: string, reason: DisconnectReason): void {
+        for (const [key, input] of this.#registrations) {
+            if (input.endpointId === endpointId) this.#registrations.delete(key);
+        }
+
         const devices = [...this.#devices.values()].filter((device) => device.endpointId === endpointId);
         if (devices.length === 0) return;
 
@@ -314,7 +336,6 @@ export class DeviceRegistry {
 
         for (const device of devices) {
             this.#devices.delete(device.deviceId);
-            this.#deviceByEndpointSlot.delete(endpointSlotKey(device.endpointId, device.slot));
             this.#emitter.emit("device:disconnected", {
                 deviceId: device.deviceId,
                 endpointId: device.endpointId,
@@ -328,7 +349,7 @@ export class DeviceRegistry {
     dispose(): void {
         for (const tracker of this.#trackers.values()) clearTrackerTimeout(tracker);
         this.#trackers.clear();
-        this.#deviceByEndpointSlot.clear();
+        this.#registrations.clear();
         this.#devices.clear();
     }
 
