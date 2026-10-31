@@ -104,11 +104,14 @@ export class SerialConnection implements Connection {
         const manualPaths = new Set(this.#serialPorts);
         const wiredCandidates: PortSummary[] = [];
         const detectedPaths = new Set<string>();
+        const wiredEndpoints = new Set([...this.#ports.keys()].filter((path) => this.#wiredEndpoints.has(path)));
 
         for (const port of ports) {
             const dongle = DONGLE_IDS[`${port.vendorId}:${port.productId}`.toLowerCase()];
             if (dongle) {
                 detectedPaths.add(port.path);
+                this.#wiredEndpoints.delete(port.path);
+                wiredEndpoints.delete(port.path);
                 endpoints.push({ id: port.path, connection: this.kind, displayName: `${dongle} (${port.path})`, dongle });
             } else if (this.#includeWired && !manualPaths.has(port.path) && isWiredPort(port)) {
                 wiredCandidates.push(port);
@@ -120,9 +123,28 @@ export class SerialConnection implements Connection {
         }
 
         for (const port of manualCandidates) {
+            if (this.#ports.has(port.path)) {
+                const wired = this.#wiredEndpoints.has(port.path);
+                if (wired) {
+                    endpoints.push({
+                        id: port.path,
+                        connection: this.kind,
+                        displayName: `HaritoraX Wired (${port.path})`,
+                        model: "wired",
+                    });
+                } else {
+                    endpoints.push({
+                        id: port.path,
+                        connection: this.kind,
+                        displayName: `Serial (${port.path})`,
+                    });
+                }
+                continue;
+            }
+
             const probe = await this.#probeSerialPort(port);
             if (probe.wired) {
-                this.#wiredEndpoints.add(port.path);
+                wiredEndpoints.add(port.path);
                 endpoints.push({
                     id: port.path,
                     connection: this.kind,
@@ -139,8 +161,20 @@ export class SerialConnection implements Connection {
         }
 
         for (const port of wiredCandidates) {
+            if (this.#ports.has(port.path)) {
+                if (this.#wiredEndpoints.has(port.path)) {
+                    endpoints.push({
+                        id: port.path,
+                        connection: this.kind,
+                        displayName: `HaritoraX Wired (${port.path})`,
+                        model: "wired",
+                    });
+                }
+                continue;
+            }
+
             if ((await this.#probeSerialPort(port)).wired) {
-                this.#wiredEndpoints.add(port.path);
+                wiredEndpoints.add(port.path);
                 endpoints.push({
                     id: port.path,
                     connection: this.kind,
@@ -149,6 +183,9 @@ export class SerialConnection implements Connection {
                 });
             }
         }
+
+        this.#wiredEndpoints.clear();
+        for (const path of wiredEndpoints) this.#wiredEndpoints.add(path);
 
         return endpoints;
     }
@@ -204,7 +241,7 @@ export class SerialConnection implements Connection {
             this.#log.debug(`Wired probe failed on ${port.path}`, { error: String(error) });
             return { wired: false };
         } finally {
-            if (handle) void this.#closeHandle(handle);
+            if (handle) await this.#closeHandle(handle);
         }
     }
 

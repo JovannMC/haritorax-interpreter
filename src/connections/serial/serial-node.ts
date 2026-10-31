@@ -27,7 +27,13 @@ function createNodeBackend(options: NodeSerialOptions): SerialBackend {
             if (options.autoBindWired) await autoBindWiredPorts();
             return binding.list();
         },
-        open: (path) => Promise.resolve(new SerialPortStream({ path, baudRate: BAUD_RATE, binding })),
+        open: async (path) => {
+            const port = new SerialPortStream({ path, baudRate: BAUD_RATE, binding, autoOpen: false });
+            await new Promise<void>((resolve, reject) => {
+                port.open((error) => (error ? reject(error) : resolve()));
+            });
+            return port;
+        },
     };
 }
 
