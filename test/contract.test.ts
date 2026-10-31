@@ -272,6 +272,54 @@ describe("container discovery and connection", () => {
         assert.equal(receivedSignal?.aborted, true);
     });
 
+    it("joins an in-flight scan instead of starting a second one", async () => {
+        let listCalls = 0;
+        let finish: (() => void) | undefined;
+
+        const scanning: Connection = {
+            kind: "ble",
+            list: () => {
+                listCalls++;
+                return new Promise<EndpointDescriptor[]>((resolve) => {
+                    finish = () => resolve([{ id: "ble-1", connection: "ble", displayName: "HaritoraX2-BBBBB0" }]);
+                });
+            },
+            open: () => Promise.resolve(),
+            close: () => Promise.resolve(),
+            write: () => Promise.resolve(),
+            onData: () => () => {},
+            onLost: () => () => {},
+            onRssi: () => () => {},
+            dispose: () => Promise.resolve(),
+        };
+
+        const app = createHaritoraX({ connections: [scanning], logLevel: "silent" });
+
+        // three callers hit the same scan window, as the pairing page, the
+        // connection settings, and startInterpreting() can
+        const first = app.discover();
+        const second = app.discover();
+        const third = app.discover();
+
+        assert.equal(listCalls, 1, "the scan starts once, not once per caller");
+        assert.equal(second, first, "a concurrent call joins the in-flight scan");
+        assert.equal(third, first);
+
+        finish!();
+        const [a, b, c] = await Promise.all([first, second, third]);
+
+        assert.deepEqual(a.map((descriptor) => descriptor.id), ["ble-1"]);
+        assert.equal(a, b, "every caller gets the same settled result");
+        assert.equal(a, c);
+
+        // once the scan settles, a fresh call starts a new scan
+        listCalls = 0;
+        const again = app.discover();
+        assert.equal(listCalls, 1);
+        finish!();
+        await again;
+    });
+
     it("stops dispatching frames after dispose()", async () => {
         const serial = memoryConnection(["COM4"]);
         const app = createHaritoraX({ connections: [serial], logLevel: "silent" });

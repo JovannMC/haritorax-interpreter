@@ -11,11 +11,13 @@
  *
  */
 import { createWriteStream } from "node:fs";
+import { once } from "node:events";
+import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { createBleConnection } from "./connections/ble/noble.js";
 import type { Connection } from "./connections/contract.js";
 import { createSerialConnection } from "./connections/serial/serial-node.js";
-import type { EndpointDescriptor } from "./types.js";
+import { Logger } from "./lib/logging.js";
 
 void (async () => {
     const { values } = parseArgs({
@@ -30,87 +32,109 @@ void (async () => {
 
     const logPath = values["no-log"] ? undefined : (values.log ?? defaultLogPath());
     const logStream = logPath ? createWriteStream(logPath) : undefined;
+    if (logStream) await once(logStream, "open");
+
+    function writeLine(line: string, error = false): void {
+        if (error) console.error(line);
+        else console.log(line);
+        logStream?.write(`${line}\n`);
+    }
+
+    if (logPath) writeLine(`Logging to ${resolve(logPath)}`);
+    writeLine("Starting HaritoraX trace. Ctrl+C to stop.");
+
+    const logger = new Logger("debug", (entry) => {
+        const details = entry.data ? ` ${JSON.stringify(entry.data)}` : "";
+        writeLine(`[${entry.level}] ${entry.message}${details}`, entry.level === "error" || entry.level === "warn");
+    });
 
     const requested = values.ports?.split(",").map((port) => port.trim());
+    const connections: Connection[] = [];
+    const opened: string[] = [];
+    const abort = new AbortController();
+    let stopping = false;
 
-    const connections: Array<{ connection: Connection; targets: EndpointDescriptor[] }> = [];
+    async function shutdown(code = 0): Promise<void> {
+        if (stopping) return;
+        stopping = true;
+        abort.abort();
 
-    const serial = createSerialConnection(values.wired ? { includeWired: true } : undefined);
-    try {
-        const targets = await listTargets(serial, requested);
-        if (targets.length > 0) connections.push({ connection: serial, targets });
-    } catch (error) {
-        console.error(`Could not list serial ports: ${(error as Error).message}`);
-        process.exit(1);
+        await Promise.all(connections.map((connection) => connection.dispose().catch(() => {})));
+        if (logStream && !logStream.destroyed) await new Promise<void>((resolve) => logStream.end(resolve));
+        process.exit(code);
     }
 
-    try {
-        const binding = values.binding as "auto" | "hci" | "dbus" | "mac" | "win" | undefined;
-        const ble = createBleConnection(binding ? { binding } : undefined);
-        const targets = await listTargets(ble, requested);
-        if (targets.length > 0) connections.push({ connection: ble, targets });
-    } catch (error) {
-        console.error(`BLE unavailable, continuing with serial only: ${(error as Error).message}`);
-    }
+    process.on("SIGINT", () => void shutdown());
+    process.on("SIGTERM", () => void shutdown());
+    logStream?.on("error", (error) => {
+        console.error(`Failed to write ${logPath}: ${error.message}`);
+        void shutdown(1);
+    });
 
-    if (connections.length === 0) {
-        console.error("No HaritoraX endpoints found.");
-        console.error(requested ? `Requested: ${requested.join(", ")}` : "Are the trackers / dongles powered on?");
-        process.exit(1);
-    }
-
-    const allTargets = connections.flatMap((entry) => entry.targets);
-    console.log(`Watching ${allTargets.length} endpoint(s): ${allTargets.map((endpoint) => endpoint.id).join(", ")}`);
-    if (logPath) console.log(`logging to ${logPath}`);
-    console.log("Ctrl+C to stop.\n");
-
-    for (const { connection, targets } of connections) {
+    async function capture(connection: Connection): Promise<void> {
+        connections.push(connection);
         const isBle = connection.kind === "ble";
 
         connection.onData((frame) => {
             const id = isBle ? `${frame.endpointId}:${frame.characteristic}` : frame.endpointId;
             const text = isBle ? hex(frame.data) : ascii(frame.data);
-
-            const line = `${id} - ${text}`;
-            console.log(line);
-            logStream?.write(`${line}\n`);
+            writeLine(`${id} - ${text}`);
+        });
+        connection.onLost((id, reason) => {
+            writeLine(`Lost ${id}: ${reason}`, true);
         });
 
+        writeLine(`Discovering ${isBle ? "BLE" : "serial"} endpoints...`);
+        const discovered = await connection.list({ signal: abort.signal });
+        if (stopping) return;
+        const targets = requested
+            ? discovered.filter((endpoint) => requested.includes(endpoint.id) || requested.includes(endpoint.displayName))
+            : discovered;
+        writeLine(`Found ${targets.length} matching ${connection.kind} endpoint(s).`);
+
         for (const target of targets) {
+            if (stopping) return;
+            writeLine(`Opening ${target.displayName} (${target.id})...`);
             try {
                 await connection.open(target.id);
+                opened.push(target.id);
+                writeLine(`Watching ${target.id}`);
             } catch (error) {
-                console.error(`Failed to open ${target.id}: ${(error as Error).message}`);
+                writeLine(`Failed to open ${target.id}: ${(error as Error).message}`, true);
             }
         }
     }
 
-    let stopping = false;
-    async function shutdown() {
-        if (stopping) return;
-        stopping = true;
-
-        for (const { connection, targets } of connections) {
-            for (const target of targets) await connection.close(target.id).catch(() => {});
-            await connection.dispose().catch(() => {});
-        }
-
-        if (logStream) await new Promise((resolve) => logStream.end(resolve));
-        process.exit(0);
+    try {
+        await capture(createSerialConnection({ includeWired: values.wired, logger }));
+    } catch (error) {
+        writeLine(`Serial unavailable: ${(error as Error).message}`, true);
     }
 
-    process.on("SIGINT", () => void shutdown());
-    process.on("SIGTERM", () => void shutdown());
-})();
+    if (stopping) return;
+    try {
+        const binding = values.binding as "auto" | "hci" | "dbus" | "mac" | "win" | undefined;
+        await capture(createBleConnection({ binding, logger }));
+    } catch (error) {
+        writeLine(`BLE unavailable, continuing with serial only: ${(error as Error).message}`, true);
+    }
+
+    if (stopping) return;
+    if (opened.length === 0) {
+        writeLine("No HaritoraX endpoints could be opened.", true);
+        writeLine(requested ? `Requested: ${requested.join(", ")}` : "Are the trackers / dongles powered on?", true);
+        await shutdown(1);
+    } else {
+        writeLine(`Watching ${opened.length} endpoint(s): ${opened.join(", ")}`);
+    }
+})().catch((error: unknown) => {
+    console.error(`Trace failed: ${String(error)}`);
+    process.exitCode = 1;
+});
 
 /*
  * helpers
  */
-
-async function listTargets(connection: Connection, requested: string[] | undefined) {
-    const discovered = await connection.list();
-    return requested ? discovered.filter((endpoint) => requested.includes(endpoint.id)) : discovered;
-}
 
 function defaultLogPath() {
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
