@@ -83,13 +83,15 @@ class NobleBleBackend implements BleBackend {
             await this.#noble.waitForPoweredOnAsync(timeoutMs);
             if (options?.signal?.aborted) return [];
 
-            await this.#noble.startScanningAsync([], false);
+            await withTimeout(this.#noble.startScanningAsync([], false), timeoutMs, "Timed out starting BLE scan");
             await waitForScanEnd(options?.signal, timeoutMs);
         } finally {
-            await this.#noble.stopScanningAsync().catch((error: unknown) => {
-                this.#log?.debug("Failed to stop BLE scanning", { error: String(error) });
-            });
             this.#noble.removeListener("discover", onDiscover);
+            await withTimeout(this.#noble.stopScanningAsync(), options?.timeoutMs ?? 5_000, "Timed out stopping BLE scan").catch(
+                (error: unknown) => {
+                    this.#log?.debug("Failed to stop BLE scanning", { error: String(error) });
+                },
+            );
         }
 
         return [...found.values()];
@@ -197,7 +199,7 @@ class NobleBleBackend implements BleBackend {
         for (const timer of this.#rssiTimers.values()) clearInterval(timer);
         this.#rssiTimers.clear();
 
-        await this.#noble.stopScanningAsync().catch(() => undefined);
+        await withTimeout(this.#noble.stopScanningAsync(), 5_000, "Timed out stopping BLE scan").catch(() => undefined);
 
         await Promise.all([...this.#open.keys()].map((peripheralId) => this.close(peripheralId)));
 
@@ -352,6 +354,20 @@ function waitForScanEnd(signal: AbortSignal | undefined, timeoutMs: number): Pro
         const timer = setTimeout(finish, timeoutMs);
         signal?.addEventListener("abort", finish, { once: true });
     });
+}
+
+async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+        return await Promise.race([
+            operation,
+            new Promise<never>((_resolve, reject) => {
+                timer = setTimeout(() => reject(new HaritoraXError("LINK_UNAVAILABLE", message)), timeoutMs);
+            }),
+        ]);
+    } finally {
+        clearTimeout(timer);
+    }
 }
 
 interface OpenPeripheral {

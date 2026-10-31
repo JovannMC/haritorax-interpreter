@@ -40,7 +40,8 @@ export class HaritoraX {
     readonly #open = new Set<string>();
     readonly #subscriptions: Unsubscribe[] = [];
 
-    #discovery: AbortController | undefined;
+    #scanController: AbortController | undefined;
+    #scanning: Promise<EndpointDescriptor[]> | undefined;
 
     constructor(options: HaritoraXOptions = {}) {
         this.#connections = options.connections ?? [];
@@ -100,11 +101,24 @@ export class HaritoraX {
      */
 
     // check what endpoints every connection can see, serial ports and BLE peripherals
-    async discover(options?: ListOptions): Promise<EndpointDescriptor[]> {
-        this.#discovery?.abort();
-        const controller = new AbortController();
-        this.#discovery = controller;
+    discover(options?: ListOptions): Promise<EndpointDescriptor[]> {
+        if (this.#scanning) return this.#scanning;
 
+        const controller = new AbortController();
+        this.#scanController = controller;
+
+        const done = this.#scan(controller, options).finally(() => {
+            if (this.#scanning === done) {
+                this.#scanning = undefined;
+                if (this.#scanController === controller) this.#scanController = undefined;
+            }
+        });
+
+        this.#scanning = done;
+        return done;
+    }
+
+    async #scan(controller: AbortController, options?: ListOptions): Promise<EndpointDescriptor[]> {
         const results = await Promise.all(
             this.#connections.map(async (connection) => {
                 try {
@@ -176,8 +190,9 @@ export class HaritoraX {
     }
 
     stopDiscovery(): Promise<void> {
-        this.#discovery?.abort();
-        this.#discovery = undefined;
+        this.#scanController?.abort();
+        this.#scanController = undefined;
+        this.#scanning = undefined;
         return Promise.resolve();
     }
 
@@ -373,8 +388,8 @@ export class HaritoraX {
      */
 
     async dispose(): Promise<void> {
-        this.#discovery?.abort();
-        this.#discovery = undefined;
+        this.#scanController?.abort();
+        this.#scanController = undefined;
         this.#dongle.dispose();
         this.#wired.dispose();
         this.#ble.dispose();

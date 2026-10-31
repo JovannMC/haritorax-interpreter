@@ -7,3 +7,6 @@ allowBuilds:
 
 overrides:
   "usocket@0.3.0>node-gyp": "13.1.0"
+
+patchedDependencies:
+  usocket@0.3.0: patches/usocket@0.3.0.patch
