@@ -145,12 +145,12 @@ function identityFrames(device: FakeDevice): Array<[BleCharacteristic, Uint8Arra
     ];
 }
 
-async function connected(device: FakeDevice = HX2_DEVICE) {
+async function connected(device: FakeDevice = HX2_DEVICE, buttonDebounceMs?: number) {
     const backend = new FakeBleBackend();
     backend.peripherals[0] = { id: "ble-1", localName: device.localName, rssi: -52 };
 
     const connection = new BleConnection(backend, { scanTimeoutMs: 1 });
-    const app = createHaritoraX({ connections: [connection], logLevel: "silent" });
+    const app = createHaritoraX({ connections: [connection], logLevel: "silent", buttonDebounceMs });
 
     const infos: Array<{ deviceId: string; version: string; model: string; imuCount?: number }> = [];
     app.on("info", (event) => infos.push(event));
@@ -515,6 +515,43 @@ describe("BLE device", () => {
 
         // a 16-byte frame has no range
         assert.deepEqual(ranges, [undefined, 700]);
+    });
+
+    for (const buttonDebounceMs of [undefined, 500]) {
+        it(`uses the ${buttonDebounceMs === undefined ? "default 100" : buttonDebounceMs} ms debounce interval`, async () => {
+            const { app, backend } = await connected(HX2_DEVICE, buttonDebounceMs);
+            mock.timers.enable({ apis: ["Date"] });
+            try {
+                const buttons: string[] = [];
+                app.on("button", (event) => buttons.push(event.button));
+                backend.emit("ble-1", "main-button", byte(1));
+                mock.timers.tick((buttonDebounceMs ?? 100) - 1);
+                backend.emit("ble-1", "main-button", byte(1));
+                assert.deepEqual(buttons, ["main"]);
+
+                mock.timers.tick(1);
+                backend.emit("ble-1", "main-button", byte(1));
+                assert.deepEqual(buttons, ["main", "main"]);
+            } finally {
+                mock.timers.reset();
+                await app.dispose();
+            }
+        });
+    }
+
+    it("disables debounce when buttonDebounceMs is 0", async () => {
+        const { app, backend } = await connected(HX2_DEVICE, 0);
+        mock.timers.enable({ apis: ["Date"] });
+        try {
+            const buttons: string[] = [];
+            app.on("button", (event) => buttons.push(event.button));
+            backend.emit("ble-1", "main-button", byte(1));
+            backend.emit("ble-1", "main-button", byte(1));
+            assert.deepEqual(buttons, ["main", "main"]);
+        } finally {
+            mock.timers.reset();
+            await app.dispose();
+        }
     });
 
     it("emits magnetometer, button and battery updates", async () => {

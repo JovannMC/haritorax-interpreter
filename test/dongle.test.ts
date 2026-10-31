@@ -97,9 +97,9 @@ function asciiText(bytes: Uint8Array): string {
     return text;
 }
 
-async function connected() {
+async function connected(buttonDebounceMs?: number) {
     const serial = memoryConnection();
-    const app = createHaritoraX({ connections: [serial], logLevel: "silent" });
+    const app = createHaritoraX({ connections: [serial], logLevel: "silent", buttonDebounceMs });
 
     await app.discover();
     await app.connect("COM4");
@@ -416,6 +416,47 @@ describe("button counters", () => {
     // digit 4 is the tracker id, digits 6 and 9 are the main and sub event counters
     const counters = (main: string, sub = "0") => `r0:110010${main}00${sub}00`;
 
+    for (const buttonDebounceMs of [undefined, 500]) {
+        it(`uses the ${buttonDebounceMs === undefined ? "default 100" : buttonDebounceMs} ms debounce interval`, async () => {
+            const { app, serial } = await connected(buttonDebounceMs);
+            mock.timers.enable({ apis: ["Date"] });
+            try {
+                const buttons: string[] = [];
+                app.on("button", (event) => buttons.push(event.button));
+                serial.emitFrame(INFO);
+                serial.emitFrame(counters("0"));
+                serial.emitFrame(counters("1"));
+                mock.timers.tick((buttonDebounceMs ?? 100) - 1);
+                serial.emitFrame(counters("2"));
+                assert.deepEqual(buttons, ["main"]);
+
+                mock.timers.tick(1);
+                serial.emitFrame(counters("3"));
+                assert.deepEqual(buttons, ["main", "main"]);
+            } finally {
+                mock.timers.reset();
+                await app.dispose();
+            }
+        });
+    }
+
+    it("disables debounce when buttonDebounceMs is 0", async () => {
+        const { app, serial } = await connected(0);
+        mock.timers.enable({ apis: ["Date"] });
+        try {
+            const buttons: string[] = [];
+            app.on("button", (event) => buttons.push(event.button));
+            serial.emitFrame(INFO);
+            serial.emitFrame(counters("0"));
+            serial.emitFrame(counters("1"));
+            serial.emitFrame(counters("2"));
+            assert.deepEqual(buttons, ["main", "main"]);
+        } finally {
+            mock.timers.reset();
+            await app.dispose();
+        }
+    });
+
     it("sets the baseline on the first frame instead of reporting a press", async () => {
         const { app, serial } = await connected();
         const buttons: string[] = [];
@@ -555,26 +596,31 @@ describe("tracker identity", () => {
         ]);
     });
 
-    it("marks a tracker lost on 7f7f… and reconnects on the next frame", async () => {
+    it("keeps a tracker connected while IMU frames arrive despite searching status", async () => {
         const { app, serial } = await connected();
-
-        serial.emitFrame(INFO);
-        serial.emitFrame("a0:284128442f30");
-        assert.equal(app.getTracker("AAAAA7:0")?.connected, true);
-
-        const disconnected: Array<{ trackerId: string; reason: string }> = [];
-        const reconnected: string[] = [];
-        app.on("tracker:disconnected", (event) => disconnected.push({ trackerId: event.trackerId, reason: event.reason }));
-        app.on("tracker:connected", (event) => reconnected.push(event.trackerId));
-
-        serial.emitFrame("a0:7f7f7f7f7f7f");
-        assert.equal(app.getTracker("AAAAA7:0")?.connected, false);
-        assert.equal(app.getTracker("AAAAA7:0")?.rssi, undefined);
-        assert.deepEqual(disconnected, [{ trackerId: "AAAAA7:0", reason: "remote" }]);
-
-        serial.emitFrame("a0:284128442f30");
-        assert.equal(app.getTracker("AAAAA7:0")?.connected, true);
-        assert.ok(reconnected.includes("AAAAA7:0"));
+        mock.timers.enable({ apis: ["setTimeout", "Date"] });
+        try {
+            serial.emitFrame(INFO);
+            const disconnected: Array<{ trackerId: string; reason: string }> = [];
+            const reconnected: string[] = [];
+            app.on("tracker:disconnected", (event) => disconnected.push({ trackerId: event.trackerId, reason: event.reason }));
+            app.on("tracker:connected", (event) => reconnected.push(event.trackerId));
+            for (let i = 0; i < 12; i++) {
+                serial.emitFrame("a0:7f7f7f7f7f7f");
+                serial.emitFrame("x0:QAV1/Is6EBngAaf/bAkCAA==");
+                mock.timers.tick(1_000);
+            }
+            assert.equal(app.getTracker("AAAAA7:0")?.connected, true);
+            assert.deepEqual(disconnected, []);
+            assert.deepEqual(reconnected, []);
+            serial.emitFrame("a0:7f7f7f7f7f7f");
+            mock.timers.tick(9_000);
+            assert.equal(app.getTracker("AAAAA7:0")?.connected, false);
+            assert.deepEqual(disconnected, [{ trackerId: "AAAAA7:0", reason: "timeout" }]);
+        } finally {
+            mock.timers.reset();
+            await app.dispose();
+        }
     });
 });
 

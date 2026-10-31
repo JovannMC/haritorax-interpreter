@@ -94,7 +94,7 @@ export class DongleController {
         this.#connectionKind = options.connectionKind;
         this.#write = options.write;
         this.#onChannel = options.onChannel;
-        this.#buttonDebounceMs = options.buttonDebounceMs ?? 200;
+        this.#buttonDebounceMs = options.buttonDebounceMs ?? 100;
         this.#pairingTimeoutMs = options.pairingTimeoutMs ?? PAIRING_TIMEOUT_MS;
     }
 

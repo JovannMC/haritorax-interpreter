@@ -71,7 +71,7 @@ export class BleController implements ProtocolHandler {
         this.#registry = options.registry;
         this.#connectionKind = options.connectionKind;
         this.#write = options.write;
-        this.#buttonDebounceMs = options.buttonDebounceMs ?? 200;
+        this.#buttonDebounceMs = options.buttonDebounceMs ?? 100;
     }
 
     handleFrame(): void {}

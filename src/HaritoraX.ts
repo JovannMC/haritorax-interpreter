@@ -66,6 +66,7 @@ export class HaritoraX {
             connectionKind,
             write: (endpointId, command) => this.#writeCommand(endpointId, command),
             onChannel: (endpointId, channel) => this.#applyChannel(endpointId, channel),
+            buttonDebounceMs: options.buttonDebounceMs,
             pairingTimeoutMs: options.pairingTimeoutMs,
         });
         this.#wired = new WiredController({
@@ -81,6 +82,7 @@ export class HaritoraX {
             registry: this.#registry,
             connectionKind,
             write: (endpointId, characteristic, data) => this.#writeBleCommand(endpointId, characteristic, data),
+            buttonDebounceMs: options.buttonDebounceMs,
         });
 
         for (const connection of this.#connections) {
@@ -521,6 +523,8 @@ export interface HaritoraXOptions {
     connections?: Connection[];
     logLevel?: LogLevel;
     onLog?: LogSink;
+    // debounce time for button presses, default 100ms
+    buttonDebounceMs?: number;
     // how long pairing waits for the dongle to report the slot as paired, default 30 s
     pairingTimeoutMs?: number;
 }
