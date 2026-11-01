@@ -50,6 +50,8 @@ class FakeBleBackend implements BleBackend {
         { id: "other", localName: "JBL Flip 4", rssi: -80 },
     ];
     readonly writes: Array<{ endpointId: string; characteristic: BleCharacteristic; data: number[] }> = [];
+    readonly writeAttempts: Array<{ endpointId: string; characteristic: BleCharacteristic; data: number[] }> = [];
+    readonly unsupportedWrites = new Set<BleCharacteristic>();
     readonly opened = new Set<string>();
     // the real backend reads the device information while opening, a test can emit it from here
     onOpen: (() => void) | undefined;
@@ -78,6 +80,8 @@ class FakeBleBackend implements BleBackend {
     }
 
     write(peripheralId: string, characteristic: BleCharacteristic, data: Uint8Array): Promise<void> {
+        this.writeAttempts.push({ endpointId: peripheralId, characteristic, data: [...data] });
+        if (this.unsupportedWrites.has(characteristic)) return Promise.reject(new Error(`Unsupported characteristic: ${characteristic}`));
         this.writes.push({ endpointId: peripheralId, characteristic, data: [...data] });
         return Promise.resolve();
     }
@@ -735,6 +739,7 @@ function wiredIdentity(options: { calibration?: boolean } = {}): Array<[BleChara
 async function connectedWired(options: { calibration?: boolean } = {}) {
     const backend = new FakeBleBackend();
     backend.peripherals[0] = { id: "ble-1", localName: "HaritoraX1.1B-0000021", rssi: -60 };
+    if (options.calibration === false) backend.unsupportedWrites.add("wired-auto-calibration");
 
     const connection = new BleConnection(backend, { scanTimeoutMs: 1 });
     const app = createHaritoraX({ connections: [connection], logLevel: "silent" });
@@ -948,10 +953,11 @@ describe("wired tracker over BLE", () => {
         );
     });
 
-    it("skips the calibration write when the tracker has no such characteristic", async () => {
+    it("continues applying settings when the calibration characteristic is unavailable", async () => {
         const { app, backend } = await connectedWired({ calibration: false });
         assert.equal(app.getDevice("0000021")?.settings, undefined);
         backend.writes.length = 0;
+        backend.writeAttempts.length = 0;
 
         await app.setSettings("0000021", {
             sensorMode: 2,
@@ -963,6 +969,10 @@ describe("wired tracker over BLE", () => {
         assert.deepEqual(
             backend.writes.map((write) => write.characteristic),
             ["sensor-mode", "fps", "tof"],
+        );
+        assert.deepEqual(
+            backend.writeAttempts.map((write) => write.characteristic),
+            ["sensor-mode", "fps", "wired-auto-calibration", "tof"],
         );
     });
 
@@ -977,7 +987,7 @@ describe("wired tracker over BLE", () => {
         assert.deepEqual(splitWiredImuBytes(new Uint8Array(20), 6), []);
     });
 
-    it("uses BLE only when it sees the wired tracker, and keeps the serial port when it doesn't", async () => {
+    it("keeps serial and BLE discovery candidates until the tracker identity is known", async () => {
         const stub = wiredSerialStub();
         const backend = new FakeBleBackend();
         backend.peripherals[0] = { id: "ble-1", localName: "HaritoraX1.1B-0000021", rssi: -60 };
@@ -986,12 +996,13 @@ describe("wired tracker over BLE", () => {
             logLevel: "silent",
         });
 
-        // the wired tracker is on Bluetooth Classic and advertises over BLE as well
+        // Both endpoints may be candidates for the same tracker; discovery has not identified either yet.
         assert.deepEqual(
             (await app.discover()).map((endpoint) => endpoint.id),
-            ["ble-1"],
+            ["COM9", "ble-1"],
         );
-        await assert.rejects(app.connect("COM9"), (error: { code?: string }) => error.code === "DEVICE_NOT_FOUND");
+        await app.connect("COM9");
+        await app.disconnect("COM9");
 
         // nothing on BLE: the serial port is all there is
         backend.peripherals[0] = { id: "other", localName: "JBL Flip 4", rssi: -80 };

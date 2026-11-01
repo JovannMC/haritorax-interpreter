@@ -383,17 +383,29 @@ describe("settings writing", () => {
         const events: TrackerSettings[] = [];
         app.on("settings", (event) => events.push(event.settings));
 
-        await app.setSettings("AAAAA7", first);
-        await app.setSettings("EEEEE1", second);
+        const firstWrite = app.setSettings("AAAAA7", first);
+        const secondWrite = app.setSettings("EEEEE1", second);
+        await flush();
+
+        // Settings are based on the dongle's current slot values, so reply to both reads before writes proceed.
+        assert.deepEqual(serial.writes, ["COM4:o0:", "COM4:o1:"]);
+        serial.emitFrame("o0:00000000100000");
+        serial.emitFrame("o1:00000000100000");
+        await Promise.all([firstWrite, secondWrite]);
 
         // the dongle echoes the applied settings; unchanged values must not emit again
         serial.emitFrame("o0:00000110103001");
         serial.emitFrame("o1:00000000100000");
 
-        assert.deepEqual(serial.writes, ["COM4:o0:00000110103001", "COM4:o1:00000000100000"]);
+        assert.deepEqual(serial.writes, [
+            "COM4:o0:",
+            "COM4:o1:",
+            "COM4:o0:00000110103001",
+            "COM4:o1:00000000100000",
+        ]);
         assert.deepEqual(app.getDevice("AAAAA7")?.settings, first);
         assert.deepEqual(app.getDevice("EEEEE1")?.settings, second);
-        assert.deepEqual(events, [first, second]);
+        assert.deepEqual(events, [second, second, first]);
     });
 
     it("rejects settings for an unknown device", async () => {
