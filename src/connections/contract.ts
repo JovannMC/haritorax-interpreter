@@ -29,6 +29,7 @@ export interface Connection {
 
     onData(handler: (frame: Frame) => void): Unsubscribe;
     onLost(handler: (endpointId: string, reason: DisconnectReason) => void): Unsubscribe;
+    onRssi?(handler: (endpointId: string, rssi: number) => void): Unsubscribe;
 
     dispose(): Promise<void>;
 }

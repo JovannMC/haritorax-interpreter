@@ -23,7 +23,6 @@ import type {
     TrackerSettings,
     Unsubscribe,
 } from "./types.js";
-import type { BleConnection } from "./connections/ble/index.js";
 
 export class HaritoraX {
     readonly #emitter = new Emitter();
@@ -91,9 +90,9 @@ export class HaritoraX {
         for (const connection of this.#connections) {
             this.#subscriptions.push(connection.onData((frame) => this.#onFrame(frame)));
             this.#subscriptions.push(connection.onLost((endpointId, reason) => this.#onLost(endpointId, reason)));
-            if (connection.kind === "ble") {
+            if (connection.kind === "ble" && connection.onRssi) {
                 this.#subscriptions.push(
-                    (connection as BleConnection).onRssi((endpointId, rssi) => {
+                    connection.onRssi((endpointId, rssi) => {
                         this.#onBleRssi(endpointId, rssi);
                     }),
                 );
