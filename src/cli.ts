@@ -14,9 +14,7 @@ import { createWriteStream } from "node:fs";
 import { once } from "node:events";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { createBleConnection } from "./connections/ble/noble.js";
 import type { Connection } from "./connections/contract.js";
-import { createSerialConnection } from "./connections/serial/serial-node.js";
 import { Logger } from "./lib/logging.js";
 
 void (async () => {
@@ -106,6 +104,7 @@ void (async () => {
     }
 
     try {
+        const { createSerialConnection } = await import("./connections/serial/serial-node.js");
         await capture(createSerialConnection({ includeWired: values.wired, logger }));
     } catch (error) {
         writeLine(`Serial unavailable: ${(error as Error).message}`, true);
@@ -114,6 +113,7 @@ void (async () => {
     if (stopping) return;
     try {
         const binding = values.binding as "auto" | "hci" | "dbus" | "mac" | "win" | undefined;
+        const { createBleConnection } = await import("./connections/ble/noble.js");
         await capture(createBleConnection({ binding, logger }));
     } catch (error) {
         writeLine(`BLE unavailable, continuing with serial only: ${(error as Error).message}`, true);

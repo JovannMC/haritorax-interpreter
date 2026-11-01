@@ -4,12 +4,61 @@
 name: Build and publish package to npm
 
 on:
+    pull_request:
     release:
         types:
             - published
 
 jobs:
-    build-and-publish-npm:
+    check:
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - os: ubuntu-latest
+                      node: "23.6.0"
+                    - os: ubuntu-latest
+                      node: "24"
+                    - os: macos-latest
+                      node: "24"
+                    - os: windows-latest
+                      node: "24"
+                    - os: ubuntu-latest
+                      node: "26"
+        runs-on: ${{ matrix.os }}
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Set up pnpm
+              uses: pnpm/action-setup@v4
+
+            - name: Set up Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: ${{ matrix.node }}
+                  cache: pnpm
+                  registry-url: https://registry.npmjs.org/
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Lint
+              run: pnpm lint
+
+            - name: Check formatting
+              run: pnpm format:check
+
+            - name: Typecheck
+              run: pnpm typecheck
+
+            - name: Tests
+              run: pnpm test
+
+    publish:
+        if: github.event_name == 'release'
+        needs: check
         runs-on: ubuntu-latest
 
         steps:
@@ -28,13 +77,13 @@ jobs:
             - name: Install dependencies
               run: pnpm install --frozen-lockfile
 
-            - name: Test
-              run: pnpm test
-
             - name: Build package
               run: pnpm build
+
+            - name: Check release tag matches package version
+              run: pnpm check:release-version
 
             - name: Publish package
               run: pnpm publish --no-git-checks
               env:
-                  NODE_AUTH_TOKEN: ${{secrets.npm_token}}
+                  NODE_AUTH_TOKEN: ${{ secrets.npm_token }}

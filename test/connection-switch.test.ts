@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { fromByteArray } from "base64-js";
 import { createHaritoraX } from "../dist/index.js";
 import type { Connection, Frame } from "../dist/connections/contract.js";
 import type { ConnectionKind, DisconnectReason, EndpointDescriptor } from "../dist/types.js";
@@ -16,20 +17,25 @@ class MemoryConnection implements Connection {
         this.endpointId = endpointId;
     }
 
-    async list(): Promise<EndpointDescriptor[]> {
-        return [
+    list(): Promise<EndpointDescriptor[]> {
+        return Promise.resolve([
             {
                 id: this.endpointId,
                 connection: this.kind,
                 displayName: this.kind === "ble" ? "HaritoraX2-B1TEST" : this.endpointId,
                 model: "x2",
             },
-        ];
+        ]);
     }
-    async open(): Promise<void> {}
-    async close(): Promise<void> {}
-    async write(endpointId: string, _data: Uint8Array, options?: { characteristic?: string }): Promise<void> {
+    open(): Promise<void> {
+        return Promise.resolve();
+    }
+    close(): Promise<void> {
+        return Promise.resolve();
+    }
+    write(endpointId: string, _data: Uint8Array, options?: { characteristic?: string }): Promise<void> {
         this.writes.push({ endpointId, characteristic: options?.characteristic });
+        return Promise.resolve();
     }
     onData(handler: (frame: Frame) => void) {
         this.#data.add(handler);
@@ -46,12 +52,17 @@ class MemoryConnection implements Connection {
     onRssi() {
         return () => {};
     }
-    async dispose(): Promise<void> {
+    dispose(): Promise<void> {
         this.#data.clear();
         this.#lost.clear();
+        return Promise.resolve();
     }
     emit(data: string | Uint8Array, characteristic?: string): void {
-        const frame = { endpointId: this.endpointId, data: Buffer.from(data), characteristic };
+        const frame = {
+            endpointId: this.endpointId,
+            data: typeof data === "string" ? new TextEncoder().encode(data) : data,
+            characteristic,
+        };
         for (const handler of this.#data) handler(frame);
     }
     lose(): void {
@@ -59,14 +70,14 @@ class MemoryConnection implements Connection {
     }
 }
 
-const LEG = Buffer.from("9400fe01c0085d3f7dff3c00fc07", "hex");
+const LEG = Uint8Array.of(0x94, 0x00, 0xfe, 0x01, 0xc0, 0x08, 0x5d, 0x3f, 0x7d, 0xff, 0x3c, 0x00, 0xfc, 0x07);
 const info = (count: number, serial = "B1TEST") =>
     `i0:${JSON.stringify({ version: "1.0.5", model: "mc4b", imu_num: count, "serial no": serial })}`;
-function sensor(count: number): Buffer {
-    const data = Buffer.alloc(count === 2 ? 30 : 16);
-    LEG.copy(data);
+function sensor(count: number): Uint8Array {
+    const data = new Uint8Array(count === 2 ? 30 : 16);
+    data.set(LEG);
     data[14] = 2;
-    if (count === 2) LEG.copy(data, 16);
+    if (count === 2) data.set(LEG, 16);
     return data;
 }
 async function session(count: number) {
@@ -76,16 +87,16 @@ async function session(count: number) {
     await app.discover();
     await app.connect("COM4");
     serial.emit(info(count));
-    const serialSample = () => serial.emit(`x0:${sensor(count).toString("base64")}`);
+    const serialSample = () => serial.emit(`x0:${fromByteArray(sensor(count))}`);
     const bleSample = () => ble.emit(sensor(count), "sensor2");
     serialSample();
     await app.connect("ble-1");
     const bleInfo = () => {
         ble.emit("B1TEST", "serial-number");
         ble.emit("1.0.30", "software-revision");
-        ble.emit(Buffer.from([count]), "number-of-imu");
+        ble.emit(Uint8Array.of(count), "number-of-imu");
         ble.emit("MC4B", "model-number");
-        ble.emit(Buffer.from([3]), "body-part");
+        ble.emit(Uint8Array.of(3), "body-part");
     };
     bleInfo();
     return { app, serial, ble, serialSample, bleSample, bleInfo };
@@ -158,7 +169,7 @@ describe("tracker connection swaps", () => {
                     if (deviceId === "B1TEST") lost.push(trackerId);
                 });
                 bleInfo();
-                ble.emit(Buffer.from([80]), "battery-level");
+                ble.emit(Uint8Array.of(80), "battery-level");
                 assertConnection(app, "serial", "COM4", count);
                 ble.lose();
                 assertConnection(app, "serial", "COM4", count);
@@ -183,8 +194,8 @@ describe("tracker connection swaps", () => {
                 serial.emit("x0:AA==");
                 assertConnection(app, "ble", "ble-1", count);
                 serialSample();
-                ble.emit(Buffer.from([1, 2, 3]), "sensor2");
-                ble.emit(Buffer.from([1, 2, 3]), "sensor");
+                ble.emit(Uint8Array.of(1, 2, 3), "sensor2");
+                ble.emit(Uint8Array.of(1, 2, 3), "sensor");
                 assertConnection(app, "serial", "COM4", count);
             } finally {
                 await app.dispose();

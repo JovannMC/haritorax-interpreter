@@ -351,15 +351,16 @@ class NobleBleBackend implements BleBackend {
 
 function createNobleBackend(options: NobleBleOptions = {}): BleBackend {
     const binding = resolveBinding(options.binding);
-    const module = loadNoble();
+    const module = loadNoble(binding);
     const noble = module.withBindings(binding);
 
     return new NobleBleBackend(noble, options.rssiPollMs ?? 0, options.logger);
 }
 
-function loadNoble(): NobleModule {
+function loadNoble(binding: NobleBinding): NobleModule {
     try {
         const require = createRequire(import.meta.url);
+        if (binding === "dbus") restoreUtilIsError(require);
         return require("@stoprocent/noble") as NobleModule;
     } catch (error) {
         throw new HaritoraXError("LINK_UNAVAILABLE", 'BLE requires the optional "@stoprocent/noble" package', {
@@ -368,8 +369,23 @@ function loadNoble(): NobleModule {
     }
 }
 
-function resolveBinding(requested: NobleBleOptions["binding"]): NobleBinding {
-    if (requested && requested !== "auto") return requested;
+function restoreUtilIsError(require: NodeJS.Require): void {
+    const util = require("node:util") as typeof import("node:util") & {
+        isError?: (value: unknown) => boolean;
+    };
+
+    // usocket@0.3.0 used by noble's optional D-Bus backend calls util.isError (remove in Node 24), so restoring it to avoid runtime errors
+    if (typeof util.isError !== "function") {
+        Object.defineProperty(util, "isError", { value: util.types.isNativeError });
+    }
+}
+
+function resolveBinding(requested: string | undefined): NobleBinding {
+    if (requested && requested !== "auto") {
+        const binding = (["hci", "dbus", "mac", "win"] as const).find((candidate) => candidate === requested);
+        if (binding) return binding;
+        throw new HaritoraXError("NOT_SUPPORTED", `BLE binding "${requested}" is not supported`);
+    }
 
     if (process.platform === "win32") return "win";
     if (process.platform === "darwin") return "mac";
