@@ -43,6 +43,7 @@ const PAIRING_COMMAND_DELAY_MS = 1_000;
 const PAIRING_TIMEOUT_MS = 30_000;
 const BODY_PART_STEP_DELAY_MS = 200;
 const BODY_PART_TIMEOUT_MS = 2_000;
+const SETTINGS_READ_TIMEOUT_MS = 2_000;
 const PING_INTERVAL_MS = 1_000;
 
 export interface DongleControllerOptions {
@@ -82,6 +83,7 @@ export class DongleController {
     readonly #bodyPartWaits = new Map<string, BodyPartWait>();
     // last `oN:` frame the dongle echoed per endpoint:slot, the base for settings writes
     readonly #settingsEchoes = new Map<string, string>();
+    readonly #settingsReads = new Map<string, SettingsRead>();
     readonly #latencies = new Map<string, number>();
     readonly #pingSentAt = new Map<string, number>();
     readonly #pingTimers = new Map<string, ReturnType<typeof setInterval>>();
@@ -195,7 +197,8 @@ export class DongleController {
             throw new HaritoraXError("NOT_CONNECTED", `${endpointId} is not connected`);
         }
 
-        await this.#write(endpointId, dongleSettingsCommand(slot, settings, undefined, undefined, this.#echo(endpointId, slot)));
+        const echo = await this.#requireEcho(endpointId, slot);
+        await this.#write(endpointId, dongleSettingsCommand(slot, settings, undefined, undefined, echo));
 
         const device = this.#registry.deviceAt(endpointId, slot);
         if (device) this.#registry.setSettings(device.deviceId, settings);
@@ -203,12 +206,14 @@ export class DongleController {
         this.#log.info(`Applied settings to ${endpointId}:${slot}`);
     }
 
-    async powerOff(endpointId: string, slot: string, settings: TrackerSettings): Promise<void> {
+    async powerOff(endpointId: string, slot: string): Promise<void> {
         if (!this.#isOpen(endpointId)) {
             throw new HaritoraXError("NOT_CONNECTED", `${endpointId} is not connected`);
         }
 
-        const echo = this.#echo(endpointId, slot);
+        const echo = await this.#requireEcho(endpointId, slot);
+        const settings = decodeSettings(echo);
+        if (!settings) throw new HaritoraXError("NOT_SUPPORTED", `Settings are not available for ${endpointId}:${slot}`);
         const command = dongleSettingsCommand(slot, settings, 2, undefined, echo);
         const restore = dongleSettingsCommand(slot, settings, 0, undefined, echo);
         await this.#write(endpointId, command);
@@ -219,12 +224,14 @@ export class DongleController {
     }
 
     // swaps to BLE
-    async switchCommunication(endpointId: string, slot: string, settings: TrackerSettings): Promise<void> {
+    async switchCommunication(endpointId: string, slot: string): Promise<void> {
         if (!this.#isOpen(endpointId)) {
             throw new HaritoraXError("NOT_CONNECTED", `${endpointId} is not connected`);
         }
 
-        const echo = this.#echo(endpointId, slot);
+        const echo = await this.#requireEcho(endpointId, slot);
+        const settings = decodeSettings(echo);
+        if (!settings) throw new HaritoraXError("NOT_SUPPORTED", `Settings are not available for ${endpointId}:${slot}`);
         const command = dongleSettingsCommand(slot, settings, 1, undefined, echo);
         const restore = dongleSettingsCommand(slot, settings, 0, undefined, echo);
         await this.#write(endpointId, command);
@@ -260,6 +267,7 @@ export class DongleController {
             );
         }
 
+        const echo = await this.#requireEcho(endpointId, slot);
         const key = endpointSlotKey(endpointId, slot);
         if (this.#bodyPartWaits.has(key)) {
             throw new HaritoraXError("BUSY", `A body-part change is already in progress on ${endpointId}:${slot}`);
@@ -267,7 +275,7 @@ export class DongleController {
         const wait = this.#createBodyPartWait(key, bodyPart);
 
         try {
-            const commands = bodyPartCommands(slot, settings, trackerId, unlock, this.#echo(endpointId, slot));
+            const commands = bodyPartCommands(slot, settings, trackerId, unlock, echo);
             for (const [index, command] of commands.entries()) {
                 if (index > 0) await delay(BODY_PART_STEP_DELAY_MS);
                 await this.#write(endpointId, command);
@@ -338,6 +346,11 @@ export class DongleController {
         for (const key of this.#bodyPartWaits.keys()) {
             if (key.startsWith(`${endpointId}:`)) this.#cancelBodyPartWait(key);
         }
+        for (const key of this.#settingsReads.keys()) {
+            if (key.startsWith(`${endpointId}:`)) {
+                this.#settleSettingsRead(key, undefined, new HaritoraXError("NOT_CONNECTED", `${endpointId} disconnected`));
+            }
+        }
 
         this.#stopPings(endpointId);
         this.#registers.delete(endpointId);
@@ -362,6 +375,9 @@ export class DongleController {
 
     dispose(): void {
         for (const key of this.#bodyPartWaits.keys()) this.#cancelBodyPartWait(key);
+        for (const key of this.#settingsReads.keys()) {
+            this.#settleSettingsRead(key, undefined, new HaritoraXError("NOT_CONNECTED", "Dongle controller disposed"));
+        }
         for (const endpointId of [...this.#pingTimers.keys()]) this.#stopPings(endpointId);
         this.#latencies.clear();
         this.#pingSentAt.clear();
@@ -623,10 +639,61 @@ export class DongleController {
         return this.#settingsEchoes.get(endpointSlotKey(endpointId, slot));
     }
 
+    async #requireEcho(endpointId: string, slot: string): Promise<string> {
+        const echo = this.#echo(endpointId, slot);
+        if (echo && /^[0-9a-f]{14}$/i.test(echo)) return echo;
+
+        const key = endpointSlotKey(endpointId, slot);
+        const existing = this.#settingsReads.get(key);
+        if (existing) return existing.promise;
+
+        let resolveRead!: (value: string) => void;
+        let rejectRead!: (error: Error) => void;
+        const promise = new Promise<string>((resolve, reject) => {
+            resolveRead = resolve;
+            rejectRead = reject;
+        });
+        const timer = setTimeout(() => {
+            this.#settleSettingsRead(
+                key,
+                undefined,
+                new HaritoraXError(
+                    "READ_FAILED",
+                    `Could not read current settings for ${endpointId}:${slot}, won't apply new settings without a valid echo`,
+                ),
+            );
+        }, SETTINGS_READ_TIMEOUT_MS);
+        this.#settingsReads.set(key, { promise, resolve: resolveRead, reject: rejectRead, timer });
+
+        this.#write(endpointId, `o${slot}:`).catch((error: unknown) => {
+            this.#settleSettingsRead(
+                key,
+                undefined,
+                new HaritoraXError("READ_FAILED", `Could not request settings for ${endpointId}:${slot}`, { cause: error }),
+            );
+        });
+        return promise;
+    }
+
+    #settleSettingsRead(key: string, value: string | undefined, error?: Error): void {
+        const read = this.#settingsReads.get(key);
+        if (!read) return;
+        clearTimeout(read.timer);
+        this.#settingsReads.delete(key);
+        if (error) read.reject(error);
+        else if (value !== undefined) read.resolve(value);
+    }
+
+    #onSettingsEcho(key: string, payload: string): void {
+        if (!/^[0-9a-f]{14}$/i.test(payload)) return;
+        this.#settingsEchoes.set(key, payload);
+        this.#settleSettingsRead(key, payload);
+    }
+
     #onSettings(endpointId: string, slot: string, payload: string): void {
         const key = endpointSlotKey(endpointId, slot);
         const first = !this.#settingsEchoes.has(key);
-        if (payload.length === 14) this.#settingsEchoes.set(key, payload);
+        this.#onSettingsEcho(key, payload);
 
         // clear leftover power-off / switch to BLE command, so it doesn't keep the tracker off or on BLE after a reconnect
         const settings = decodeSettings(payload);
@@ -768,4 +835,11 @@ interface BodyPartWait {
     timer: ReturnType<typeof setTimeout>;
     resolve: (result: boolean | undefined) => void;
     promise: Promise<boolean | undefined>;
+}
+
+interface SettingsRead {
+    promise: Promise<string>;
+    resolve: (value: string) => void;
+    reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
 }

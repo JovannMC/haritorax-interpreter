@@ -211,27 +211,34 @@ export class BleController implements ProtocolHandler {
         if (!device) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown BLE tracker on "${endpointId}"`);
 
         const values = bleSettingValues(settings);
-        await this.#write(endpointId, "sensor-mode", new Uint8Array([values.sensorMode]));
-        await this.#write(endpointId, "fps", new Uint8Array([values.fpsMode]));
-
-        if (device.model !== "wired") {
-            await this.#write(endpointId, "auto-calibration", new Uint8Array([values.autoCorrection]));
-        } else if (state.settings.correction !== undefined) {
-            await this.#write(endpointId, "wired-auto-calibration", new Uint8Array([values.autoCorrection]));
-        } else {
-            this.#log.debug(`${endpointId} has no calibration characteristic, skipped`);
-        }
-
-        await this.#write(endpointId, "tof", new Uint8Array([values.tof]));
-
-        state.settings = {
-            sensorMode: settings.sensorMode,
-            fpsMode: settings.fpsMode,
-            correction: [...settings.sensorAutoCorrection],
-            ankle: settings.ankleMotionDetection,
+        const failures: { setting: string; error: unknown }[] = [];
+        const apply = async (setting: string, characteristic: BleCharacteristic, value: number): Promise<boolean> => {
+            try {
+                await this.#write(endpointId, characteristic, new Uint8Array([value]));
+                return true;
+            } catch (error) {
+                failures.push({ setting, error });
+                return false;
+            }
         };
-        this.#registry.setSettings(device.deviceId, settings);
-        this.#log.info(`Applied BLE settings to ${endpointId}`);
+
+        if (await apply("sensorMode", "sensor-mode", values.sensorMode)) state.settings.sensorMode = settings.sensorMode;
+        if (await apply("fpsMode", "fps", values.fpsMode)) state.settings.fpsMode = settings.fpsMode;
+        const calibrationCharacteristic = device.model === "wired" ? "wired-auto-calibration" : "auto-calibration";
+        if (await apply("sensorAutoCorrection", calibrationCharacteristic, values.autoCorrection)) {
+            state.settings.correction = [...settings.sensorAutoCorrection];
+        }
+        if (await apply("ankleMotionDetection", "tof", values.tof)) state.settings.ankle = settings.ankleMotionDetection;
+
+        this.#maybeSettings(state);
+        if (failures.length > 0) {
+            this.#log.warn(`Some BLE settings could not be applied to ${endpointId}`, {
+                settings: failures.map(({ setting }) => setting),
+                errors: failures.map(({ setting, error }) => `${setting}: ${String(error)}`),
+            });
+        } else {
+            this.#log.info(`Applied BLE settings to ${endpointId}`);
+        }
     }
 
     forgetEndpoint(endpointId: string): void {

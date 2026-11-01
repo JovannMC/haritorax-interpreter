@@ -130,20 +130,28 @@ export class HaritoraX {
     }
 
     async #scan(signal: AbortSignal, generation: number, options?: ListOptions): Promise<EndpointDescriptor[]> {
+        const failures: Error[] = [];
         const scanning = Promise.all(
             this.#connections.map(async (connection) => {
                 try {
                     return { connection, found: await connection.list({ ...options, signal }) };
                 } catch (error) {
                     if (signal.aborted) return { connection, found: [] as EndpointDescriptor[] };
+                    const failure = toError(error);
+                    failures.push(failure);
                     this.#log.error(`Discovery failed for "${connection.kind}"`, { error: String(error) });
-                    this.#emitter.emit("error", { error: toError(error) });
+                    this.#emitter.emit("error", { error: failure });
                     return { connection, found: [] as EndpointDescriptor[] };
                 }
             }),
         );
         const results = await raceWithAbort(scanning, signal);
         if (!results || signal.aborted || this.#disposed || generation !== this.#scanGeneration) return this.#endpoints;
+        if (this.#connections.length > 0 && failures.length === this.#connections.length) {
+            throw new HaritoraXError("CONNECTION_FAILED", "Discovery failed for every configured connection", {
+                cause: new AggregateError(failures),
+            });
+        }
 
         const merged = new Map<string, EndpointDescriptor>();
 
@@ -237,13 +245,7 @@ export class HaritoraX {
         }
 
         if (device.model === "wired") {
-            const endpointIds = this.#endpoints
-                .filter(
-                    (endpoint) => endpoint.model === "wired" && endpoint.connection === "serial" && this.#open.has(endpoint.id),
-                )
-                .map((endpoint) => endpoint.id);
-
-            await this.#wired.setSettings(endpointIds, settings);
+            await this.#wired.setSettings([device.endpointId], settings);
             return;
         }
 
@@ -311,14 +313,7 @@ export class HaritoraX {
         if (device.connection === "ble") {
             await this.#ble.powerOff(device.endpointId);
         } else {
-            const snapshot = device.settings;
-            const settings: TrackerSettings = snapshot ?? {
-                sensorMode: 2,
-                fpsMode: 50,
-                sensorAutoCorrection: [],
-                ankleMotionDetection: false,
-            };
-            await this.#dongle.powerOff(device.endpointId, device.slot, settings);
+            await this.#dongle.powerOff(device.endpointId, device.slot);
         }
 
         this.#log.info(`Powering off ${deviceId}`);
@@ -337,14 +332,7 @@ export class HaritoraX {
             await this.#ble.switchCommunication(device.endpointId);
         } else {
             if (mode === "serial") throw new HaritoraXError("NOT_SUPPORTED", "This tracker is already on serial communication");
-            const snapshot = device.settings;
-            const settings: TrackerSettings = snapshot ?? {
-                sensorMode: 2,
-                fpsMode: 50,
-                sensorAutoCorrection: [],
-                ankleMotionDetection: false,
-            };
-            await this.#dongle.switchCommunication(device.endpointId, device.slot, settings);
+            await this.#dongle.switchCommunication(device.endpointId, device.slot);
         }
 
         this.#log.info(`Switching ${deviceId} to ${mode}`);
@@ -369,9 +357,15 @@ export class HaritoraX {
 
             const descriptor = this.#endpoints.find((endpoint) => endpoint.id === endpointId);
             if (descriptor?.connection === "ble") {
-                await this.#ble.start(endpointId).catch((error: unknown) => {
-                    this.#log.warn(`Could not start sensor data on ${endpointId}`, { error: String(error) });
-                });
+                try {
+                    await this.#ble.start(endpointId);
+                } catch (error) {
+                    await connection.close(endpointId).catch((closeError: unknown) => {
+                        this.#log.warn(`Could not close ${endpointId} after BLE startup failed`, { error: String(closeError) });
+                    });
+                    if (this.#open.delete(endpointId)) this.#dropEndpoint(endpointId, "error");
+                    throw error;
+                }
             }
 
             this.#emitter.emit("endpoint:connected", {
