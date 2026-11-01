@@ -62,7 +62,7 @@ export class BleController implements ProtocolHandler {
     readonly #write: (endpointId: string, characteristic: BleCharacteristic, data: Uint8Array) => Promise<void>;
     readonly #states = new Map<string, BleState>();
     readonly #lastButtonPress = new Map<string, number>();
-    readonly #bodyPartWaits = new Map<string, { bodyPart: BodyPart; resolve: () => void }>();
+    readonly #bodyPartWaits = new Map<string, BodyPartWait>();
     readonly #buttonDebounceMs: number;
 
     constructor(options: BleControllerOptions) {
@@ -119,8 +119,8 @@ export class BleController implements ProtocolHandler {
                 }
                 this.#ensureDevice(state);
 
-                if (part && this.#bodyPartWaits.get(endpointId)?.bodyPart === part)
-                    this.#bodyPartWaits.get(endpointId)?.resolve();
+                const wait = this.#bodyPartWaits.get(endpointId);
+                if (part && wait?.bodyPart === part) this.#finishBodyPartWait(endpointId, wait, true);
                 break;
             }
             // take priority over "sensor" if available, includes mag status and tap count
@@ -236,7 +236,7 @@ export class BleController implements ProtocolHandler {
 
     forgetEndpoint(endpointId: string): void {
         this.#states.delete(endpointId);
-        this.#bodyPartWaits.delete(endpointId);
+        this.#cancelBodyPartWait(endpointId);
         for (const key of this.#lastButtonPress.keys()) {
             if (key.startsWith(endpointId)) this.#lastButtonPress.delete(key);
         }
@@ -264,32 +264,23 @@ export class BleController implements ProtocolHandler {
 
         // older firmware doesn't notify, and no tracker notifies when it already has that body part
         const confirms = bodyPartNotifies(device.model, device.version) && state.bodyPart !== bodyPart;
-        const confirmed = confirms
-            ? new Promise<boolean>((resolve) => {
-                  const timer = setTimeout(() => {
-                      this.#bodyPartWaits.delete(endpointId);
-                      resolve(false);
-                  }, BODY_PART_TIMEOUT_MS);
-
-                  this.#bodyPartWaits.set(endpointId, {
-                      bodyPart,
-                      resolve: () => {
-                          clearTimeout(timer);
-                          this.#bodyPartWaits.delete(endpointId);
-                          resolve(true);
-                      },
-                  });
-              })
-            : undefined;
+        if (confirms && this.#bodyPartWaits.has(endpointId)) {
+            throw new HaritoraXError("BUSY", `A body-part change is already in progress on ${endpointId}`);
+        }
+        const wait = confirms ? this.#createBodyPartWait(endpointId, bodyPart) : undefined;
 
         try {
             await this.#write(endpointId, "body-part-write", new Uint8Array([id]));
         } catch (error) {
-            this.#bodyPartWaits.delete(endpointId);
+            if (wait) this.#finishBodyPartWait(endpointId, wait, undefined);
             throw error;
         }
 
-        if (confirmed && !(await confirmed)) {
+        const confirmed = wait ? await wait.promise : true;
+        if (confirmed === undefined) {
+            throw new HaritoraXError("NOT_CONNECTED", `${endpointId} disconnected before confirming its body part`);
+        }
+        if (!confirmed) {
             throw new HaritoraXError(
                 "TIMEOUT",
                 `${device.deviceId} did not confirm the body part "${bodyPart}" in time. Its firmware may ignore the change, check its version`,
@@ -318,8 +309,37 @@ export class BleController implements ProtocolHandler {
     }
 
     dispose(): void {
+        for (const endpointId of this.#bodyPartWaits.keys()) this.#cancelBodyPartWait(endpointId);
         this.#states.clear();
         this.#lastButtonPress.clear();
+    }
+
+    #createBodyPartWait(endpointId: string, bodyPart: BodyPart): BodyPartWait {
+        let resolveWait!: (result: boolean | undefined) => void;
+        const promise = new Promise<boolean | undefined>((resolve) => (resolveWait = resolve));
+        const wait: BodyPartWait = {
+            bodyPart,
+            timer: setTimeout(() => {
+                const current = this.#bodyPartWaits.get(endpointId);
+                if (current) this.#finishBodyPartWait(endpointId, current, false);
+            }, BODY_PART_TIMEOUT_MS),
+            resolve: resolveWait,
+            promise,
+        };
+        this.#bodyPartWaits.set(endpointId, wait);
+        return wait;
+    }
+
+    #finishBodyPartWait(endpointId: string, wait: BodyPartWait, result: boolean | undefined): void {
+        if (this.#bodyPartWaits.get(endpointId) !== wait) return;
+        clearTimeout(wait.timer);
+        this.#bodyPartWaits.delete(endpointId);
+        wait.resolve(result);
+    }
+
+    #cancelBodyPartWait(endpointId: string): void {
+        const wait = this.#bodyPartWaits.get(endpointId);
+        if (wait) this.#finishBodyPartWait(endpointId, wait, undefined);
     }
 
     // IMU data, mag status, taps, ToF range
@@ -557,4 +577,11 @@ interface BleState {
         voltage?: number;
         chargeStatus?: "discharging" | "charging" | "charged" | "unknown";
     };
+}
+
+interface BodyPartWait {
+    bodyPart: BodyPart;
+    timer: ReturnType<typeof setTimeout>;
+    resolve: (result: boolean | undefined) => void;
+    promise: Promise<boolean | undefined>;
 }

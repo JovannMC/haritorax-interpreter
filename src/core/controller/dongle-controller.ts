@@ -79,7 +79,7 @@ export class DongleController {
     readonly #pairingSlots = new Map<string, { slot: "0" | "1"; armed: boolean; wasUnpaired: boolean }>();
     // last `r:` register per endpoint
     readonly #registers = new Map<string, DongleRegister>();
-    readonly #bodyPartWaits = new Map<string, { bodyPart: BodyPart; resolve: () => void }>();
+    readonly #bodyPartWaits = new Map<string, BodyPartWait>();
     // last `oN:` frame the dongle echoed per endpoint:slot, the base for settings writes
     readonly #settingsEchoes = new Map<string, string>();
     readonly #latencies = new Map<string, number>();
@@ -261,21 +261,10 @@ export class DongleController {
         }
 
         const key = endpointSlotKey(endpointId, slot);
-        const confirmed = new Promise<boolean>((resolve) => {
-            const timer = setTimeout(() => {
-                this.#bodyPartWaits.delete(key);
-                resolve(false);
-            }, BODY_PART_TIMEOUT_MS);
-
-            this.#bodyPartWaits.set(key, {
-                bodyPart,
-                resolve: () => {
-                    clearTimeout(timer);
-                    this.#bodyPartWaits.delete(key);
-                    resolve(true);
-                },
-            });
-        });
+        if (this.#bodyPartWaits.has(key)) {
+            throw new HaritoraXError("BUSY", `A body-part change is already in progress on ${endpointId}:${slot}`);
+        }
+        const wait = this.#createBodyPartWait(key, bodyPart);
 
         try {
             const commands = bodyPartCommands(slot, settings, trackerId, unlock, this.#echo(endpointId, slot));
@@ -286,11 +275,15 @@ export class DongleController {
 
             await this.#write(endpointId, `r${slot}:`);
         } catch (error) {
-            this.#bodyPartWaits.delete(key);
+            this.#finishBodyPartWait(key, wait, undefined);
             throw error;
         }
 
-        if (!(await confirmed)) {
+        const confirmed = await wait.promise;
+        if (confirmed === undefined) {
+            throw new HaritoraXError("NOT_CONNECTED", `${endpointId}:${slot} disconnected before confirming its body part`);
+        }
+        if (!confirmed) {
             throw new HaritoraXError(
                 "TIMEOUT",
                 `${device.deviceId} did not confirm the body part "${bodyPart}", firmware may have rejected it`,
@@ -342,6 +335,9 @@ export class DongleController {
         this.#dongleVersions.delete(endpointId);
         this.#pairings.cancel(endpointId);
         this.#pairingSlots.delete(endpointId);
+        for (const key of this.#bodyPartWaits.keys()) {
+            if (key.startsWith(`${endpointId}:`)) this.#cancelBodyPartWait(key);
+        }
 
         this.#stopPings(endpointId);
         this.#registers.delete(endpointId);
@@ -365,6 +361,7 @@ export class DongleController {
     }
 
     dispose(): void {
+        for (const key of this.#bodyPartWaits.keys()) this.#cancelBodyPartWait(key);
         for (const endpointId of [...this.#pingTimers.keys()]) this.#stopPings(endpointId);
         this.#latencies.clear();
         this.#pingSentAt.clear();
@@ -376,6 +373,34 @@ export class DongleController {
         this.#identities.clear();
         this.#buttons.clear();
         this.#lastButtonPress.clear();
+    }
+
+    #createBodyPartWait(key: string, bodyPart: BodyPart): BodyPartWait {
+        let resolveWait!: (result: boolean | undefined) => void;
+        const promise = new Promise<boolean | undefined>((resolve) => (resolveWait = resolve));
+        const wait: BodyPartWait = {
+            bodyPart,
+            timer: setTimeout(() => {
+                const current = this.#bodyPartWaits.get(key);
+                if (current) this.#finishBodyPartWait(key, current, false);
+            }, BODY_PART_TIMEOUT_MS),
+            resolve: resolveWait,
+            promise,
+        };
+        this.#bodyPartWaits.set(key, wait);
+        return wait;
+    }
+
+    #finishBodyPartWait(key: string, wait: BodyPartWait, result: boolean | undefined): void {
+        if (this.#bodyPartWaits.get(key) !== wait) return;
+        clearTimeout(wait.timer);
+        this.#bodyPartWaits.delete(key);
+        wait.resolve(result);
+    }
+
+    #cancelBodyPartWait(key: string): void {
+        const wait = this.#bodyPartWaits.get(key);
+        if (wait) this.#finishBodyPartWait(key, wait, undefined);
     }
 
     /*
@@ -533,7 +558,7 @@ export class DongleController {
         if (device) this.#registry.setTrackers(device.deviceId, bodyPartsFor(bodyPart, device.imuCount ?? 1));
 
         const bodyPartWait = this.#bodyPartWaits.get(key);
-        if (bodyPartWait?.bodyPart === bodyPart) bodyPartWait.resolve();
+        if (bodyPartWait?.bodyPart === bodyPart) this.#finishBodyPartWait(key, bodyPartWait, true);
 
         if (device) this.#applyAccelAccuracy(endpointId, device, payload);
 
@@ -734,4 +759,11 @@ function delay(ms: number): Promise<void> {
 interface TrackerIdentity {
     dongleId: string;
     bodyPart: BodyPart;
+}
+
+interface BodyPartWait {
+    bodyPart: BodyPart;
+    timer: ReturnType<typeof setTimeout>;
+    resolve: (result: boolean | undefined) => void;
+    promise: Promise<boolean | undefined>;
 }

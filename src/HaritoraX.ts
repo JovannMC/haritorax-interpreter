@@ -39,9 +39,12 @@ export class HaritoraX {
     readonly #endpointOwners = new Map<string, Connection>();
     readonly #open = new Set<string>();
     readonly #subscriptions: Unsubscribe[] = [];
+    readonly #endpointOperations = new Map<string, Promise<void>>();
 
     #scanController: AbortController | undefined;
     #scanning: Promise<EndpointDescriptor[]> | undefined;
+    #scanGeneration = 0;
+    #disposed = false;
 
     constructor(options: HaritoraXOptions = {}) {
         this.#connections = options.connections ?? [];
@@ -104,12 +107,18 @@ export class HaritoraX {
 
     // check what endpoints every connection can see, serial ports and BLE peripherals
     discover(options?: ListOptions): Promise<EndpointDescriptor[]> {
+        if (this.#disposed || options?.signal?.aborted) return Promise.resolve(this.#endpoints);
         if (this.#scanning) return this.#scanning;
 
         const controller = new AbortController();
+        const signal = options?.signal ? AbortSignal.any([controller.signal, options.signal]) : controller.signal;
+        const generation = ++this.#scanGeneration;
+        const timeout = options?.timeoutMs;
+        const timeoutId = timeout !== undefined && timeout >= 0 ? setTimeout(() => controller.abort(), timeout) : undefined;
         this.#scanController = controller;
 
-        const done = this.#scan(controller, options).finally(() => {
+        const done = this.#scan(signal, generation, options).finally(() => {
+            clearTimeout(timeoutId);
             if (this.#scanning === done) {
                 this.#scanning = undefined;
                 if (this.#scanController === controller) this.#scanController = undefined;
@@ -120,18 +129,21 @@ export class HaritoraX {
         return done;
     }
 
-    async #scan(controller: AbortController, options?: ListOptions): Promise<EndpointDescriptor[]> {
-        const results = await Promise.all(
+    async #scan(signal: AbortSignal, generation: number, options?: ListOptions): Promise<EndpointDescriptor[]> {
+        const scanning = Promise.all(
             this.#connections.map(async (connection) => {
                 try {
-                    return { connection, found: await connection.list({ ...options, signal: controller.signal }) };
+                    return { connection, found: await connection.list({ ...options, signal }) };
                 } catch (error) {
+                    if (signal.aborted) return { connection, found: [] as EndpointDescriptor[] };
                     this.#log.error(`Discovery failed for "${connection.kind}"`, { error: String(error) });
                     this.#emitter.emit("error", { error: toError(error) });
                     return { connection, found: [] as EndpointDescriptor[] };
                 }
             }),
         );
+        const results = await raceWithAbort(scanning, signal);
+        if (!results || signal.aborted || this.#disposed || generation !== this.#scanGeneration) return this.#endpoints;
 
         const merged = new Map<string, EndpointDescriptor>();
 
@@ -146,24 +158,8 @@ export class HaritoraX {
             if (previous) merged.set(endpointId, previous);
         }
 
-        // wired tracker over BLE still shows BTSPP device, so prioritize BLE over serial for wired trackers
-        const wiredOnBle = results.some(({ found }) =>
-            found.some((descriptor) => descriptor.connection === "ble" && descriptor.model === "wired"),
-        );
-        let skippedWired = 0;
-
         for (const { connection, found } of results) {
             for (const descriptor of found) {
-                if (
-                    wiredOnBle &&
-                    descriptor.connection === "serial" &&
-                    descriptor.model === "wired" &&
-                    !this.#open.has(descriptor.id)
-                ) {
-                    skippedWired++;
-                    continue;
-                }
-
                 merged.set(descriptor.id, descriptor);
                 this.#endpointOwners.set(descriptor.id, connection);
 
@@ -182,7 +178,6 @@ export class HaritoraX {
         }
 
         this.#endpoints = [...merged.values()];
-        if (skippedWired > 0) this.#log.info(`Using BLE for the wired tracker, ignored ${skippedWired} wired serial port(s)`);
 
         this.#log.info(`Discovered ${this.#endpoints.length} endpoint(s)`, {
             ids: this.#endpoints.map((descriptor) => descriptor.id).join(","),
@@ -192,10 +187,12 @@ export class HaritoraX {
     }
 
     stopDiscovery(): Promise<void> {
+        this.#scanGeneration++;
         this.#scanController?.abort();
         this.#scanController = undefined;
+        const scanning = this.#scanning;
         this.#scanning = undefined;
-        return Promise.resolve();
+        return scanning?.then(() => undefined) ?? Promise.resolve();
     }
 
     getEndpoints(): EndpointDescriptor[] {
@@ -352,37 +349,49 @@ export class HaritoraX {
     }
 
     async connect(endpointId: string): Promise<void> {
-        const connection = this.#endpointOwners.get(endpointId);
-        if (!connection) {
-            throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown endpoint "${endpointId}", call discover() first`);
-        }
+        return this.#withEndpointOperation(endpointId, async () => {
+            if (this.#disposed) throw new HaritoraXError("NOT_CONNECTED", "HaritoraX has been disposed");
+            const connection = this.#endpointOwners.get(endpointId);
+            if (!connection) {
+                throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown endpoint "${endpointId}", call discover() first`);
+            }
 
-        if (this.#open.has(endpointId)) return;
+            if (this.#open.has(endpointId)) return;
 
-        await connection.open(endpointId);
-        this.#open.add(endpointId);
+            await connection.open(endpointId);
+            if (this.#disposed) {
+                await connection.close(endpointId);
+                return;
+            }
+            this.#open.add(endpointId);
 
-        const descriptor = this.#endpoints.find((endpoint) => endpoint.id === endpointId);
-        if (descriptor?.connection === "ble") {
-            await this.#ble.start(endpointId).catch((error: unknown) => {
-                this.#log.warn(`Could not start sensor data on ${endpointId}`, { error: String(error) });
+            const descriptor = this.#endpoints.find((endpoint) => endpoint.id === endpointId);
+            if (descriptor?.connection === "ble") {
+                await this.#ble.start(endpointId).catch((error: unknown) => {
+                    this.#log.warn(`Could not start sensor data on ${endpointId}`, { error: String(error) });
+                });
+            }
+
+            this.#emitter.emit("endpoint:connected", {
+                endpointId,
+                connection: connection.kind,
+                displayName: descriptor?.displayName ?? endpointId,
             });
-        }
-
-        this.#emitter.emit("endpoint:connected", {
-            endpointId,
-            connection: connection.kind,
-            displayName: descriptor?.displayName ?? endpointId,
+            this.#log.info(`Connected ${endpointId}`);
         });
-        this.#log.info(`Connected ${endpointId}`);
     }
 
     async disconnect(endpointId: string): Promise<void> {
-        if (!this.#open.delete(endpointId)) return;
+        return this.#withEndpointOperation(endpointId, async () => {
+            if (!this.#open.has(endpointId)) return;
 
-        await this.#endpointOwners.get(endpointId)?.close(endpointId);
-        this.#dropEndpoint(endpointId, "requested");
-        this.#log.info(`Disconnected ${endpointId}`);
+            try {
+                await this.#endpointOwners.get(endpointId)?.close(endpointId);
+            } finally {
+                if (this.#open.delete(endpointId)) this.#dropEndpoint(endpointId, "requested");
+            }
+            this.#log.info(`Disconnected ${endpointId}`);
+        });
     }
 
     /*
@@ -390,8 +399,17 @@ export class HaritoraX {
      */
 
     async dispose(): Promise<void> {
+        if (this.#disposed) return;
+        this.#disposed = true;
+        this.#scanGeneration++;
         this.#scanController?.abort();
         this.#scanController = undefined;
+        const scanning = this.#scanning;
+        this.#scanning = undefined;
+        await Promise.all([
+            ...(scanning ? [scanning.catch(() => this.#endpoints)] : []),
+            ...[...this.#endpointOperations.values()].map((operation) => operation.catch(() => undefined)),
+        ]);
         this.#dongle.dispose();
         this.#wired.dispose();
         this.#ble.dispose();
@@ -505,6 +523,16 @@ export class HaritoraX {
 
         this.#log.debug(`BLE RSSI update for ${device.deviceId}: ${rssi} dBm`);
     }
+
+    #withEndpointOperation(endpointId: string, operation: () => Promise<void>): Promise<void> {
+        const previous = this.#endpointOperations.get(endpointId) ?? Promise.resolve();
+        const current = previous.catch(() => undefined).then(operation);
+        const tracked = current.finally(() => {
+            if (this.#endpointOperations.get(endpointId) === tracked) this.#endpointOperations.delete(endpointId);
+        });
+        this.#endpointOperations.set(endpointId, tracked);
+        return tracked;
+    }
 }
 
 export function createHaritoraX(options?: HaritoraXOptions): HaritoraX {
@@ -513,6 +541,28 @@ export function createHaritoraX(options?: HaritoraXOptions): HaritoraX {
 
 function toError(value: unknown): Error {
     return value instanceof Error ? value : new Error(String(value));
+}
+
+function raceWithAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T | undefined> {
+    if (signal.aborted) return Promise.resolve(undefined);
+
+    return new Promise((resolve, reject) => {
+        const onAbort = (): void => {
+            signal.removeEventListener("abort", onAbort);
+            resolve(undefined);
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+        operation.then(
+            (value) => {
+                signal.removeEventListener("abort", onAbort);
+                resolve(value);
+            },
+            (error: unknown) => {
+                signal.removeEventListener("abort", onAbort);
+                reject(error instanceof Error ? error : new Error(String(error)));
+            },
+        );
+    });
 }
 
 /*

@@ -98,6 +98,7 @@ export class SerialConnection implements Connection {
             }
             this.#log.warn("Serial enumeration failed, trying manually configured serial ports", { error: String(error) });
         }
+        if (options?.signal?.aborted) return [];
 
         const endpoints: EndpointDescriptor[] = [];
         const manualCandidates: PortSummary[] = [];
@@ -123,6 +124,7 @@ export class SerialConnection implements Connection {
         }
 
         for (const port of manualCandidates) {
+            if (options?.signal?.aborted) return [];
             if (this.#ports.has(port.path)) {
                 const wired = this.#wiredEndpoints.has(port.path);
                 if (wired) {
@@ -142,7 +144,7 @@ export class SerialConnection implements Connection {
                 continue;
             }
 
-            const probe = await this.#probeSerialPort(port);
+            const probe = await this.#probeSerialPort(port, options?.signal);
             if (probe.wired) {
                 wiredEndpoints.add(port.path);
                 endpoints.push({
@@ -161,6 +163,7 @@ export class SerialConnection implements Connection {
         }
 
         for (const port of wiredCandidates) {
+            if (options?.signal?.aborted) return [];
             if (this.#ports.has(port.path)) {
                 if (this.#wiredEndpoints.has(port.path)) {
                     endpoints.push({
@@ -173,7 +176,7 @@ export class SerialConnection implements Connection {
                 continue;
             }
 
-            if ((await this.#probeSerialPort(port)).wired) {
+            if ((await this.#probeSerialPort(port, options?.signal)).wired) {
                 wiredEndpoints.add(port.path);
                 endpoints.push({
                     id: port.path,
@@ -191,23 +194,31 @@ export class SerialConnection implements Connection {
     }
 
     // tries a port candidate by sending both the wired and generic serial info requests.
-    async #probeSerialPort(port: PortSummary): Promise<{ wired: boolean }> {
+    async #probeSerialPort(port: PortSummary, signal?: AbortSignal): Promise<{ wired: boolean }> {
+        if (signal?.aborted) return { wired: false };
         let handle: SerialPort | undefined;
         try {
             handle = await this.#backend.open(port.path);
             return await new Promise<{ wired: boolean }>((resolve) => {
                 let settled = false;
                 let pending: Uint8Array = new Uint8Array(0);
+                const timer = setTimeout(() => finish({ wired: false }), SPP_TIMEOUT);
 
                 const finish = (result: { wired: boolean }): void => {
                     if (settled) return;
                     settled = true;
                     clearTimeout(timer);
+                    signal?.removeEventListener("abort", onAbort);
                     handle?.removeAllListeners();
                     resolve(result);
                 };
 
-                const timer = setTimeout(() => finish({ wired: false }), SPP_TIMEOUT);
+                const onAbort = (): void => finish({ wired: false });
+                signal?.addEventListener("abort", onAbort, { once: true });
+                if (signal?.aborted) {
+                    finish({ wired: false });
+                    return;
+                }
 
                 handle?.on("data", (chunk: Uint8Array) => {
                     const { lines, rest } = splitLines(pending, chunk);
