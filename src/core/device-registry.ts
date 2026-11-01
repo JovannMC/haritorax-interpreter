@@ -132,13 +132,13 @@ export class DeviceRegistry {
                     tracker.rssi = undefined;
                     tracker.sensorRssi = undefined;
                 }
+            }
 
-                if (
-                    existing.trackers.length !== input.parts.length ||
-                    existing.trackers.some((tracker, index) => tracker.bodyPart !== input.parts[index])
-                ) {
-                    this.setTrackers(deviceId, input.parts);
-                }
+            if (
+                existing.trackers.length !== input.parts.length ||
+                existing.trackers.some((tracker, index) => tracker.bodyPart !== input.parts[index])
+            ) {
+                this.setTrackers(deviceId, input.parts);
             }
 
             existing.model = input.model;
@@ -211,8 +211,8 @@ export class DeviceRegistry {
         const device = this.#devices.get(deviceId);
         if (!device) return;
 
-        device.battery = battery;
-        this.#emitter.emit("battery", battery);
+        device.battery = { ...battery };
+        this.#emitter.emit("battery", { ...battery });
     }
 
     setSettings(deviceId: string, settings: TrackerSettings): void {
@@ -220,8 +220,11 @@ export class DeviceRegistry {
         if (!device) return;
         if (device.settings && settingsEqual(device.settings, settings)) return;
 
-        device.settings = settings;
-        this.#emitter.emit("settings", { deviceId, settings });
+        device.settings = { ...settings, sensorAutoCorrection: [...settings.sensorAutoCorrection] };
+        this.#emitter.emit("settings", {
+            deviceId,
+            settings: { ...device.settings, sensorAutoCorrection: [...device.settings.sensorAutoCorrection] },
+        });
         this.#emitDevices();
     }
 
@@ -292,7 +295,7 @@ export class DeviceRegistry {
 
     setRssi(trackerId: string, dongleRssi: number, sensorRssi?: number): void {
         const state = this.#trackers.get(trackerId);
-        if (!state || state.snapshot.rssi === dongleRssi) return;
+        if (!state || (state.snapshot.rssi === dongleRssi && state.snapshot.sensorRssi === sensorRssi)) return;
 
         state.snapshot.rssi = dongleRssi;
         state.snapshot.sensorRssi = sensorRssi;
@@ -432,12 +435,27 @@ export class DeviceRegistry {
     }
 
     #emitDevices(): void {
-        this.#emitter.emit("devices", { devices: this.listDevices() });
+        this.#emitter.emit("devices", { devices: this.listDevices().map(copyDeviceSnapshot) });
     }
 }
 
 export function endpointSlotKey(endpointId: string, slot: string): string {
     return `${endpointId}:${slot}`;
+}
+
+export function copyDeviceSnapshot(device: DeviceSnapshot): DeviceSnapshot {
+    return {
+        ...device,
+        trackers: device.trackers.map((tracker) => ({ ...tracker })),
+        ...(device.battery ? { battery: { ...device.battery } } : {}),
+        ...(device.settings
+            ? { settings: { ...device.settings, sensorAutoCorrection: [...device.settings.sensorAutoCorrection] } }
+            : {}),
+    };
+}
+
+export function copyTrackerSnapshot(tracker: TrackerSnapshot): TrackerSnapshot {
+    return { ...tracker };
 }
 
 function settingsEqual(a: TrackerSettings, b: TrackerSettings): boolean {

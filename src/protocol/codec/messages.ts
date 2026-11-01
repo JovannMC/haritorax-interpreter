@@ -28,7 +28,8 @@ export function parseInfo(payload: string): ParsedInfo | undefined {
         const comm = typeof data["comm"] === "string" ? (data["comm"] as WiredComm) : undefined;
         const commNext = typeof data["comm_next"] === "string" ? (data["comm_next"] as WiredComm) : undefined;
 
-        if (!model) return undefined;
+        if (!model || !serialNumber.trim()) return undefined;
+        if (imuCount !== undefined && (!Number.isInteger(imuCount) || imuCount < 1)) return undefined;
         return {
             version,
             model,

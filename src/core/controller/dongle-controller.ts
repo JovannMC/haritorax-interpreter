@@ -569,8 +569,10 @@ export class DongleController {
 
         if (!updated.pressed || !device) return;
 
-        if (!isButtonDebounced(buttonKey, updated.pressed, this.#lastButtonPress, Date.now(), this.#buttonDebounceMs)) {
-            this.#emitter.emit("button", { deviceId: device.deviceId, button: updated.pressed });
+        for (const button of updated.pressed) {
+            if (!isButtonDebounced(buttonKey, button, this.#lastButtonPress, Date.now(), this.#buttonDebounceMs)) {
+                this.#emitter.emit("button", { deviceId: device.deviceId, button });
+            }
         }
     }
 

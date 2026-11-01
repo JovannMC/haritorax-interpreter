@@ -1,7 +1,7 @@
 import { HaritoraXError } from "./lib/errors.js";
 import { Logger, type LogSink } from "./lib/logging.js";
 import { Emitter } from "./lib/emitter.js";
-import { DeviceRegistry } from "./core/device-registry.js";
+import { copyDeviceSnapshot, copyTrackerSnapshot, DeviceRegistry } from "./core/device-registry.js";
 import { DongleController } from "./core/controller/dongle-controller.js";
 import { WiredController } from "./core/controller/wired-controller.js";
 import { BleController } from "./core/controller/ble-controller.js";
@@ -196,23 +196,25 @@ export class HaritoraX {
     }
 
     getEndpoints(): EndpointDescriptor[] {
-        return [...this.#endpoints];
+        return this.#endpoints.map((endpoint) => ({ ...endpoint }));
     }
 
     getDevices(): DeviceSnapshot[] {
-        return this.#registry.listDevices();
+        return this.#registry.listDevices().map(copyDeviceSnapshot);
     }
 
     getDevice(deviceId: string): DeviceSnapshot | undefined {
-        return this.#registry.getDevice(deviceId);
+        const device = this.#registry.getDevice(deviceId);
+        return device ? copyDeviceSnapshot(device) : undefined;
     }
 
     getTrackers(): TrackerSnapshot[] {
-        return this.#registry.listTrackers();
+        return this.#registry.listTrackers().map(copyTrackerSnapshot);
     }
 
     getTracker(trackerId: string): TrackerSnapshot | undefined {
-        return this.#registry.getTracker(trackerId);
+        const tracker = this.#registry.getTracker(trackerId);
+        return tracker ? copyTrackerSnapshot(tracker) : undefined;
     }
 
     getBodyPart(trackerId: string): BodyPart | undefined {
@@ -519,7 +521,7 @@ export class HaritoraX {
         const device = this.#open.has(endpointId) ? this.#registry.deviceAt(endpointId, "0") : undefined;
         if (!device) return;
 
-        this.#registry.setRssi(`${device.deviceId}:0`, rssi);
+        for (const tracker of device.trackers) this.#registry.setRssi(tracker.trackerId, rssi, tracker.sensorRssi);
 
         this.#log.debug(`BLE RSSI update for ${device.deviceId}: ${rssi} dBm`);
     }

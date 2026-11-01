@@ -266,8 +266,10 @@ export function parseDongleButtons(payload: string, previous: DongleButtonState 
     // ignore first frame (may have previous counts)
     if (!previous) return result;
 
-    if (main !== previous.main) result.pressed = "main";
-    else if (sub !== previous.sub) result.pressed = "sub";
+    const pressed: ("main" | "sub")[] = [];
+    if (main !== previous.main) pressed.push("main");
+    if (sub !== previous.sub) pressed.push("sub");
+    if (pressed.length > 0) result.pressed = pressed;
 
     return result;
 }
@@ -295,7 +297,7 @@ export function isButtonDebounced(
 export interface DongleButtonState {
     main: number;
     sub: number;
-    pressed?: "main" | "sub";
+    pressed?: ("main" | "sub")[];
 }
 
 export interface TrackerRssi {
