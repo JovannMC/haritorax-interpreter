@@ -2,19 +2,24 @@
 
 A node.js package that enables communication with the HaritoraX FBT trackers to read & write data to them. No HaritoraConfigurator / Shiftall VR Manager software needed!
 
-Check out the Haritora-GX(6/2) POC if you want some more info: <https://github.com/JovannMC/haritora-gx-poc>
+Check out the Haritora-GX(6/2) POC if you want some more info, at least for the dongles: <https://github.com/JovannMC/haritora-gx-poc>
 
 ## Installation
 
-`npm install haritorax-interpreter`
+Node.js 23.6 or newer is required. Install the package and the optional peers for the transports you use:
 
-or
+```bash
+npm install haritorax-interpreter
 
-`pnpm install haritorax-interpreter`
+# Serial ports (and HaritoraX Wired via SPP)
+npm install @serialport/bindings-cpp @serialport/stream
 
-or
+# Bluetooth LE
+npm install @stoprocent/noble
 
-`(insert whatever package manager, lol)`
+# Linux BLE using BlueZ D-Bus binding
+npm install dbus-next
+```
 
 ## Quick start
 
@@ -24,16 +29,30 @@ The package is split so you can import only what you need and most dependencies 
 import { createHaritoraX } from "haritorax-interpreter";
 import { createSerialConnection } from "haritorax-interpreter/connections/serial";
 
-const serial = createSerialConnection();
-const app = createHaritoraX({ connections: [serial], logLevel: "info" });
+const app = createHaritoraX({
+    connections: [createSerialConnection({ includeWired: true })],
+    logLevel: "info",
+});
 
-const endpoints = await app.discover();
+const stopListening = app.on("imu", (sample) => {
+    console.log(`IMU sample from ${sample.deviceId} - ${sample.trackerId}: ${sample.rotation}`);
+});
+
+const endpoints = await app.discover({ timeoutMs: 5_000 });
 for (const endpoint of endpoints) await app.connect(endpoint.id);
 
-app.on("imu", (sample) => console.log(sample.deviceId, sample.rotation));
+// on shutdown:
+stopListening();
+await app.dispose();
 ```
 
 Bluetooth LE is used by using `createBleConnection` from `haritorax-interpreter/connections/ble`.
+
+You can use the optional trace CLI can capture serial port and BLE traffic from real devices:
+
+```bash
+npx haritorax-trace --no-log
+```
 
 ### Serial options
 
@@ -51,7 +70,7 @@ const serial = createSerialConnection({
 });
 ```
 
-On Linux, you can use optionally use `autoBindWired: true` to check paired HaritoraX Wired Bluetooth devices, resolve their SPP channel with `sdptool`, and attempt `rfcomm bind` for you, instead of doing it yourself. This requires `bluetoothctl`, `sdptool`, and `rfcomm`.
+On Linux, `autoBindWired: true` checks paired HaritoraX Wired Bluetooth devices, resolves their SPP channel with `sdptool`, and attempts `rfcomm bind` for you. This requires `bluetoothctl`, `sdptool`, and `rfcomm`, and permissions to bind RFCOMM devices.
 
 If you want to do it manually instead, find the paired device and resolve its SPP channel:
 
@@ -75,7 +94,7 @@ sudo rfcomm bind /dev/rfcomm0 <MAC> <channel>
 # e.g. sudo rfcomm bind /dev/rfcomm0 00:11:22:33:44:55 1
 ```
 
-The device will then appear as `/dev/rfcomm0` and be detected automatically by the package.
+The device will then appear as `/dev/rfcomm0` that you can pass in to `serialPorts`, or you can enable wired auto discovery with `includeWired: true`.
 
 ## Linux-specific instructions
 
@@ -90,9 +109,9 @@ For Linux users, you (or your users) need to do some setup depending on the conn
 
 ### Bluetooth (LE)
 
-BLE on Linux uses [noble](https://github.com/stoprocent/noble)'s BlueZ D-Bus binding through the optional `dbus-next` dependency. On most distributions just make sure BlueZ is running, Bluetooth is enabled, and your user has access to the adapter.
+BLE on Linux uses [noble](https://github.com/stoprocent/noble)'s BlueZ D-Bus binding through the optional `dbus-next` peer dependency, which uses the system's BlueZ service to avoid needing to set up raw HCI socket permissions. Make sure BlueZ is running, Bluetooth is enabled, and your user has access to the adapter.
 
-If discovery fails with a D-Bus or permission error, check your distribution's BlueZ/polkit configuration and system logs.
+If discovery fails with a D-Bus or permission error, check your distribution's BlueZ/polkit configuration and system logs. You can explicitly select the HCI binding with `binding: "hci"` if you have configured raw socket access instead.
 
 ## Supported devices
 
@@ -112,6 +131,8 @@ If discovery fails with a D-Bus or permission error, check your distribution's B
 | Bluetooth (SPP)          | Y         |
 | GX6 Communication Dongle | Y         |
 | GX2 Communication Dongle | Y         |
+
+`Y` = supported, `N` = unsupported, `?` = unknown, `-` = not applicable
 
 ## Projects using package
 
