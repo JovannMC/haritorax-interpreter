@@ -55,6 +55,9 @@ jobs:
         if: github.event_name == 'release'
         needs: check
         runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            id-token: write
 
         steps:
             - name: Checkout repository
@@ -80,5 +83,3 @@ jobs:
 
             - name: Publish package
               run: pnpm publish --no-git-checks
-              env:
-                  NODE_AUTH_TOKEN: ${{ secrets.npm_token }}
