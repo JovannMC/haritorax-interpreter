@@ -49,7 +49,7 @@
         "LICENSE"
     ],
     "engines": {
-        "node": ">=23.6.0"
+        "node": ">=24.0.0"
     },
     "scripts": {
         "build": "npm run clean && tsc -p tsconfig.json && node scripts/fix-bin-mode.mjs",

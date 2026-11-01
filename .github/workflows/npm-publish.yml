@@ -16,8 +16,6 @@ jobs:
             matrix:
                 include:
                     - os: ubuntu-latest
-                      node: "23.6.0"
-                    - os: ubuntu-latest
                       node: "24"
                     - os: macos-latest
                       node: "24"

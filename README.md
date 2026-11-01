@@ -6,7 +6,7 @@ Check out the Haritora-GX(6/2) POC if you want some more info, at least for the 
 
 ## Installation
 
-Node.js 23.6 or newer is required. Install the package and the optional peers for the transports you use:
+Node.js 24 or newer is required. Install the package and the optional peers for the transports you use:
 
 ```bash
 npm install haritorax-interpreter
