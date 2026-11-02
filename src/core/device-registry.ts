@@ -243,6 +243,11 @@ export class DeviceRegistry {
         if (state.snapshot.connected) {
             if (!state.timer) this.#armTrackerTimeout(state);
         } else {
+            this.#log.debug(`Tracker data resumed for ${trackerId}`, {
+                deviceId: state.snapshot.deviceId,
+                endpointId: state.snapshot.endpointId,
+                lastSeen: state.snapshot.lastSeen,
+            });
             this.#connectTracker(state.snapshot);
             this.#emitDevices();
         }
@@ -259,6 +264,11 @@ export class DeviceRegistry {
 
         if (!tracker.connected) return;
 
+        this.#log.debug(`Tracker disconnected: ${tracker.trackerId}`, {
+            deviceId: tracker.deviceId,
+            endpointId: tracker.endpointId,
+            reason,
+        });
         tracker.connected = false;
         this.#emitter.emit("tracker:disconnected", {
             trackerId: tracker.trackerId,
@@ -315,6 +325,12 @@ export class DeviceRegistry {
         state.snapshot.connected = false;
         state.snapshot.rssi = undefined;
         state.snapshot.sensorRssi = undefined;
+        this.#log.debug(`Tracker marked lost: ${trackerId}`, {
+            deviceId: state.snapshot.deviceId,
+            endpointId: state.snapshot.endpointId,
+            reason,
+            lastSeen: state.snapshot.lastSeen,
+        });
 
         this.#emitter.emit("tracker:disconnected", {
             trackerId: state.snapshot.trackerId,
@@ -385,6 +401,12 @@ export class DeviceRegistry {
 
         tracker.connected = true;
         state.deadline = Date.now() + TRACKER_TIMEOUT_MS;
+        this.#log.debug(`Tracker connected: ${tracker.trackerId}`, {
+            deviceId: tracker.deviceId,
+            endpointId: tracker.endpointId,
+            bodyPart: tracker.bodyPart,
+            timeoutMs: TRACKER_TIMEOUT_MS,
+        });
         this.#emitter.emit("tracker:connected", {
             trackerId: tracker.trackerId,
             deviceId: tracker.deviceId,
@@ -411,6 +433,12 @@ export class DeviceRegistry {
             if (!state.snapshot.connected) return;
 
             state.snapshot.connected = false;
+            this.#log.debug(`Tracker timed out: ${state.snapshot.trackerId}`, {
+                deviceId: state.snapshot.deviceId,
+                endpointId: state.snapshot.endpointId,
+                timeoutMs: TRACKER_TIMEOUT_MS,
+                lastSeen: state.snapshot.lastSeen,
+            });
             this.#emitter.emit("tracker:disconnected", {
                 trackerId: state.snapshot.trackerId,
                 deviceId: state.snapshot.deviceId,

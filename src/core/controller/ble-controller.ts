@@ -134,7 +134,10 @@ export class BleController implements ProtocolHandler {
                     state.sensorStartedAt ??= now;
                     const expectsSensor2 = state.model && hasSensor2(state.model, state.version);
                     const preferredAt = state.sensor2LastSeen ?? (expectsSensor2 ? state.sensorStartedAt : undefined);
-                    if (preferredAt === undefined || now - preferredAt >= SENSOR2_FALLBACK_MS) this.#onSensor(state, data);
+                    if (preferredAt === undefined || now - preferredAt >= SENSOR2_FALLBACK_MS) {
+                        this.#setSensorSource(state, "sensor");
+                        this.#onSensor(state, data);
+                    }
                 }
                 break;
             case "magnetometer": {
@@ -353,6 +356,7 @@ export class BleController implements ProtocolHandler {
     #onSensor2(state: BleState, data: Uint8Array): void {
         const slices = splitBleSensor2(data);
         if (slices.length === 0) return;
+        this.#setSensorSource(state, "sensor2");
         state.sensor2LastSeen = Date.now();
 
         const device = this.#ensureDevice(state, true);
@@ -384,6 +388,15 @@ export class BleController implements ProtocolHandler {
 
             this.#emitImu(device, tracker, slice.index, slice.role, slice.payload, undefined, slice.range);
         }
+    }
+
+    #setSensorSource(state: BleState, source: "sensor" | "sensor2"): void {
+        if (state.sensorSource === source) return;
+        this.#log.debug(`Using BLE ${source} notifications for ${state.endpointId}`, {
+            model: state.model,
+            firmwareVersion: state.version,
+        });
+        state.sensorSource = source;
     }
 
     #onWiredSensor(state: BleState, data: Uint8Array): void {
@@ -517,6 +530,14 @@ export class BleController implements ProtocolHandler {
 
         if (device.endpointId !== state.endpointId) return undefined;
         state.device = device;
+        this.#log.debug(`Identified BLE tracker ${device.deviceId}`, {
+            endpointId: state.endpointId,
+            model: state.model,
+            firmwareModel: state.firmwareModel,
+            version: state.version,
+            imuCount: device.imuCount,
+            bodyParts: parts,
+        });
 
         if (activate) {
             this.#maybeBattery(state);
@@ -566,6 +587,7 @@ interface BleState {
     endpointId: string;
     sensorStartedAt?: number;
     sensor2LastSeen?: number;
+    sensorSource?: "sensor" | "sensor2";
     serial?: string;
     model?: TrackerModel;
     device?: DeviceSnapshot;

@@ -47,11 +47,14 @@ export class HaritoraX {
 
     constructor(options: HaritoraXOptions = {}) {
         this.#connections = options.connections ?? [];
-        this.#log = new Logger(options.logLevel ?? "info", (entry) => {
-            if (options.onLog) options.onLog(entry);
-            else console.log(`[${entry.level}] ${entry.message}`);
-            this.#emitter.emit("log", entry);
-        });
+        this.#log = options.logger ?? new Logger(options.logLevel ?? "info");
+        this.#subscriptions.push(
+            this.#log.onEntry((entry) => {
+                if (options.onLog) options.onLog(entry);
+                else if (!options.logger) console.log(`[${entry.level}] ${entry.message}`);
+                this.#emitter.emit("log", entry);
+            }),
+        );
         this.#emitter.setErrorHandler((event, error) => {
             if (event === "log") return;
             this.#log.error(`Listener for "${event}" threw`, { error: String(error) });
@@ -442,8 +445,8 @@ export class HaritoraX {
 
         try {
             if (frame.characteristic !== undefined) {
-                if (this.#log.enabled("debug")) {
-                    this.#log.debug(`Frame ${frame.characteristic} from ${frame.endpointId}`, {
+                if (this.#log.enabled("trace")) {
+                    this.#log.trace(`Frame ${frame.characteristic} from ${frame.endpointId}`, {
                         bytes: frame.data.length,
                     });
                 }
@@ -457,8 +460,8 @@ export class HaritoraX {
             identifier = line.identifier;
             const { payload, rawIdentifier } = line;
 
-            if (this.#log.enabled("debug")) {
-                this.#log.debug(`Frame ${identifier || "(none)"} from ${frame.endpointId}`, {
+            if (this.#log.enabled("trace")) {
+                this.#log.trace(`Frame ${identifier || "(none)"} from ${frame.endpointId}`, {
                     bytes: frame.data.length,
                     payload: payload.length > 120 ? `${payload.slice(0, 120)}…` : payload,
                 });
@@ -568,6 +571,7 @@ export interface HaritoraXOptions {
     connections?: Connection[];
     logLevel?: LogLevel;
     onLog?: LogSink;
+    logger?: Logger;
     // debounce time for button presses, default 100ms
     buttonDebounceMs?: number;
     // how long pairing waits for the dongle to report the slot as paired, default 30 s

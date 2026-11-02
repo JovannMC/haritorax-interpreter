@@ -1,4 +1,4 @@
-import type { LogEntry, LogLevel } from "../types.js";
+import type { LogEntry, LogLevel, Unsubscribe } from "../types.js";
 
 const ORDER: Readonly<Record<Exclude<LogLevel, "silent">, number>> = Object.freeze({
     error: 1,
@@ -12,11 +12,16 @@ export type LogSink = (entry: LogEntry) => void;
 
 export class Logger {
     readonly #level: LogLevel;
-    readonly #sink: LogSink | undefined;
+    readonly #sinks = new Set<LogSink>();
 
     constructor(level: LogLevel = "info", sink?: LogSink) {
         this.#level = level;
-        this.#sink = sink;
+        if (sink) this.#sinks.add(sink);
+    }
+
+    onEntry(sink: LogSink): Unsubscribe {
+        this.#sinks.add(sink);
+        return () => this.#sinks.delete(sink);
     }
 
     enabled(level: Exclude<LogLevel, "silent">): boolean {
@@ -25,7 +30,8 @@ export class Logger {
 
     write(level: Exclude<LogLevel, "silent">, message: string, data?: Record<string, unknown>): void {
         if (!this.enabled(level)) return;
-        this.#sink?.({ level, message, timestamp: Date.now(), ...(data ? { data } : {}) });
+        const entry: LogEntry = { level, message, timestamp: Date.now(), ...(data ? { data } : {}) };
+        for (const sink of [...this.#sinks]) sink(entry);
     }
 
     error(message: string, data?: Record<string, unknown>): void {
@@ -42,5 +48,9 @@ export class Logger {
 
     debug(message: string, data?: Record<string, unknown>): void {
         this.write("debug", message, data);
+    }
+
+    trace(message: string, data?: Record<string, unknown>): void {
+        this.write("trace", message, data);
     }
 }

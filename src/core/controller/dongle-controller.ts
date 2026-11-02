@@ -111,8 +111,13 @@ export class DongleController {
         }
 
         const completion = this.#pairings.wait(endpointId, this.#pairingTimeoutMs);
+        const pairingStartedAt = Date.now();
         const session = { slot: portId, armed: false, wasUnpaired: false };
         this.#pairingSlots.set(endpointId, session);
+        this.#log.debug(`Starting pairing on ${endpointId}:${portId}`, {
+            channel,
+            timeoutMs: this.#pairingTimeoutMs,
+        });
 
         let result: Awaited<typeof completion> | undefined;
         try {
@@ -140,6 +145,10 @@ export class DongleController {
         }
 
         if (result === "timeout") {
+            this.#log.warn(`Pairing timed out on ${endpointId}:${portId}`, {
+                elapsedMs: Date.now() - pairingStartedAt,
+                timeoutMs: this.#pairingTimeoutMs,
+            });
             throw new HaritoraXError("TIMEOUT", `Pairing on ${endpointId} timed out`);
         }
 
@@ -150,7 +159,7 @@ export class DongleController {
         await this.#write(endpointId, `r${portId}:`);
 
         this.#emitter.emit("paired", { endpointId, slot: portId });
-        this.#log.info(`Paired ${endpointId}:${portId}`);
+        this.#log.info(`Paired ${endpointId}:${portId}`, { elapsedMs: Date.now() - pairingStartedAt, channel });
     }
 
     async unpair(endpointId: string, slot: string | number): Promise<void> {

@@ -8,6 +8,8 @@ export interface BlePeripheralSummary {
     id: string;
     localName?: string;
     rssi?: number;
+    connectable?: boolean;
+    serviceUuids?: string[];
 }
 
 export type BleDataHandler = (peripheralId: string, characteristic: BleCharacteristic, data: Uint8Array) => void;
