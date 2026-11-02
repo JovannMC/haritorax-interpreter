@@ -10,6 +10,8 @@ export interface Frame {
 export interface ListOptions {
     // return results after this time
     timeoutMs?: number;
+    // stop scanning once this known BLE endpoint is found
+    targetEndpointId?: string;
     // return no results if the signal is aborted before the timeout expires.
     signal?: AbortSignal;
 }

@@ -171,6 +171,19 @@ export class HaritoraX {
             if (previous) merged.set(endpointId, previous);
         }
 
+        if (options?.targetEndpointId) {
+            for (const previous of this.#endpoints) {
+                if (previous.id === options.targetEndpointId || merged.has(previous.id)) continue;
+
+                merged.set(previous.id, previous);
+                const owner = previousOwners.get(previous.id);
+                const handler = previousHandlers.get(previous.id);
+
+                if (owner) this.#endpointOwners.set(previous.id, owner);
+                if (handler) this.#handlers.set(previous.id, handler);
+            }
+        }
+
         for (const { connection, found } of results) {
             for (const descriptor of found) {
                 merged.set(descriptor.id, descriptor);

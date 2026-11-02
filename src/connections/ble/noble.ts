@@ -18,12 +18,14 @@ export interface NobleBleOptions extends BleConnectionOptions {
     binding?: "auto" | "hci" | "dbus" | "mac" | "win";
 }
 
-const INITIAL_READS: readonly BleCharacteristic[] = Object.freeze([
+const STREAM_IDENTITY_READS: readonly BleCharacteristic[] = Object.freeze([
     "serial-number",
     "software-revision",
     "number-of-imu",
     "model-number",
     "body-part",
+]);
+const DEFERRED_READS: readonly BleCharacteristic[] = Object.freeze([
     "magnetometer",
     "accel-accuracy",
     "sensor-mode",
@@ -78,6 +80,8 @@ class NobleBleBackend implements BleBackend {
     async scan(options?: ListOptions): Promise<BlePeripheralSummary[]> {
         const scanStartedAt = Date.now();
         const found = new Map<string, BlePeripheralSummary>();
+        let finishForTarget!: () => void;
+        const targetFound = new Promise<void>((resolve) => (finishForTarget = resolve));
         const onDiscover = (peripheral: Peripheral): void => {
             this.#peripherals.set(peripheral.id, peripheral);
 
@@ -92,6 +96,7 @@ class NobleBleBackend implements BleBackend {
                 connectable: peripheral.connectable,
                 serviceUuids: [...(peripheral.advertisement?.serviceUuids ?? [])],
             });
+            if (peripheral.id === options?.targetEndpointId) finishForTarget();
         };
 
         this.#noble.on("discover", onDiscover);
@@ -117,7 +122,7 @@ class NobleBleBackend implements BleBackend {
                 options?.signal,
             );
             this.#log?.debug("BLE scan started", { elapsedMs: Date.now() - scanStartStartedAt });
-            await waitForScanEnd(options?.signal, timeoutMs);
+            await waitForScanEnd(options?.signal, timeoutMs, options?.targetEndpointId ? targetFound : undefined);
         } catch (error) {
             this.#log?.debug("BLE scan failed", { elapsedMs: Date.now() - scanStartedAt, error: String(error) });
             throw error;
@@ -130,7 +135,9 @@ class NobleBleBackend implements BleBackend {
             );
         }
 
-        const results = [...found.values()];
+        const results = [...found.values()].filter(
+            (peripheral) => !options?.targetEndpointId || peripheral.id === options.targetEndpointId,
+        );
         const candidates = results.filter((peripheral) => parseBleDeviceName(peripheral.localName));
         this.#log?.debug("BLE scan completed", {
             elapsedMs: Date.now() - scanStartedAt,
@@ -272,24 +279,49 @@ class NobleBleBackend implements BleBackend {
                 });
             }
 
-            const readsStartedAt = Date.now();
-            await this.#readInitial(peripheralId, entry);
+            const identityReadsStartedAt = Date.now();
+            await this.#readInitial(peripheralId, entry, STREAM_IDENTITY_READS);
             this.#assertOpenEntry(peripheralId, entry);
-            this.#log?.debug("Finished initial BLE reads", {
+            this.#log?.debug("Finished essential BLE identity reads", {
                 peripheralId,
-                elapsedMs: Date.now() - readsStartedAt,
-                requested: INITIAL_READS.length,
-                available: INITIAL_READS.filter((name) => entry.characteristics.has(name)),
-                missing: INITIAL_READS.filter((name) => !entry.characteristics.has(name)),
+                elapsedMs: Date.now() - identityReadsStartedAt,
+                requested: STREAM_IDENTITY_READS.length,
+                available: STREAM_IDENTITY_READS.filter((name) => entry.characteristics.has(name)),
+                missing: STREAM_IDENTITY_READS.filter((name) => !entry.characteristics.has(name)),
             });
-            const subscriptionsStartedAt = Date.now();
-            await this.#subscribe(peripheralId, entry);
+
+            const sensorSubscriptionsStartedAt = Date.now();
+            await this.#subscribe(peripheralId, entry, ["sensor", "sensor2"]);
             this.#assertOpenEntry(peripheralId, entry);
-            this.#log?.debug("Finished BLE notification subscriptions", {
+            this.#log?.debug("Subscribed to BLE sensor notifications", {
                 peripheralId,
-                elapsedMs: Date.now() - subscriptionsStartedAt,
-                subscribed: [...entry.subscribed],
+                elapsedMs: Date.now() - sensorSubscriptionsStartedAt,
+                subscribed: entry.subscribed.filter((name) => name === "sensor" || name === "sensor2"),
             });
+
+            const metadataReadsStartedAt = Date.now();
+            await this.#readInitial(peripheralId, entry, DEFERRED_READS);
+            this.#assertOpenEntry(peripheralId, entry);
+            this.#log?.debug("Finished deferred BLE metadata reads", {
+                peripheralId,
+                elapsedMs: Date.now() - metadataReadsStartedAt,
+                requested: DEFERRED_READS.length,
+                available: DEFERRED_READS.filter((name) => entry.characteristics.has(name)),
+                missing: DEFERRED_READS.filter((name) => !entry.characteristics.has(name)),
+            });
+
+            const metadataSubscriptionsStartedAt = Date.now();
+            const metadataSubscriptions = [...entry.characteristics.keys()].filter(
+                (name) => name !== "sensor" && name !== "sensor2",
+            );
+            await this.#subscribe(peripheralId, entry, metadataSubscriptions);
+            this.#assertOpenEntry(peripheralId, entry);
+            this.#log?.debug("Finished BLE metadata subscriptions", {
+                peripheralId,
+                elapsedMs: Date.now() - metadataSubscriptionsStartedAt,
+                subscribed: entry.subscribed.filter((name) => name !== "sensor" && name !== "sensor2"),
+            });
+
             this.#startRssiPolling(peripheralId, entry);
             this.#log?.info(`BLE peripheral ready ${peripheralId}`, {
                 localName: peripheral.advertisement?.localName,
@@ -423,10 +455,10 @@ class NobleBleBackend implements BleBackend {
         this.#rssiTimers.delete(peripheralId);
     }
 
-    async #readInitial(peripheralId: string, entry: OpenPeripheral): Promise<void> {
+    async #readInitial(peripheralId: string, entry: OpenPeripheral, reads: readonly BleCharacteristic[]): Promise<void> {
         const succeeded: string[] = [];
         const failed: Array<{ characteristic: string; uuid: string; error: string }> = [];
-        for (const characteristic of INITIAL_READS) {
+        for (const characteristic of reads) {
             this.#assertOpenEntry(peripheralId, entry);
             const instance = entry.characteristics.get(characteristic);
             if (!instance) continue;
@@ -444,11 +476,13 @@ class NobleBleBackend implements BleBackend {
         this.#log?.debug("BLE initial read results", { peripheralId, succeeded, failed });
     }
 
-    async #subscribe(peripheralId: string, entry: OpenPeripheral): Promise<void> {
+    async #subscribe(peripheralId: string, entry: OpenPeripheral, characteristics: readonly BleCharacteristic[]): Promise<void> {
         const unsupported: string[] = [];
         const failed: Array<{ characteristic: string; uuid: string; error: string }> = [];
-        for (const [characteristic, instance] of entry.characteristics) {
+        for (const characteristic of characteristics) {
             this.#assertOpenEntry(peripheralId, entry);
+            const instance = entry.characteristics.get(characteristic);
+            if (!instance) continue;
             const properties = instance.properties;
             if (!properties.includes("notify") && !properties.includes("indicate")) {
                 unsupported.push(characteristic);
@@ -592,7 +626,7 @@ function resolveBinding(requested: string | undefined): NobleBinding {
     throw new HaritoraXError("LINK_UNAVAILABLE", `BLE is not supported on ${process.platform}`);
 }
 
-function waitForScanEnd(signal: AbortSignal | undefined, timeoutMs: number): Promise<void> {
+function waitForScanEnd(signal: AbortSignal | undefined, timeoutMs: number, finishEarly?: Promise<void>): Promise<void> {
     return new Promise((resolve) => {
         if (signal?.aborted) {
             resolve();
@@ -607,6 +641,7 @@ function waitForScanEnd(signal: AbortSignal | undefined, timeoutMs: number): Pro
 
         const timer = setTimeout(finish, timeoutMs);
         signal?.addEventListener("abort", finish, { once: true });
+        void finishEarly?.then(finish);
     });
 }
 
