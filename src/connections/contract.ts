@@ -8,7 +8,9 @@ export interface Frame {
 }
 
 export interface ListOptions {
+    // return results after this time
     timeoutMs?: number;
+    // return no results if the signal is aborted before the timeout expires.
     signal?: AbortSignal;
 }
 

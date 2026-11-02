@@ -5,9 +5,9 @@ import { Emitter } from "../dist/lib/emitter.js";
 import { Logger } from "../dist/lib/logging.js";
 import type { TrackerSettings } from "../dist/types.js";
 
-function create() {
+function create(bleTrackerTimeoutMs?: number) {
     const emitter = new Emitter();
-    const registry = new DeviceRegistry({ emitter, log: new Logger("silent") });
+    const registry = new DeviceRegistry({ emitter, log: new Logger("silent"), bleTrackerTimeoutMs });
     return { emitter, registry };
 }
 
@@ -115,6 +115,42 @@ describe("device registry", () => {
             assert.deepEqual(disconnected, []);
 
             mock.timers.tick(5_000);
+            assert.deepEqual(disconnected, ["AAAAA7:0:timeout"]);
+        } finally {
+            mock.timers.reset();
+        }
+    });
+
+    it("uses the configured BLE tracker timeout", () => {
+        mock.timers.enable({ apis: ["setTimeout", "Date"] });
+        try {
+            const { emitter, registry } = create(2_500);
+            registry.register(registration({ connection: "ble" }));
+
+            const disconnected: string[] = [];
+            emitter.on("tracker:disconnected", ({ trackerId, reason }) => disconnected.push(`${trackerId}:${reason}`));
+
+            mock.timers.tick(2_499);
+            assert.deepEqual(disconnected, []);
+            mock.timers.tick(1);
+            assert.deepEqual(disconnected, ["AAAAA7:0:timeout"]);
+        } finally {
+            mock.timers.reset();
+        }
+    });
+
+    it("uses a 3-second silence timeout for BLE by default", () => {
+        mock.timers.enable({ apis: ["setTimeout", "Date"] });
+        try {
+            const { emitter, registry } = create();
+            registry.register(registration({ connection: "ble" }));
+
+            const disconnected: string[] = [];
+            emitter.on("tracker:disconnected", ({ trackerId, reason }) => disconnected.push(`${trackerId}:${reason}`));
+
+            mock.timers.tick(2_999);
+            assert.deepEqual(disconnected, []);
+            mock.timers.tick(1);
             assert.deepEqual(disconnected, ["AAAAA7:0:timeout"]);
         } finally {
             mock.timers.reset();

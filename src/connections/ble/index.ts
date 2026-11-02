@@ -28,11 +28,12 @@ export interface BleBackend {
 
 export interface BleConnectionOptions {
     scanTimeoutMs?: number;
+    operationTimeoutMs?: number;
     logger?: Logger;
     rssiPollMs?: number;
 }
 
-const DEFAULT_SCAN_TIMEOUT_MS = 5_000;
+const DEFAULT_SCAN_TIMEOUT_MS = 2_000;
 
 export class BleConnection implements Connection {
     readonly kind = "ble" as const;

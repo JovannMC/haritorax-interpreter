@@ -37,6 +37,8 @@ export class HaritoraX {
     #endpoints: EndpointDescriptor[] = [];
     readonly #endpointOwners = new Map<string, Connection>();
     readonly #open = new Set<string>();
+    readonly #openingEndpoints = new Set<string>();
+    readonly #lostWhileOpening = new Set<string>();
     readonly #subscriptions: Unsubscribe[] = [];
     readonly #endpointOperations = new Map<string, Promise<void>>();
 
@@ -62,7 +64,11 @@ export class HaritoraX {
 
         const connectionKind = (endpointId: string): ConnectionKind => this.#endpointOwners.get(endpointId)?.kind ?? "serial";
 
-        this.#registry = new DeviceRegistry({ emitter: this.#emitter, log: this.#log });
+        this.#registry = new DeviceRegistry({
+            emitter: this.#emitter,
+            log: this.#log,
+            bleTrackerTimeoutMs: options.bleTrackerTimeoutMs,
+        });
         this.#dongle = new DongleController({
             emitter: this.#emitter,
             log: this.#log,
@@ -115,12 +121,9 @@ export class HaritoraX {
         const controller = new AbortController();
         const signal = options?.signal ? AbortSignal.any([controller.signal, options.signal]) : controller.signal;
         const generation = ++this.#scanGeneration;
-        const timeout = options?.timeoutMs;
-        const timeoutId = timeout !== undefined && timeout >= 0 ? setTimeout(() => controller.abort(), timeout) : undefined;
         this.#scanController = controller;
 
         const done = this.#scan(signal, generation, options).finally(() => {
-            clearTimeout(timeoutId);
             if (this.#scanning === done) {
                 this.#scanning = undefined;
                 if (this.#scanController === controller) this.#scanController = undefined;
@@ -318,7 +321,7 @@ export class HaritoraX {
             await this.#dongle.powerOff(device.endpointId, device.slot);
         }
 
-        this.#log.info(`Powering off ${deviceId}`);
+        this.#log.info(`Sent power-off command to ${deviceId}`);
     }
 
     async switchCommunication(deviceId: string, mode: "ble" | "serial"): Promise<void> {
@@ -350,7 +353,29 @@ export class HaritoraX {
 
             if (this.#open.has(endpointId)) return;
 
-            await connection.open(endpointId);
+            this.#openingEndpoints.add(endpointId);
+            try {
+                await connection.open(endpointId);
+            } catch (error) {
+                await connection.close(endpointId).catch((closeError: unknown) => {
+                    this.#log.warn(`Could not close ${endpointId} after connection startup failed`, {
+                        error: String(closeError),
+                    });
+                });
+                this.#forgetEndpointState(endpointId, "error");
+                this.#lostWhileOpening.delete(endpointId);
+                throw error;
+            } finally {
+                this.#openingEndpoints.delete(endpointId);
+            }
+
+            if (this.#lostWhileOpening.delete(endpointId)) {
+                await connection.close(endpointId).catch((error: unknown) => {
+                    this.#log.warn(`Could not close ${endpointId} after losing it during startup`, { error: String(error) });
+                });
+                this.#forgetEndpointState(endpointId, "remote");
+                throw new HaritoraXError("CONNECTION_FAILED", `Lost ${endpointId} while the connection was starting`);
+            }
             if (this.#disposed) {
                 await connection.close(endpointId);
                 return;
@@ -425,6 +450,8 @@ export class HaritoraX {
 
         this.#emitter.removeAllListeners();
         this.#open.clear();
+        this.#openingEndpoints.clear();
+        this.#lostWhileOpening.clear();
         this.#endpoints = [];
         this.#endpointOwners.clear();
         this.#handlers.clear();
@@ -502,15 +529,25 @@ export class HaritoraX {
     }
 
     #dropEndpoint(endpointId: string, reason: DisconnectReason): void {
-        this.#registry.removeDevicesAtEndpoint(endpointId, reason);
-        const handler = this.#handlers.get(endpointId) ?? this.#dongle;
-        handler.forgetEndpoint(endpointId);
+        this.#forgetEndpointState(endpointId, reason);
         this.#emitter.emit("endpoint:disconnected", { endpointId, reason });
     }
 
     #onLost(endpointId: string, reason: DisconnectReason): void {
-        if (!this.#open.delete(endpointId)) return;
+        if (!this.#open.delete(endpointId)) {
+            if (!this.#openingEndpoints.has(endpointId)) return;
+            this.#lostWhileOpening.add(endpointId);
+            this.#forgetEndpointState(endpointId, reason);
+            this.#log.debug(`Lost ${endpointId} while the connection was starting`, { reason });
+            return;
+        }
         this.#dropEndpoint(endpointId, reason);
+    }
+
+    #forgetEndpointState(endpointId: string, reason: DisconnectReason): void {
+        this.#registry.removeDevicesAtEndpoint(endpointId, reason);
+        const handler = this.#handlers.get(endpointId) ?? this.#dongle;
+        handler.forgetEndpoint(endpointId);
     }
 
     #onBleRssi(endpointId: string, rssi: number): void {
@@ -576,4 +613,6 @@ export interface HaritoraXOptions {
     buttonDebounceMs?: number;
     // how long pairing waits for the dongle to report the slot as paired, default 30 s
     pairingTimeoutMs?: number;
+    // how long BLE trackers may be silent before emitting tracker:disconnected, default 3 s
+    bleTrackerTimeoutMs?: number;
 }

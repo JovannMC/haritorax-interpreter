@@ -15,10 +15,12 @@ import type {
 } from "../types.js";
 
 const TRACKER_TIMEOUT_MS = 10_000;
+const DEFAULT_BLE_TRACKER_TIMEOUT_MS = 3_000;
 
 export interface DeviceRegistryOptions {
     emitter: Emitter;
     log: Logger;
+    bleTrackerTimeoutMs?: number;
 }
 
 export interface DeviceRegistration {
@@ -38,6 +40,7 @@ export interface DeviceRegistration {
 export class DeviceRegistry {
     readonly #emitter: Emitter;
     readonly #log: Logger;
+    readonly #bleTrackerTimeoutMs: number;
 
     // deviceId is the device serial number
     readonly #devices = new Map<string, DeviceSnapshot>();
@@ -47,6 +50,10 @@ export class DeviceRegistry {
     constructor(options: DeviceRegistryOptions) {
         this.#emitter = options.emitter;
         this.#log = options.log;
+        this.#bleTrackerTimeoutMs = options.bleTrackerTimeoutMs ?? DEFAULT_BLE_TRACKER_TIMEOUT_MS;
+        if (!Number.isFinite(this.#bleTrackerTimeoutMs) || this.#bleTrackerTimeoutMs <= 0) {
+            throw new RangeError("bleTrackerTimeoutMs must be a positive finite number");
+        }
     }
 
     /*
@@ -126,6 +133,7 @@ export class DeviceRegistry {
                 existing.endpointId = endpointId;
                 existing.slot = slot;
                 existing.connection = input.connection;
+                this.#updateTrackerTimeouts(existing, input.connection);
 
                 for (const tracker of existing.trackers) {
                     tracker.endpointId = endpointId;
@@ -158,7 +166,7 @@ export class DeviceRegistry {
             ...(input.comm === undefined ? {} : { comm: input.comm }),
             ...(input.commNext === undefined ? {} : { commNext: input.commNext }),
             connection: input.connection,
-            trackers: this.#createTrackers(deviceId, endpointId, input.parts),
+            trackers: this.#createTrackers(deviceId, endpointId, input.parts, input.connection),
         };
 
         this.#devices.set(deviceId, device);
@@ -188,7 +196,7 @@ export class DeviceRegistry {
             const tracker = device.trackers[index];
 
             if (!tracker) {
-                const created = this.#createTracker(deviceId, device.endpointId, index, bodyPart);
+                const created = this.#createTracker(deviceId, device.endpointId, index, bodyPart, device.connection);
                 device.trackers.push(created);
                 this.#connectTracker(created);
                 continue;
@@ -238,7 +246,7 @@ export class DeviceRegistry {
         if (!state) return undefined;
 
         state.snapshot.lastSeen = Date.now();
-        state.deadline = state.snapshot.lastSeen + TRACKER_TIMEOUT_MS;
+        state.deadline = state.snapshot.lastSeen + state.timeoutMs;
 
         if (state.snapshot.connected) {
             if (!state.timer) this.#armTrackerTimeout(state);
@@ -376,11 +384,22 @@ export class DeviceRegistry {
      * internals
      */
 
-    #createTrackers(deviceId: string, endpointId: string, parts: readonly BodyPart[]): TrackerSnapshot[] {
-        return parts.map((bodyPart, index) => this.#createTracker(deviceId, endpointId, index, bodyPart));
+    #createTrackers(
+        deviceId: string,
+        endpointId: string,
+        parts: readonly BodyPart[],
+        connection: ConnectionKind,
+    ): TrackerSnapshot[] {
+        return parts.map((bodyPart, index) => this.#createTracker(deviceId, endpointId, index, bodyPart, connection));
     }
 
-    #createTracker(deviceId: string, endpointId: string, index: number, bodyPart: BodyPart): TrackerSnapshot {
+    #createTracker(
+        deviceId: string,
+        endpointId: string,
+        index: number,
+        bodyPart: BodyPart,
+        connection: ConnectionKind,
+    ): TrackerSnapshot {
         const tracker: TrackerSnapshot = {
             // stable tracker id used everywhere as "serialNumber:imuIndex" (e.g. A00000:1)
             // imuIndex identifies multiple IMUs (like HX2 leg/thigh combo)
@@ -391,7 +410,11 @@ export class DeviceRegistry {
             connected: false,
         };
 
-        this.#trackers.set(tracker.trackerId, { snapshot: tracker, deadline: 0 });
+        this.#trackers.set(tracker.trackerId, {
+            snapshot: tracker,
+            deadline: 0,
+            timeoutMs: connection === "ble" ? this.#bleTrackerTimeoutMs : TRACKER_TIMEOUT_MS,
+        });
         return tracker;
     }
 
@@ -400,12 +423,12 @@ export class DeviceRegistry {
         if (!state) return;
 
         tracker.connected = true;
-        state.deadline = Date.now() + TRACKER_TIMEOUT_MS;
+        state.deadline = Date.now() + state.timeoutMs;
         this.#log.debug(`Tracker connected: ${tracker.trackerId}`, {
             deviceId: tracker.deviceId,
             endpointId: tracker.endpointId,
             bodyPart: tracker.bodyPart,
-            timeoutMs: TRACKER_TIMEOUT_MS,
+            timeoutMs: state.timeoutMs,
         });
         this.#emitter.emit("tracker:connected", {
             trackerId: tracker.trackerId,
@@ -416,9 +439,22 @@ export class DeviceRegistry {
         this.#armTrackerTimeout(state);
     }
 
+    #updateTrackerTimeouts(device: DeviceSnapshot, connection: ConnectionKind): void {
+        const timeoutMs = connection === "ble" ? this.#bleTrackerTimeoutMs : TRACKER_TIMEOUT_MS;
+        for (const tracker of device.trackers) {
+            const state = this.#trackers.get(tracker.trackerId);
+            if (!state) continue;
+            state.timeoutMs = timeoutMs;
+            if (!tracker.connected) continue;
+
+            state.deadline = (tracker.lastSeen ?? Date.now()) + timeoutMs;
+            this.#scheduleTrackerTimeout(state, Math.max(0, state.deadline - Date.now()));
+        }
+    }
+
     #armTrackerTimeout(state: TrackerState): void {
         clearTrackerTimeout(state);
-        this.#scheduleTrackerTimeout(state, TRACKER_TIMEOUT_MS);
+        this.#scheduleTrackerTimeout(state, state.timeoutMs);
     }
 
     #scheduleTrackerTimeout(state: TrackerState, delayMs: number): void {
@@ -436,7 +472,7 @@ export class DeviceRegistry {
             this.#log.debug(`Tracker timed out: ${state.snapshot.trackerId}`, {
                 deviceId: state.snapshot.deviceId,
                 endpointId: state.snapshot.endpointId,
-                timeoutMs: TRACKER_TIMEOUT_MS,
+                timeoutMs: state.timeoutMs,
                 lastSeen: state.snapshot.lastSeen,
             });
             this.#emitter.emit("tracker:disconnected", {
@@ -513,4 +549,5 @@ interface TrackerState {
     snapshot: TrackerSnapshot;
     timer?: ReturnType<typeof setTimeout>;
     deadline: number;
+    timeoutMs: number;
 }

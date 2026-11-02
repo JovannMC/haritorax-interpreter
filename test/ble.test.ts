@@ -15,6 +15,7 @@ import {
 import type { BleCharacteristic } from "../dist/protocol/endpoint/ble.js";
 import { splitWiredImuBytes } from "../dist/protocol/endpoint/wired.js";
 import type { DisconnectReason, TrackerSettings, Unsubscribe } from "../dist/types.js";
+import { setImmediate } from "node:timers";
 
 function bytes(text: string): Uint8Array {
     const result = new Uint8Array(text.length);
@@ -53,6 +54,7 @@ class FakeBleBackend implements BleBackend {
     readonly writeAttempts: Array<{ endpointId: string; characteristic: BleCharacteristic; data: number[] }> = [];
     readonly unsupportedWrites = new Set<BleCharacteristic>();
     readonly opened = new Set<string>();
+    writeGate: Promise<void> | undefined;
     // the real backend reads the device information while opening, a test can emit it from here
     onOpen: (() => void) | undefined;
 
@@ -81,9 +83,10 @@ class FakeBleBackend implements BleBackend {
 
     write(peripheralId: string, characteristic: BleCharacteristic, data: Uint8Array): Promise<void> {
         this.writeAttempts.push({ endpointId: peripheralId, characteristic, data: [...data] });
-        if (this.unsupportedWrites.has(characteristic)) return Promise.reject(new Error(`Unsupported characteristic: ${characteristic}`));
+        if (this.unsupportedWrites.has(characteristic))
+            return Promise.reject(new Error(`Unsupported characteristic: ${characteristic}`));
         this.writes.push({ endpointId: peripheralId, characteristic, data: [...data] });
-        return Promise.resolve();
+        return this.writeGate ?? Promise.resolve();
     }
 
     onData(handler: (endpointId: string, characteristic: BleCharacteristic, data: Uint8Array) => void): Unsubscribe {
@@ -313,22 +316,22 @@ describe("BLE device", () => {
 
         const device = app.getDevice("BBBBB0");
         assert.ok(device);
-        assert.equal(device.model, "x2");
-        assert.equal(device.connection, "ble");
-        assert.equal(device.imuCount, 1);
+        assert.equal(device?.model, "x2");
+        assert.equal(device?.connection, "ble");
+        assert.equal(device?.imuCount, 1);
         assert.deepEqual(
-            device.trackers.map((tracker) => [tracker.trackerId, tracker.bodyPart]),
+            device?.trackers.map((tracker) => [tracker.trackerId, tracker.bodyPart]),
             [["BBBBB0:0", "leftElbow"]],
         );
-        assert.deepEqual(device.settings, {
+        assert.deepEqual(device?.settings, {
             sensorMode: 2,
             fpsMode: 100,
             sensorAutoCorrection: ["accel"],
             ankleMotionDetection: false,
         });
-        assert.equal(device.battery?.level, 80);
-        assert.equal(device.battery?.voltage, 4032);
-        assert.equal(device.battery?.chargeStatus, "discharging");
+        assert.equal(device?.battery?.level, 80);
+        assert.equal(device?.battery?.voltage, 4032);
+        assert.equal(device?.battery?.chargeStatus, "discharging");
     });
 
     it("registers an HXW over BLE, which reports its model as MC3", async () => {
@@ -637,6 +640,62 @@ describe("BLE device", () => {
 
         assert.deepEqual(lost, ["ble-1:remote"]);
         assert.deepEqual(app.getDevices(), []);
+    });
+
+    it("cleans up device state when a BLE connection is lost while opening", async () => {
+        const backend = new FakeBleBackend();
+        const device = HX2_DEVICE;
+        backend.onOpen = () => {
+            for (const [characteristic, data] of identityFrames(device)) backend.emit("ble-1", characteristic, data);
+            backend.lose("ble-1");
+        };
+        const app = createHaritoraX({
+            connections: [new BleConnection(backend, { scanTimeoutMs: 1 })],
+            logLevel: "silent",
+        });
+        const endpointEvents: string[] = [];
+        app.on("endpoint:connected", ({ endpointId }) => endpointEvents.push(`connected:${endpointId}`));
+        app.on("endpoint:disconnected", ({ endpointId }) => endpointEvents.push(`disconnected:${endpointId}`));
+
+        await app.discover();
+        await assert.rejects(app.connect("ble-1"), /lost.*while.*starting|connection/i);
+
+        assert.deepEqual(app.getDevices(), []);
+        assert.deepEqual(endpointEvents, []);
+        await app.dispose();
+    });
+
+    it("keeps the BLE endpoint connected after sending power-off until the tracker disconnects", async () => {
+        const { app, backend } = await connected();
+        const events: string[] = [];
+        let finishWrite!: () => void;
+        backend.writeGate = new Promise<void>((resolve) => (finishWrite = resolve));
+        app.on("endpoint:disconnected", ({ endpointId, reason }) => events.push(`${endpointId}:${reason}`));
+
+        const poweringOff = app.powerOff("BBBBB0");
+        assert.deepEqual(backend.writes, [{ endpointId: "ble-1", characteristic: "wireless-mode", data: [2] }]);
+        assert.equal(backend.opened.has("ble-1"), true);
+        assert.deepEqual(events, []);
+        finishWrite();
+        await poweringOff;
+
+        assert.equal(backend.opened.has("ble-1"), true);
+        assert.ok(app.getDevice("BBBBB0"));
+        assert.deepEqual(events, []);
+
+        backend.lose("ble-1");
+        assert.deepEqual(events, ["ble-1:remote"]);
+        assert.deepEqual(app.getDevices(), []);
+        await app.dispose();
+    });
+
+    it("keeps the BLE endpoint connected if the power-off write fails", async () => {
+        const { app, backend } = await connected();
+        backend.unsupportedWrites.add("wireless-mode");
+        await assert.rejects(app.powerOff("BBBBB0"), /Unsupported characteristic/);
+        assert.equal(backend.opened.has("ble-1"), true);
+        assert.ok(app.getDevice("BBBBB0"));
+        await app.dispose();
     });
 });
 

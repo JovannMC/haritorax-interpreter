@@ -258,7 +258,7 @@ export class BleController implements ProtocolHandler {
         if (!device) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown BLE tracker on "${endpointId}"`);
 
         await this.#write(endpointId, "wireless-mode", new Uint8Array([2]));
-        this.#log.info(`Powering off BLE ${endpointId}`);
+        this.#log.info(`Sent BLE power-off command to ${endpointId}`);
     }
 
     // the tracker stores the body part itself and notifies it back, which also refreshes the trackers here
