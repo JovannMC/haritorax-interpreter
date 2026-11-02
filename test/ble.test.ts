@@ -11,6 +11,7 @@ import {
     parseBleDeviceName,
     splitBleImu,
     splitBleSensor2,
+    splitBleSensor2Frames,
 } from "../dist/protocol/endpoint/ble.js";
 import type { BleCharacteristic } from "../dist/protocol/endpoint/ble.js";
 import { splitWiredImuBytes } from "../dist/protocol/endpoint/wired.js";
@@ -256,6 +257,16 @@ describe("BLE protocol", () => {
         assert.equal(two[1]?.index, 1);
         assert.equal(two[1]?.role, "knee");
         assert.deepEqual(two[1]?.payload, SENSOR_2IMU.slice(14, 28));
+        assert.notEqual(two[0]?.payload.buffer, SENSOR2_2IMU.buffer, "the public helper returns owned copies");
+
+        const frames = splitBleSensor2Frames(SENSOR2_2IMU);
+        assert.deepEqual(
+            frames.map(({ offset, status, index, role }) => ({ offset, status, index, role })),
+            [
+                { offset: 0, status: 0x0102, index: 0, role: "ankle" },
+                { offset: 16, status: 0x0102, index: 1, role: "knee" },
+            ],
+        );
 
         // two IMUs plus range: [IMU0 14][status 2][range 2][IMU1 14], the second IMU starts at 18
         // (from the firmware, not captured on hardware yet)
@@ -268,6 +279,13 @@ describe("BLE protocol", () => {
         assert.equal(dual.length, 2);
         assert.equal(dual[0]?.range, 700);
         assert.deepEqual(dual[1]?.payload, SENSOR_2IMU.slice(14, 28));
+        assert.deepEqual(
+            splitBleSensor2Frames(dualRanged).map(({ offset, range }) => ({ offset, range })),
+            [
+                { offset: 0, range: 700 },
+                { offset: 18, range: undefined },
+            ],
+        );
 
         assert.deepEqual(splitBleSensor2(new Uint8Array(20)), []);
     });
@@ -343,6 +361,23 @@ describe("BLE device", () => {
         assert.equal(app.getTracker("AAAAA7:0")?.bodyPart, "leftElbow");
     });
 
+    it("uses the dedicated magnetometer characteristic for HXW BLE status", async () => {
+        const { app, backend } = await connected({ ...HXW_DEVICE, version: "1.0.22" });
+        const mags: string[] = [];
+        app.on("mag", (event) => mags.push(event.status));
+
+        backend.emit("ble-1", "sensor", SINGLE_IMU);
+        assert.deepEqual(mags, [], "IMU payload bytes must not be treated as magnetometer status");
+
+        backend.emit("ble-1", "magnetometer", byte(3));
+        assert.deepEqual(mags, ["great"]);
+
+        const moved = new Uint8Array(SINGLE_IMU);
+        moved[11] = 0;
+        backend.emit("ble-1", "sensor", moved);
+        assert.deepEqual(mags, ["great"], "movement in the IMU payload must not overwrite the real mag status");
+    });
+
     it("skips sensor from the start once the firmware version proves sensor2 exists", async () => {
         const { app, backend } = await connected();
 
@@ -369,6 +404,19 @@ describe("BLE device", () => {
         current.app.on("imu", (sample) => currentSamples.push(sample.trackerId));
         current.backend.emit("ble-1", "sensor", SINGLE_IMU);
         assert.deepEqual(currentSamples, []);
+    });
+
+    it("rechecks sensor2 support when the firmware version changes", async () => {
+        const { app, backend } = await connected({ ...HXW_DEVICE, version: "1.0.22" });
+        const samples: string[] = [];
+        app.on("imu", (sample) => samples.push(sample.trackerId));
+
+        backend.emit("ble-1", "sensor", SINGLE_IMU);
+        assert.equal(samples.length, 1);
+
+        backend.emit("ble-1", "software-revision", bytes("1.0.28"));
+        backend.emit("ble-1", "sensor", SINGLE_IMU);
+        assert.equal(samples.length, 1);
     });
 
     it("reads sensor while the HXW version is unknown, until sensor2 shows up", async () => {

@@ -120,14 +120,20 @@ export function splitWiredImu(payload: string, partCount: number): WiredImuSlice
 // `x:` frames (report_type 1) carry 7 float32 per IMU, no range: quaternion i, j, k, real, then acceleration x, y, z
 // this should never show up on real trackers unless someone else found the command and changed it themselves, for some reason
 export function splitWiredFloatImu(payload: string, partCount: number): WiredImuSlice[] {
-    const bytes = decodeBase64(payload);
+    return splitWiredFloatImuBytes(decodeBase64(payload), partCount).map((slice) => ({
+        ...slice,
+        payload: encodeBase64(slice.payload),
+    }));
+}
+
+export function splitWiredFloatImuBytes(bytes: Uint8Array, partCount: number): WiredImuBytes[] {
     const size = 7 * 4;
     if (partCount <= 0 || bytes.length < partCount * size) return [];
 
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const toInt16 = (value: number) => Math.max(-32768, Math.min(32767, Math.round(value)));
 
-    const slices: WiredImuSlice[] = [];
+    const slices: WiredImuBytes[] = [];
     for (let index = 0; index < partCount; index++) {
         const at = index * size;
         const out = new Uint8Array(WIRED_IMU_BYTES);
@@ -136,7 +142,7 @@ export function splitWiredFloatImu(payload: string, partCount: number): WiredImu
         for (let i = 0; i < 4; i++) dv.setInt16(i * 2, toInt16(view.getFloat32(at + i * 4, true) * 16384), true);
         for (let i = 0; i < 3; i++) dv.setInt16(8 + i * 2, toInt16(view.getFloat32(at + (4 + i) * 4, true) * 256), true);
 
-        slices.push({ payload: encodeBase64(out), index });
+        slices.push({ payload: out, index });
     }
 
     return slices;

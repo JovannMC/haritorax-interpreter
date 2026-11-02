@@ -102,6 +102,14 @@ export interface DongleImuSlice {
     range?: number;
 }
 
+export interface DongleImuBytesSlice {
+    payload: Uint8Array;
+    role: ImuRole;
+    index: number;
+    status?: number;
+    range?: number;
+}
+
 // decoded IMU packets from the dongle:
 //  14 bytes: [IMU0 14]
 //  16 bytes: [IMU0 14][status 2]
@@ -109,16 +117,22 @@ export interface DongleImuSlice {
 //  30 bytes: [IMU0 14][status 2][IMU1 14]
 //  32 bytes: [IMU0 14][status 2][range 2][IMU1 14]
 export function splitDongleImu(payload: string, trackerCount: number): DongleImuSlice[] {
-    const bytes = decodeBase64(payload);
+    return splitDongleImuBytes(decodeBase64(payload), trackerCount).map((slice) => ({
+        ...slice,
+        payload: encodeBase64(slice.payload),
+    }));
+}
+
+export function splitDongleImuBytes(bytes: Uint8Array, trackerCount: number): DongleImuBytesSlice[] {
     if (bytes.length < 14) return [];
 
     const status = readImuStatusWord(bytes);
     const hasRange = bytes.length === 18 || bytes.length === 32;
     const range = hasRange ? readUint16(bytes, 16) : undefined;
 
-    const slices: DongleImuSlice[] = [
+    const slices: DongleImuBytesSlice[] = [
         {
-            payload: encodeBase64(bytes.slice(0, 14)),
+            payload: bytes.slice(0, 14),
             role: "ankle",
             index: 0,
             ...(status === undefined ? {} : { status }),
@@ -129,7 +143,7 @@ export function splitDongleImu(payload: string, trackerCount: number): DongleImu
     const secondOffset = hasRange ? 18 : 16;
     if (trackerCount >= 2 && bytes.length >= secondOffset + 14) {
         slices.push({
-            payload: encodeBase64(bytes.slice(secondOffset, secondOffset + 14)),
+            payload: bytes.slice(secondOffset, secondOffset + 14),
             role: "knee",
             index: 1,
             ...(status === undefined ? {} : { status }),

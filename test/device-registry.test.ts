@@ -121,6 +121,59 @@ describe("device registry", () => {
         }
     });
 
+    it("updates activity and IMU status together without repeating unchanged status events", () => {
+        const { emitter, registry } = create();
+        registry.register(registration({ connection: "ble" }));
+        const events: string[] = [];
+        emitter.on("mag", () => events.push("mag"));
+        emitter.on("tap", () => events.push("tap"));
+
+        assert.ok(registry.trackerSeenWithImuStatus("AAAAA7:0", "okay", 1));
+        assert.deepEqual(events, ["mag", "tap"]);
+
+        assert.ok(registry.trackerSeenWithImuStatus("AAAAA7:0", "okay", 1));
+        assert.deepEqual(events, ["mag", "tap"]);
+    });
+
+    it("does not emit tap after a mag listener removes the tracker", () => {
+        const { emitter, registry } = create();
+        const device = registry.register(registration({ connection: "ble" }));
+        const tracker = device.trackers[0];
+        assert.ok(tracker);
+        const events: string[] = [];
+        emitter.on("mag", () => {
+            events.push("mag");
+            registry.disconnectTracker(tracker, "requested");
+        });
+        emitter.on("tap", () => events.push("tap"));
+
+        registry.trackerSeenWithImuStatus(tracker.trackerId, "okay", 1);
+
+        assert.deepEqual(events, ["mag"]);
+    });
+
+    it("keeps tracker recovery events before IMU status events", () => {
+        mock.timers.enable({ apis: ["setTimeout", "Date"] });
+        try {
+            const { emitter, registry } = create();
+            registry.register(registration({ connection: "ble" }));
+            const events: string[] = [];
+            emitter.on("tracker:disconnected", () => events.push("disconnected"));
+            emitter.on("tracker:connected", () => events.push("connected"));
+            emitter.on("devices", () => events.push("devices"));
+            emitter.on("mag", () => events.push("mag"));
+            emitter.on("tap", () => events.push("tap"));
+
+            mock.timers.tick(3_000);
+            events.length = 0;
+            assert.ok(registry.trackerSeenWithImuStatus("AAAAA7:0", "okay", 1));
+
+            assert.deepEqual(events, ["connected", "devices", "mag", "tap"]);
+        } finally {
+            mock.timers.reset();
+        }
+    });
+
     it("uses the configured BLE tracker timeout", () => {
         mock.timers.enable({ apis: ["setTimeout", "Date"] });
         try {

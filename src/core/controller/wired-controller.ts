@@ -1,16 +1,17 @@
+import { toByteArray as decodeBase64 } from "base64-js";
 import type { Emitter } from "../../lib/emitter.js";
 import type { Logger } from "../../lib/logging.js";
 import type { DeviceRegistry } from "../device-registry.js";
 import type { ProtocolHandler } from "../protocol-handler.js";
-import { decodeImu, decodeRange } from "../../protocol/codec/imu.js";
+import { decodeImuBytes, decodeRange } from "../../protocol/codec/imu.js";
 import { modelFromFirmware, parseBattery, parseInfo, type ParsedInfo } from "../../protocol/codec/messages.js";
 import {
     parseWiredButton,
     parseWiredState,
-    splitWiredFloatImu,
-    splitWiredImu,
+    splitWiredFloatImuBytes,
+    splitWiredImuBytes,
     wiredSettingsCommands,
-    type WiredImuSlice,
+    type WiredImuBytes,
     type WiredState,
 } from "../../protocol/endpoint/wired.js";
 import type { ConnectionKind, DeviceSnapshot, SensorAutoCorrection, TrackerSettings } from "../../types.js";
@@ -187,7 +188,7 @@ export class WiredController implements ProtocolHandler {
         if (!input) return;
 
         const parts = this.#states.get(endpointId)?.parts ?? input.parts;
-        const slices = splitWiredImu(payload, parts.length);
+        const slices = splitWiredImuBytes(decodeBase64(payload), parts.length);
         if (slices.length === 0) return;
 
         const device = this.#registry.deviceAt(endpointId, WIRED_SLOT) ?? this.#registry.register({ ...input, parts });
@@ -199,19 +200,19 @@ export class WiredController implements ProtocolHandler {
         if (!input) return;
 
         const parts = this.#states.get(endpointId)?.parts ?? input.parts;
-        const slices = splitWiredFloatImu(payload, parts.length);
+        const slices = splitWiredFloatImuBytes(decodeBase64(payload), parts.length);
         if (slices.length === 0) return;
 
         const device = this.#registry.deviceAt(endpointId, WIRED_SLOT) ?? this.#registry.register({ ...input, parts });
         this.#emitImu(device, slices);
     }
 
-    #emitImu(device: DeviceSnapshot, slices: readonly WiredImuSlice[]): void {
+    #emitImu(device: DeviceSnapshot, slices: readonly WiredImuBytes[]): void {
         for (const slice of slices) {
             const tracker = device.trackers[slice.index];
             if (!tracker) continue;
 
-            const decoded = decodeImu(slice.payload, device.model);
+            const decoded = decodeImuBytes(slice.payload, device.model);
             if (!decoded || !this.#registry.trackerSeen(tracker.trackerId)) continue;
 
             const range = decodeRange(device.model, slice.range);

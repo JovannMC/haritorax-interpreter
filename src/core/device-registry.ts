@@ -245,13 +245,39 @@ export class DeviceRegistry {
         const state = this.#trackers.get(trackerId);
         if (!state) return undefined;
 
+        this.#markTrackerSeen(state);
+        return state.snapshot;
+    }
+
+    // updates activity and status using one tracker lookup for an IMU sample
+    trackerSeenWithImuStatus(trackerId: string, magStatus?: MagStatus, tap?: number): TrackerSnapshot | undefined {
+        const state = this.#trackers.get(trackerId);
+        if (!state) return undefined;
+
+        const wasConnected = state.snapshot.connected;
+        this.#markTrackerSeen(state);
+        if (!wasConnected) {
+            if (magStatus !== undefined) this.setMag(trackerId, magStatus);
+            if (tap !== undefined) this.setTap(trackerId, tap);
+            return state.snapshot;
+        }
+
+        const magChanged = magStatus !== undefined && this.#setMagState(state, magStatus);
+        if (tap !== undefined) {
+            if (magChanged && this.#trackers.get(trackerId) !== state) this.setTap(trackerId, tap);
+            else this.#setTapState(state, tap);
+        }
+        return state.snapshot;
+    }
+
+    #markTrackerSeen(state: TrackerState): void {
         state.snapshot.lastSeen = Date.now();
         state.deadline = state.snapshot.lastSeen + state.timeoutMs;
 
         if (state.snapshot.connected) {
             if (!state.timer) this.#armTrackerTimeout(state);
         } else {
-            this.#log.debug(`Tracker data resumed for ${trackerId}`, {
+            this.#log.debug(`Tracker data resumed for ${state.snapshot.trackerId}`, {
                 deviceId: state.snapshot.deviceId,
                 endpointId: state.snapshot.endpointId,
                 lastSeen: state.snapshot.lastSeen,
@@ -259,8 +285,6 @@ export class DeviceRegistry {
             this.#connectTracker(state.snapshot);
             this.#emitDevices();
         }
-
-        return state.snapshot;
     }
 
     disconnectTracker(tracker: TrackerSnapshot, reason: DisconnectReason): void {
@@ -288,19 +312,32 @@ export class DeviceRegistry {
     // magnetometer data is reported every IMU packet on most devices (all but wired trackers), just emit on change
     setMag(trackerId: string, status: MagStatus): void {
         const state = this.#trackers.get(trackerId);
-        if (!state || state.snapshot.mag === status) return;
+        if (!state) return;
+
+        this.#setMagState(state, status);
+    }
+
+    #setMagState(state: TrackerState, status: MagStatus): boolean {
+        if (state.snapshot.mag === status) return false;
 
         state.snapshot.mag = status;
-        this.#emitter.emit("mag", { trackerId, deviceId: state.snapshot.deviceId, status });
+        this.#emitter.emit("mag", { trackerId: state.snapshot.trackerId, deviceId: state.snapshot.deviceId, status });
+        return true;
     }
 
     // taps are recorded and stay on the tracker for a second before resetting
     setTap(trackerId: string, count: number): void {
         const state = this.#trackers.get(trackerId);
-        if (!state || state.snapshot.tap === count) return;
+        if (!state) return;
+
+        this.#setTapState(state, count);
+    }
+
+    #setTapState(state: TrackerState, count: number): void {
+        if (state.snapshot.tap === count) return;
 
         state.snapshot.tap = count;
-        this.#emitter.emit("tap", { trackerId, deviceId: state.snapshot.deviceId, count });
+        this.#emitter.emit("tap", { trackerId: state.snapshot.trackerId, deviceId: state.snapshot.deviceId, count });
     }
 
     setAccelAccuracy(trackerId: string, accuracy: AccelAccuracy): void {

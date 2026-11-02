@@ -20,6 +20,7 @@ import {
     parseTrackerId,
     setChannelCommand,
     splitDongleImu,
+    splitDongleImuBytes,
     trackerIdOfBodyPart,
     unpairCommands,
 } from "../dist/protocol/endpoint/dongle.js";
@@ -241,6 +242,10 @@ describe("dongle protocol", () => {
         assert.equal(rangedSlices[0]?.range, 700);
         assert.equal(rangedSlices[1]?.range, undefined);
         assert.deepEqual(decodeBase64(rangedSlices[1]?.payload ?? ""), thigh);
+        assert.deepEqual(
+            splitDongleImuBytes(comboRange, 2).map((slice) => ({ ...slice, payload: encodeBase64(slice.payload) })),
+            rangedSlices,
+        );
 
         assert.deepEqual(splitDongleImu(encodeBase64(new Uint8Array(10)), 1), []);
     });
@@ -397,12 +402,7 @@ describe("settings writing", () => {
         serial.emitFrame("o0:00000110103001");
         serial.emitFrame("o1:00000000100000");
 
-        assert.deepEqual(serial.writes, [
-            "COM4:o0:",
-            "COM4:o1:",
-            "COM4:o0:00000110103001",
-            "COM4:o1:00000000100000",
-        ]);
+        assert.deepEqual(serial.writes, ["COM4:o0:", "COM4:o1:", "COM4:o0:00000110103001", "COM4:o1:00000000100000"]);
         assert.deepEqual(app.getDevice("AAAAA7")?.settings, first);
         assert.deepEqual(app.getDevice("EEEEE1")?.settings, second);
         assert.deepEqual(events, [second, second, first]);

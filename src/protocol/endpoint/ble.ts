@@ -198,27 +198,43 @@ export interface BleSensor2Slice {
     range?: number;
 }
 
+export interface BleSensor2Frame {
+    offset: number;
+    status: number;
+    index: number;
+    role: ImuRole;
+    // raw range sensor value (see decodeRange)
+    range?: number;
+}
+
 // see splitBleImu, but sensor2 frames have a status word at bytes 14-15
 export function splitBleSensor2(data: Uint8Array): BleSensor2Slice[] {
+    return splitBleSensor2Frames(data).map(({ offset, ...slice }) => ({
+        ...slice,
+        payload: data.slice(offset, offset + 14),
+    }));
+}
+
+// internal consumers can decode directly from the notification buffer using these offsets
+export function splitBleSensor2Frames(data: Uint8Array): BleSensor2Frame[] {
     const status = readImuStatusWord(data);
     if (status === undefined) return [];
 
-    const ankle = data.slice(0, 14);
     const range = bleUint16(data, 16);
     switch (data.length) {
         case 16:
-            return [{ payload: ankle, status, index: 0, role: "ankle" }];
+            return [{ offset: 0, status, index: 0, role: "ankle" }];
         case 18:
-            return [{ payload: ankle, status, index: 0, role: "ankle", range }];
+            return [{ offset: 0, status, index: 0, role: "ankle", range }];
         case 30:
             return [
-                { payload: ankle, status, index: 0, role: "ankle" },
-                { payload: data.slice(16, 30), status, index: 1, role: "knee" },
+                { offset: 0, status, index: 0, role: "ankle" },
+                { offset: 16, status, index: 1, role: "knee" },
             ];
         case 32:
             return [
-                { payload: ankle, status, index: 0, role: "ankle", range },
-                { payload: data.slice(18, 32), status, index: 1, role: "knee" },
+                { offset: 0, status, index: 0, role: "ankle", range },
+                { offset: 18, status, index: 1, role: "knee" },
             ];
         default:
             return [];

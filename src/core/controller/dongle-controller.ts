@@ -1,3 +1,4 @@
+import { toByteArray as decodeBase64 } from "base64-js";
 import { HaritoraXError } from "../../lib/errors.js";
 import type { Emitter } from "../../lib/emitter.js";
 import type { Logger } from "../../lib/logging.js";
@@ -23,11 +24,11 @@ import {
     parseDongleRegister,
     parseTrackerId,
     setChannelCommand,
-    splitDongleImu,
+    splitDongleImuBytes,
     trackerIdOfBodyPart,
     unpairCommands,
 } from "../../protocol/endpoint/dongle.js";
-import { decodeImu, decodeRange } from "../../protocol/codec/imu.js";
+import { decodeImuBytes, decodeRange } from "../../protocol/codec/imu.js";
 import {
     bodyPartNeedsUnlock,
     commandHoldMs,
@@ -723,7 +724,7 @@ export class DongleController {
     #onImu(endpointId: string, slot: string, payload: string): void {
         const input = this.#registry.registrationAt(endpointId, slot);
         if (!input) return; // drop packet if device is unidentified still
-        const slices = splitDongleImu(payload, input.parts.length);
+        const slices = splitDongleImuBytes(decodeBase64(payload), input.parts.length);
         if (slices.length === 0) return;
         const identity = this.#identities.get(endpointSlotKey(endpointId, slot));
         const device =
@@ -738,7 +739,7 @@ export class DongleController {
                 device,
                 slice.index,
                 slice.role,
-                decodeImu(slice.payload, device.model, slice.status, slice.index),
+                decodeImuBytes(slice.payload, device.model, slice.status, slice.index),
                 decodeRange(device.model, slice.range),
             );
         }
@@ -748,7 +749,7 @@ export class DongleController {
         device: DeviceSnapshot,
         imuIndex: number,
         role: ImuRole,
-        decoded: ReturnType<typeof decodeImu>,
+        decoded: ReturnType<typeof decodeImuBytes>,
         range: number | undefined,
     ): void {
         if (!decoded) return;

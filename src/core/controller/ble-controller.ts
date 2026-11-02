@@ -1,11 +1,10 @@
-import { fromByteArray as encodeBase64 } from "base64-js";
 import { HaritoraXError } from "../../lib/errors.js";
 import type { Emitter } from "../../lib/emitter.js";
 import type { Logger } from "../../lib/logging.js";
 import type { DeviceRegistry } from "../device-registry.js";
 import type { ProtocolHandler } from "../protocol-handler.js";
 import { bodyPartsFor, isButtonDebounced, trackerIdOfBodyPart } from "../../protocol/endpoint/dongle.js";
-import { decodeImu, decodeRange } from "../../protocol/codec/imu.js";
+import { decodeImuBytes, decodeImuBytesAt, decodeRange } from "../../protocol/codec/imu.js";
 import { bodyPartNotifies, hasSensor2 } from "../../protocol/firmware.js";
 import { modelFromFirmware } from "../../protocol/codec/messages.js";
 import {
@@ -22,7 +21,7 @@ import {
     bleUint8,
     bleWiredMagStatusAt,
     splitBleImu,
-    splitBleSensor2,
+    splitBleSensor2Frames,
     type BleCharacteristic,
 } from "../../protocol/endpoint/ble.js";
 import { splitWiredImuBytes, wiredPartsFor } from "../../protocol/endpoint/wired.js";
@@ -95,14 +94,20 @@ export class BleController implements ProtocolHandler {
                 if (firmware && firmware !== state.firmwareModel) {
                     state.firmwareModel = firmware;
                     state.model = this.#modelFromFirmware(firmware);
+                    state.sensor2Supported = undefined;
                     state.device = undefined;
                 }
                 this.#ensureDevice(state);
                 break;
             }
-            case "software-revision":
-                state.version = bleText(data);
+            case "software-revision": {
+                const version = bleText(data);
+                if (version !== state.version) {
+                    state.version = version;
+                    state.sensor2Supported = undefined;
+                }
                 break;
+            }
             case "number-of-imu": {
                 const count = bleUint8(data);
                 if (count === undefined || count < 1 || count === state.imuCount) return;
@@ -132,7 +137,7 @@ export class BleController implements ProtocolHandler {
                 else {
                     const now = Date.now();
                     state.sensorStartedAt ??= now;
-                    const expectsSensor2 = state.model && hasSensor2(state.model, state.version);
+                    const expectsSensor2 = state.model && (state.sensor2Supported ??= hasSensor2(state.model, state.version));
                     const preferredAt = state.sensor2LastSeen ?? (expectsSensor2 ? state.sensorStartedAt : undefined);
                     if (preferredAt === undefined || now - preferredAt >= SENSOR2_FALLBACK_MS) {
                         this.#setSensorSource(state, "sensor");
@@ -354,7 +359,7 @@ export class BleController implements ProtocolHandler {
 
     // IMU data, mag status, taps, ToF range
     #onSensor2(state: BleState, data: Uint8Array): void {
-        const slices = splitBleSensor2(data);
+        const slices = splitBleSensor2Frames(data);
         if (slices.length === 0) return;
         this.#setSensorSource(state, "sensor2");
         state.sensor2LastSeen = Date.now();
@@ -366,9 +371,9 @@ export class BleController implements ProtocolHandler {
 
         for (const slice of slices) {
             const tracker = device.trackers[slice.index];
-            if (!tracker || !this.#registry.trackerSeen(tracker.trackerId)) continue;
+            if (!tracker) continue;
 
-            this.#emitImu(device, tracker, slice.index, slice.role, slice.payload, slice.status, slice.range);
+            this.#emitImu(device, tracker, slice.index, slice.role, data, slice.status, slice.range, slice.offset);
         }
     }
 
@@ -384,7 +389,7 @@ export class BleController implements ProtocolHandler {
 
         for (const slice of slices) {
             const tracker = device.trackers[slice.index];
-            if (!tracker || !this.#registry.trackerSeen(tracker.trackerId)) continue;
+            if (!tracker) continue;
 
             this.#emitImu(device, tracker, slice.index, slice.role, slice.payload, undefined, slice.range);
         }
@@ -408,7 +413,7 @@ export class BleController implements ProtocolHandler {
 
         for (const slice of slices) {
             const tracker = device.trackers[slice.index];
-            if (!tracker || !this.#registry.trackerSeen(tracker.trackerId)) continue;
+            if (!tracker) continue;
 
             this.#emitImu(device, tracker, slice.index, "single", slice.payload, undefined, slice.range);
         }
@@ -429,12 +434,18 @@ export class BleController implements ProtocolHandler {
         payload: Uint8Array,
         status: number | undefined,
         range: number | undefined,
+        byteOffset = 0,
     ): void {
-        const decoded = decodeImu(encodeBase64(payload), device.model, status, index);
-        if (!decoded) return;
-
-        if (decoded.magStatus) this.#registry.setMag(tracker.trackerId, decoded.magStatus);
-        if (decoded.tap !== undefined) this.#registry.setTap(tracker.trackerId, decoded.tap);
+        const decoded =
+            byteOffset === 0
+                ? decodeImuBytes(payload, device.model, status, index)
+                : decodeImuBytesAt(payload, byteOffset, device.model, status, index);
+        if (!decoded) {
+            this.#registry.trackerSeen(tracker.trackerId);
+            return;
+        }
+        if (device.model === "wireless" && status === undefined) decoded.magStatus = undefined;
+        if (!this.#registry.trackerSeenWithImuStatus(tracker.trackerId, decoded.magStatus, decoded.tap)) return;
 
         const distance = decodeRange(device.model, range);
 
@@ -593,6 +604,7 @@ interface BleState {
     device?: DeviceSnapshot;
     firmwareModel?: string;
     version?: string;
+    sensor2Supported?: boolean;
     imuCount?: number;
     bodyPart?: BodyPart;
     settings: {

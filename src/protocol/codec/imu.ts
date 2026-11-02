@@ -3,6 +3,7 @@ import type { MagStatus, Quaternion, TrackerModel, Vector } from "../../types.js
 
 const ROTATION_SCALAR = 1 / 16384;
 const GRAVITY_CONSTANT = 9.80665;
+const BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 const ACCEL_SCALAR: Readonly<Record<TrackerModel, number>> = Object.freeze({
     x2: GRAVITY_CONSTANT / 2048,
@@ -84,22 +85,59 @@ export interface DecodedImu {
 }
 
 export function decodeImu(base64: string, model: TrackerModel, statusWord?: number, imuIndex = 0): DecodedImu | undefined {
-    const bytes = decodeBase64(base64);
-    if (bytes.length < 14) return undefined;
+    return decodeImuFrame(decodeBase64(base64), model, statusWord, imuIndex, base64.charAt(base64.length - 5));
+}
 
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+export function decodeImuBytes(
+    bytes: Uint8Array,
+    model: TrackerModel,
+    statusWord?: number,
+    imuIndex = 0,
+): DecodedImu | undefined {
+    const encodedLength = Math.ceil(bytes.length / 3) * 4;
+    const legacyMagCharacterIndex = encodedLength - 5;
+    const legacyMagByteIndex = Math.floor(legacyMagCharacterIndex / 4) * 3 + 2;
+    const legacyMagByte = legacyMagCharacterIndex < 0 ? undefined : bytes[legacyMagByteIndex];
+    const legacyMagCharacter = legacyMagByte === undefined ? "" : BASE64_ALPHABET.charAt(legacyMagByte & 0x3f);
+
+    return decodeImuFrame(bytes, model, statusWord, imuIndex, legacyMagCharacter);
+}
+
+export function decodeImuBytesAt(
+    bytes: Uint8Array,
+    byteOffset: number,
+    model: TrackerModel,
+    statusWord?: number,
+    imuIndex = 0,
+): DecodedImu | undefined {
+    if (!Number.isInteger(byteOffset) || byteOffset < 0 || byteOffset + 14 > bytes.length) return undefined;
+
+    const legacyMagByte = bytes[byteOffset + 11];
+    const legacyMagCharacter = legacyMagByte === undefined ? "" : BASE64_ALPHABET.charAt(legacyMagByte & 0x3f);
+    return decodeImuFrame(bytes, model, statusWord, imuIndex, legacyMagCharacter, byteOffset);
+}
+
+function decodeImuFrame(
+    bytes: Uint8Array,
+    model: TrackerModel,
+    statusWord: number | undefined,
+    imuIndex: number,
+    legacyMagCharacter: string,
+    byteOffset = 0,
+): DecodedImu | undefined {
+    if (byteOffset < 0 || byteOffset + 14 > bytes.length) return undefined;
 
     const rotation: Quaternion = {
-        x: view.getInt16(0, true) * ROTATION_SCALAR,
-        y: view.getInt16(2, true) * ROTATION_SCALAR,
-        z: view.getInt16(4, true) * -ROTATION_SCALAR,
-        w: view.getInt16(6, true) * -ROTATION_SCALAR,
+        x: readInt16LE(bytes, byteOffset) * ROTATION_SCALAR,
+        y: readInt16LE(bytes, byteOffset + 2) * ROTATION_SCALAR,
+        z: readInt16LE(bytes, byteOffset + 4) * -ROTATION_SCALAR,
+        w: readInt16LE(bytes, byteOffset + 6) * -ROTATION_SCALAR,
     };
 
     const accelScalar = ACCEL_SCALAR[model];
-    const gravityRawX = view.getInt16(8, true) * accelScalar;
-    const gravityRawY = view.getInt16(10, true) * accelScalar;
-    const gravityRawZ = view.getInt16(12, true) * accelScalar;
+    const gravityRawX = readInt16LE(bytes, byteOffset + 8) * accelScalar;
+    const gravityRawY = readInt16LE(bytes, byteOffset + 10) * accelScalar;
+    const gravityRawZ = readInt16LE(bytes, byteOffset + 12) * accelScalar;
 
     let magStatus: MagStatus | undefined;
     let tap: number | undefined;
@@ -108,32 +146,27 @@ export function decodeImu(base64: string, model: TrackerModel, statusWord?: numb
         magStatus = fields.mag;
         tap = fields.tap;
     } else if (model === "wireless") {
-        magStatus = MAG_BY_CHAR[base64.charAt(base64.length - 5)] ?? "veryBad";
+        magStatus = MAG_BY_CHAR[legacyMagCharacter] ?? "veryBad";
     }
 
-    const rc = [rotation.w, rotation.x, rotation.y, rotation.z] as const;
-    const r = [rc[0], -rc[1], -rc[2], -rc[3]] as const;
-    const p = [0.0, 0.0, 0.0, GRAVITY_CONSTANT] as const;
-
-    const hrp = [
-        r[0] * p[0] - r[1] * p[1] - r[2] * p[2] - r[3] * p[3],
-        r[0] * p[1] + r[1] * p[0] + r[2] * p[3] - r[3] * p[2],
-        r[0] * p[2] - r[1] * p[3] + r[2] * p[0] + r[3] * p[1],
-        r[0] * p[3] + r[1] * p[2] - r[2] * p[1] + r[3] * p[0],
-    ] as const;
-
-    const hFinal = [
-        hrp[0] * rc[0] - hrp[1] * rc[1] - hrp[2] * rc[2] - hrp[3] * rc[3],
-        hrp[0] * rc[1] + hrp[1] * rc[0] + hrp[2] * rc[3] - hrp[3] * rc[2],
-        hrp[0] * rc[2] - hrp[1] * rc[3] + hrp[2] * rc[0] + hrp[3] * rc[1],
-        hrp[0] * rc[3] + hrp[1] * rc[2] - hrp[2] * rc[1] + hrp[3] * rc[0],
-    ] as const;
+    const hrpW = rotation.z * GRAVITY_CONSTANT;
+    const hrpX = -rotation.y * GRAVITY_CONSTANT;
+    const hrpY = rotation.x * GRAVITY_CONSTANT;
+    const hrpZ = rotation.w * GRAVITY_CONSTANT;
+    const gravityX = hrpW * rotation.x + hrpX * rotation.w + hrpY * rotation.z - hrpZ * rotation.y;
+    const gravityY = hrpW * rotation.y - hrpX * rotation.z + hrpY * rotation.w + hrpZ * rotation.x;
+    const gravityZ = hrpW * rotation.z + hrpX * rotation.y - hrpY * rotation.x + hrpZ * rotation.w;
 
     const acceleration: Vector = {
-        x: gravityRawX + hFinal[1],
-        y: gravityRawY + hFinal[2],
-        z: gravityRawZ - hFinal[3],
+        x: gravityRawX + gravityX,
+        y: gravityRawY + gravityY,
+        z: gravityRawZ - gravityZ,
     };
 
     return { rotation, acceleration, magStatus, tap };
+}
+
+function readInt16LE(bytes: Uint8Array, offset: number): number {
+    const value = bytes[offset]! | (bytes[offset + 1]! << 8);
+    return value > 0x7fff ? value - 0x10000 : value;
 }

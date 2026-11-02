@@ -1,10 +1,17 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { decodeImu, decodeRange, magStatusFromByte, readImuStatusWord } from "../dist/protocol/codec/imu.js";
+import {
+    decodeImu,
+    decodeImuBytes,
+    decodeImuBytesAt,
+    decodeRange,
+    magStatusFromByte,
+    readImuStatusWord,
+} from "../dist/protocol/codec/imu.js";
 import { fromByteArray as encodeBase64, toByteArray as decodeBase64 } from "base64-js";
 import { decodeSettings, modelFromFirmware, parseBattery, parseInfo } from "../dist/protocol/codec/messages.js";
-import { splitWiredFloatImu } from "../dist/protocol/endpoint/wired.js";
+import { splitWiredFloatImu, splitWiredFloatImuBytes } from "../dist/protocol/endpoint/wired.js";
 
 interface Fixture {
     model: "wireless" | "x2" | "wired";
@@ -42,6 +49,45 @@ describe("IMU decoding", () => {
         for (const fixture of fixtures) {
             const { x, y, z, w } = decodeImu(fixture.payload, fixture.model)?.rotation ?? { x: NaN, y: NaN, z: NaN, w: NaN };
             assert.ok(Math.abs(Math.hypot(x, y, z, w) - 1) < 1e-3, `norm ${Math.hypot(x, y, z, w)}`);
+        }
+    });
+
+    it("keeps the byte decoder equivalent to the base64 API for captured fixtures", () => {
+        for (const fixture of fixtures) {
+            const bytes = decodeBase64(fixture.payload);
+            const status = readImuStatusWord(bytes);
+
+            assert.deepEqual(decodeImuBytes(bytes, fixture.model), decodeImu(fixture.payload, fixture.model));
+            assert.deepEqual(
+                decodeImuBytes(bytes, fixture.model, status, 1),
+                decodeImu(fixture.payload, fixture.model, status, 1),
+            );
+        }
+    });
+
+    it("decodes an IMU frame directly at a byte offset", () => {
+        for (const fixture of fixtures) {
+            const frame = decodeBase64(fixture.payload);
+            const input = new Uint8Array(frame.length + 8);
+            input.set(frame, 4);
+            const status = readImuStatusWord(frame);
+
+            assert.deepEqual(
+                decodeImuBytesAt(input, 4, fixture.model, status, 1),
+                decodeImuBytes(frame, fixture.model, status, 1),
+            );
+        }
+        assert.equal(decodeImuBytesAt(new Uint8Array(14), -1, "x2"), undefined);
+        assert.equal(decodeImuBytesAt(new Uint8Array(14), 1, "x2"), undefined);
+    });
+
+    it("preserves the legacy wireless magnetometer character fallback for all byte values", () => {
+        for (let value = 0; value < 64; value++) {
+            const bytes = new Uint8Array(14);
+            bytes[11] = value;
+            const base64 = encodeBase64(bytes);
+
+            assert.equal(decodeImuBytes(bytes, "wireless")?.magStatus, decodeImu(base64, "wireless")?.magStatus);
         }
     });
 
@@ -251,7 +297,10 @@ describe("wired float frames", () => {
         const fromX = decodeImu(encodeBase64(xBytes), "wired");
         const [slice] = splitWiredFloatImu(encodeBase64(floatBytes), 1);
         const fromFloat = slice ? decodeImu(slice.payload, "wired") : undefined;
+        const [byteSlice] = splitWiredFloatImuBytes(floatBytes, 1);
+        const fromFloatBytes = byteSlice ? decodeImuBytes(byteSlice.payload, "wired") : undefined;
 
         assert.deepEqual(fromFloat, fromX);
+        assert.deepEqual(fromFloatBytes, fromFloat);
     });
 });
