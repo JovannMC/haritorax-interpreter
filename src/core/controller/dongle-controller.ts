@@ -53,6 +53,7 @@ export interface DongleControllerOptions {
     registry: DeviceRegistry;
     isOpen: (endpointId: string) => boolean;
     connectionKind: (endpointId: string) => ConnectionKind;
+    hasBlePeer: (deviceId: string) => boolean;
     write: (endpointId: string, command: string) => Promise<void>;
     onChannel: (endpointId: string, channel: number) => void;
     buttonDebounceMs?: number;
@@ -65,6 +66,7 @@ export class DongleController {
     readonly #registry: DeviceRegistry;
     readonly #isOpen: (endpointId: string) => boolean;
     readonly #connectionKind: (endpointId: string) => ConnectionKind;
+    readonly #hasBlePeer: (deviceId: string) => boolean;
     readonly #write: (endpointId: string, command: string) => Promise<void>;
     readonly #onChannel: (endpointId: string, channel: number) => void;
 
@@ -95,6 +97,7 @@ export class DongleController {
         this.#registry = options.registry;
         this.#isOpen = options.isOpen;
         this.#connectionKind = options.connectionKind;
+        this.#hasBlePeer = options.hasBlePeer;
         this.#write = options.write;
         this.#onChannel = options.onChannel;
         this.#buttonDebounceMs = options.buttonDebounceMs ?? 100;
@@ -506,6 +509,11 @@ export class DongleController {
         if (isRssiLost(payload)) {
             // make sure to not mark tracker lost if its BLE (not serial/dongle)
             if (device.connection !== this.#connectionKind(endpointId)) return;
+
+            if (device.connection === "serial" && this.#hasBlePeer(device.deviceId)) {
+                this.#log.debug(`Dongle ${endpointId}:${slot} is searching for ${device.deviceId}, waiting for BLE handoff`);
+                return;
+            }
 
             let lost = false;
             for (const imu of device.trackers) {

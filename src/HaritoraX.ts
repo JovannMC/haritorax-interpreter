@@ -84,6 +84,11 @@ export class HaritoraX {
             registry: this.#registry,
             isOpen: (endpointId) => this.#open.has(endpointId),
             connectionKind,
+            hasBlePeer: (deviceId) =>
+                this.#endpoints.some(
+                    (endpoint) =>
+                        endpoint.connection === "ble" && endpointNameHasSerial(endpoint.displayName, deviceId),
+                ),
             write: (endpointId, command) => this.#writeCommand(endpointId, command),
             onChannel: (endpointId, channel) => this.#applyChannel(endpointId, channel),
             buttonDebounceMs: options.buttonDebounceMs,
@@ -633,6 +638,11 @@ export function createHaritoraX(options?: HaritoraXOptions): HaritoraX {
 
 function toError(value: unknown): Error {
     return value instanceof Error ? value : new Error(String(value));
+}
+
+function endpointNameHasSerial(displayName: string, deviceId: string): boolean {
+    const separator = displayName.lastIndexOf("-");
+    return separator >= 0 && displayName.slice(separator + 1).trim().toLowerCase() === deviceId.toLowerCase();
 }
 
 function raceWithAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T | undefined> {
