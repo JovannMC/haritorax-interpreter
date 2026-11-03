@@ -152,6 +152,19 @@ describe("device registry", () => {
         assert.deepEqual(events, ["mag"]);
     });
 
+    it("returns no snapshot when a mag listener removes the tracker", () => {
+        const { emitter, registry } = create();
+        const device = registry.register(registration({ connection: "ble" }));
+        const tracker = device.trackers[0];
+        assert.ok(tracker);
+        emitter.on("mag", () => registry.removeDevicesAtEndpoint("COM4", "remote"));
+
+        const current = registry.trackerSeenWithImuStatus(tracker.trackerId, "okay", 1);
+
+        assert.equal(current, undefined);
+        assert.equal(registry.getTracker(tracker.trackerId), undefined);
+    });
+
     it("keeps tracker recovery events before IMU status events", () => {
         mock.timers.enable({ apis: ["setTimeout", "Date"] });
         try {

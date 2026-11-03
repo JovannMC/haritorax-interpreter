@@ -9,9 +9,10 @@ import type { EventHandler, Events, Unsubscribe } from "../types.js";
  */
 export class Emitter {
     readonly #handlers = new Map<keyof Events, Set<(payload: never) => void>>();
-    #onError: ((event: string, error: unknown) => void) | undefined;
+    #onError: ((event: string, error: unknown) => void | Promise<void>) | undefined;
+    #reportingError = false;
 
-    setErrorHandler(handler: (event: string, error: unknown) => void): void {
+    setErrorHandler(handler: (event: string, error: unknown) => void | Promise<void>): void {
         this.#onError = handler;
     }
 
@@ -37,14 +38,44 @@ export class Emitter {
 
         for (const handler of [...set]) {
             try {
-                (handler as EventHandler<E>)(payload);
+                const result: unknown = (handler as EventHandler<E>)(payload);
+                if (isPromiseLike(result)) {
+                    void Promise.resolve(result).catch((error: unknown) => this.#reportError(event, error));
+                }
             } catch (error) {
-                this.#onError?.(event, error);
+                this.#reportError(event, error);
             }
+        }
+    }
+
+    #reportError(event: string, error: unknown): void {
+        if (this.#reportingError) return;
+        this.#reportingError = true;
+        let reportingAsync = false;
+        try {
+            const result = this.#onError?.(event, error);
+            if (isPromiseLike(result)) {
+                reportingAsync = true;
+                void Promise.resolve(result)
+                    .catch(() => undefined)
+                    .finally(() => {
+                        this.#reportingError = false;
+                    });
+            }
+        } catch {
+            // Error reporting must not unwind through event dispatch or recurse into itself.
+        } finally {
+            if (!reportingAsync) this.#reportingError = false;
         }
     }
 
     removeAllListeners(): void {
         this.#handlers.clear();
     }
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+    return (typeof value === "object" && value !== null) || typeof value === "function"
+        ? typeof (value as { then?: unknown }).then === "function"
+        : false;
 }

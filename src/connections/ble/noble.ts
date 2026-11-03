@@ -1,7 +1,8 @@
 import { createRequire } from "node:module";
 import { HaritoraXError } from "../../lib/errors.js";
 import type { Logger } from "../../lib/logging.js";
-import { bleCharacteristicFromUuid, parseBleDeviceName, type BleCharacteristic } from "../../protocol/endpoint/ble.js";
+import { modelFromFirmware } from "../../protocol/codec/messages.js";
+import { bleCharacteristicFromUuid, bleText, parseBleDeviceName, type BleCharacteristic } from "../../protocol/endpoint/ble.js";
 import { BleConnection, type BleBackend, type BleConnectionOptions, type BlePeripheralSummary } from "./index.js";
 import type { ListOptions } from "../contract.js";
 import type { DisconnectReason, Unsubscribe } from "../../types.js";
@@ -280,8 +281,24 @@ class NobleBleBackend implements BleBackend {
             }
 
             const identityReadsStartedAt = Date.now();
-            await this.#readInitial(peripheralId, entry, STREAM_IDENTITY_READS);
+            const identityValues = await this.#readInitial(peripheralId, entry, STREAM_IDENTITY_READS);
             this.#assertOpenEntry(peripheralId, entry);
+            const serial = bleText(identityValues.get("serial-number") ?? new Uint8Array(0));
+            const firmwareModel = bleText(identityValues.get("model-number") ?? new Uint8Array(0));
+            let identityValid = Boolean(serial && firmwareModel);
+            if (identityValid) {
+                try {
+                    modelFromFirmware(firmwareModel);
+                } catch {
+                    identityValid = false;
+                }
+            }
+            if (!identityValid) {
+                throw new HaritoraXError(
+                    "CONNECTION_FAILED",
+                    `BLE peripheral "${peripheralId}" did not provide a valid serial number and supported model`,
+                );
+            }
             this.#log?.debug("Finished essential BLE identity reads", {
                 peripheralId,
                 elapsedMs: Date.now() - identityReadsStartedAt,
@@ -293,6 +310,13 @@ class NobleBleBackend implements BleBackend {
             const sensorSubscriptionsStartedAt = Date.now();
             await this.#subscribe(peripheralId, entry, ["sensor", "sensor2"]);
             this.#assertOpenEntry(peripheralId, entry);
+            const sensorSubscriptions = entry.subscribed.filter((name) => name === "sensor" || name === "sensor2");
+            if (sensorSubscriptions.length === 0) {
+                throw new HaritoraXError(
+                    "CONNECTION_FAILED",
+                    `BLE peripheral "${peripheralId}" has no usable sensor notification characteristic`,
+                );
+            }
             this.#log?.debug("Subscribed to BLE sensor notifications", {
                 peripheralId,
                 elapsedMs: Date.now() - sensorSubscriptionsStartedAt,
@@ -455,7 +479,12 @@ class NobleBleBackend implements BleBackend {
         this.#rssiTimers.delete(peripheralId);
     }
 
-    async #readInitial(peripheralId: string, entry: OpenPeripheral, reads: readonly BleCharacteristic[]): Promise<void> {
+    async #readInitial(
+        peripheralId: string,
+        entry: OpenPeripheral,
+        reads: readonly BleCharacteristic[],
+    ): Promise<Map<BleCharacteristic, Uint8Array>> {
+        const values = new Map<BleCharacteristic, Uint8Array>();
         const succeeded: string[] = [];
         const failed: Array<{ characteristic: string; uuid: string; error: string }> = [];
         for (const characteristic of reads) {
@@ -466,7 +495,9 @@ class NobleBleBackend implements BleBackend {
             try {
                 const value = await this.#raceDisconnect(entry, instance.readAsync(), peripheralId, `read ${characteristic}`);
                 this.#assertOpenEntry(peripheralId, entry);
-                this.#emit(peripheralId, characteristic, new Uint8Array(value));
+                const bytes = new Uint8Array(value);
+                values.set(characteristic, bytes);
+                this.#emit(peripheralId, characteristic, bytes);
                 succeeded.push(characteristic);
             } catch (error) {
                 this.#log?.debug(`Failed to read "${characteristic}" from ${peripheralId}`, { error: String(error) });
@@ -474,6 +505,7 @@ class NobleBleBackend implements BleBackend {
             }
         }
         this.#log?.debug("BLE initial read results", { peripheralId, succeeded, failed });
+        return values;
     }
 
     async #subscribe(peripheralId: string, entry: OpenPeripheral, characteristics: readonly BleCharacteristic[]): Promise<void> {

@@ -91,6 +91,26 @@ describe("connection contract", () => {
 
         assert.ok(logs.some((message) => message.startsWith("Discovered")));
     });
+
+    it("reports throwing onLog callbacks without losing log events or interrupting discovery", async () => {
+        const app = createHaritoraX({
+            connections: [memoryConnection()],
+            logLevel: "info",
+            onLog: () => {
+                throw new Error("log callback failed");
+            },
+        });
+        const logs: string[] = [];
+        const errors: string[] = [];
+        app.on("log", ({ message }) => logs.push(message));
+        app.on("error", ({ error }) => errors.push(error.message));
+
+        await app.discover();
+
+        assert.ok(logs.some((message) => message.startsWith("Discovered")));
+        assert.ok(errors.some((message) => message === "log callback failed"));
+        await app.dispose();
+    });
 });
 
 describe("container discovery and connection", () => {

@@ -1,4 +1,4 @@
-import { HaritoraXError } from "../../lib/errors.js";
+import { HaritoraXError, SettingsWriteError } from "../../lib/errors.js";
 import type { Emitter } from "../../lib/emitter.js";
 import type { Logger } from "../../lib/logging.js";
 import type { DeviceRegistry } from "../device-registry.js";
@@ -35,8 +35,11 @@ import type {
     SensorAutoCorrection,
     SensorMode,
     TrackerModel,
+    TrackerSetting,
     TrackerSettings,
     TrackerSnapshot,
+    SettingsApplyResult,
+    SettingsWriteFailure,
 } from "../../types.js";
 
 const BLE_SLOT = "0";
@@ -50,6 +53,7 @@ export interface BleControllerOptions {
     registry: DeviceRegistry;
     connectionKind: (endpointId: string) => ConnectionKind;
     write: (endpointId: string, characteristic: BleCharacteristic, data: Uint8Array) => Promise<void>;
+    read: (endpointId: string, characteristic: BleCharacteristic) => Promise<Uint8Array | undefined>;
     buttonDebounceMs?: number;
 }
 
@@ -59,6 +63,7 @@ export class BleController implements ProtocolHandler {
     readonly #registry: DeviceRegistry;
     readonly #connectionKind: (endpointId: string) => ConnectionKind;
     readonly #write: (endpointId: string, characteristic: BleCharacteristic, data: Uint8Array) => Promise<void>;
+    readonly #read: (endpointId: string, characteristic: BleCharacteristic) => Promise<Uint8Array | undefined>;
     readonly #states = new Map<string, BleState>();
     readonly #lastButtonPress = new Map<string, number>();
     readonly #bodyPartWaits = new Map<string, BodyPartWait>();
@@ -70,6 +75,7 @@ export class BleController implements ProtocolHandler {
         this.#registry = options.registry;
         this.#connectionKind = options.connectionKind;
         this.#write = options.write;
+        this.#read = options.read;
         this.#buttonDebounceMs = options.buttonDebounceMs ?? 100;
     }
 
@@ -102,9 +108,11 @@ export class BleController implements ProtocolHandler {
             }
             case "software-revision": {
                 const version = bleText(data);
-                if (version !== state.version) {
+                if (version && version !== state.version) {
                     state.version = version;
                     state.sensor2Supported = undefined;
+                    state.device = undefined;
+                    this.#ensureDevice(state);
                 }
                 break;
             }
@@ -213,40 +221,68 @@ export class BleController implements ProtocolHandler {
         }
     }
 
-    async setSettings(endpointId: string, settings: TrackerSettings): Promise<void> {
+    async setSettings(endpointId: string, settings: TrackerSettings): Promise<SettingsApplyResult> {
         const state = this.#state(endpointId);
         const device = this.#ensureDevice(state);
         if (!device) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown BLE tracker on "${endpointId}"`);
 
         const values = bleSettingValues(settings);
-        const failures: { setting: string; error: unknown }[] = [];
-        const apply = async (setting: string, characteristic: BleCharacteristic, value: number): Promise<boolean> => {
+        const applied: TrackerSetting[] = [];
+        const unsupported: TrackerSetting[] = [];
+        const failures: SettingsWriteFailure[] = [];
+        const apply = async (
+            setting: TrackerSetting,
+            characteristic: BleCharacteristic,
+            value: number,
+            optional = false,
+        ): Promise<"applied" | "unsupported" | "failed"> => {
             try {
                 await this.#write(endpointId, characteristic, new Uint8Array([value]));
-                return true;
+                applied.push(setting);
+                return "applied";
             } catch (error) {
-                failures.push({ setting, error });
-                return false;
+                if (optional && error instanceof HaritoraXError && error.code === "NOT_SUPPORTED") {
+                    unsupported.push(setting);
+                    return "unsupported";
+                }
+                failures.push({
+                    setting,
+                    characteristic,
+                    error: error instanceof Error ? error : new Error(String(error)),
+                });
+
+                return "failed";
             }
         };
 
-        if (await apply("sensorMode", "sensor-mode", values.sensorMode)) state.settings.sensorMode = settings.sensorMode;
-        if (await apply("fpsMode", "fps", values.fpsMode)) state.settings.fpsMode = settings.fpsMode;
+        if ((await apply("sensorMode", "sensor-mode", values.sensorMode)) === "applied")
+            state.settings.sensorMode = settings.sensorMode;
+        if ((await apply("fpsMode", "fps", values.fpsMode)) === "applied") state.settings.fpsMode = settings.fpsMode;
         const calibrationCharacteristic = device.model === "wired" ? "wired-auto-calibration" : "auto-calibration";
-        if (await apply("sensorAutoCorrection", calibrationCharacteristic, values.autoCorrection)) {
+        const calibrationResult = await apply(
+            "sensorAutoCorrection",
+            calibrationCharacteristic,
+            values.autoCorrection,
+            device.model === "wired",
+        );
+
+        if (calibrationResult === "applied") {
             state.settings.correction = [...settings.sensorAutoCorrection];
         }
-        if (await apply("ankleMotionDetection", "tof", values.tof)) state.settings.ankle = settings.ankleMotionDetection;
+        if ((await apply("ankleMotionDetection", "tof", values.tof)) === "applied")
+            state.settings.ankle = settings.ankleMotionDetection;
 
         this.#maybeSettings(state);
+        const result: SettingsApplyResult = { applied, unsupported };
         if (failures.length > 0) {
-            this.#log.warn(`Some BLE settings could not be applied to ${endpointId}`, {
-                settings: failures.map(({ setting }) => setting),
-                errors: failures.map(({ setting, error }) => `${setting}: ${String(error)}`),
-            });
+            throw new SettingsWriteError(result, failures);
         } else {
-            this.#log.info(`Applied BLE settings to ${endpointId}`);
+            this.#log.info(`Applied BLE settings to ${endpointId}`, {
+                applied,
+                unsupported,
+            });
         }
+        return result;
     }
 
     forgetEndpoint(endpointId: string): void {
@@ -283,6 +319,7 @@ export class BleController implements ProtocolHandler {
             throw new HaritoraXError("BUSY", `A body-part change is already in progress on ${endpointId}`);
         }
         const wait = confirms ? this.#createBodyPartWait(endpointId, bodyPart) : undefined;
+        const needsReadback = !confirms && state.bodyPart !== bodyPart;
 
         try {
             await this.#write(endpointId, "body-part-write", new Uint8Array([id]));
@@ -300,6 +337,28 @@ export class BleController implements ProtocolHandler {
                 "TIMEOUT",
                 `${device.deviceId} did not confirm the body part "${bodyPart}" in time. Its firmware may ignore the change, check its version`,
             );
+        }
+
+        if (needsReadback) {
+            let readback: Uint8Array | undefined;
+            try {
+                readback = await this.#read(endpointId, "body-part");
+            } catch (error) {
+                throw new HaritoraXError("READ_FAILED", `Could not verify the body part of ${device.deviceId}`, { cause: error });
+            }
+
+            const actual = readback ? bleBodyPart(readback) : undefined;
+            if (!readback || !actual) {
+                throw new HaritoraXError("READ_FAILED", `Could not read back the body part of ${device.deviceId}`);
+            }
+            if (actual !== bodyPart) {
+                throw new HaritoraXError(
+                    "READ_FAILED",
+                    `${device.deviceId} reports body part "${actual}" after requesting "${bodyPart}"`,
+                );
+            }
+
+            this.handleBinaryFrame(endpointId, "body-part", readback);
         }
 
         this.#log.info(`Set body part of BLE ${endpointId} to ${bodyPart}`);
@@ -512,16 +571,36 @@ export class BleController implements ProtocolHandler {
         const parts = this.#parts(state);
         const existing = this.#registry.deviceAt(state.endpointId, BLE_SLOT);
 
-        // if device exists (and serial matches), update trackers if parts changed, otherwise return existing device
-        // usually when user (un)plugs tracker to device during a session like in wired trackers
+        // refresh the registry when late BLE identity fields arrive for the same tracker
         if (existing && existing.deviceId === state.serial) {
             const partsChanged =
                 existing.trackers.length !== parts.length ||
                 existing.trackers.some((tracker, index) => tracker.bodyPart !== parts[index]);
+            const metadataChanged =
+                existing.model !== state.model ||
+                (state.version !== undefined && state.version !== "" && existing.version !== state.version);
+            if (!metadataChanged) {
+                if (partsChanged) this.#registry.setTrackers(state.serial, parts);
+                state.device = existing;
+                return existing;
+            }
 
-            if (partsChanged) this.#registry.setTrackers(state.serial, parts);
-            state.device = existing;
-            return existing;
+            const device = this.#registry.register(
+                {
+                    deviceId: state.serial,
+                    endpointId: state.endpointId,
+                    slot: BLE_SLOT,
+                    model: state.model,
+                    firmwareModel: state.firmwareModel ?? "",
+                    version: state.version ?? "",
+                    reportedImuCount: state.imuCount,
+                    connection: this.#connectionKind(state.endpointId),
+                    parts,
+                },
+                activate,
+            );
+            state.device = device.endpointId === state.endpointId ? device : undefined;
+            return state.device;
         }
 
         const device = this.#registry.register(

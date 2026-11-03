@@ -30,6 +30,8 @@ export interface Connection {
     open(endpointId: string): Promise<void>;
     close(endpointId: string): Promise<void>;
     write(endpointId: string, data: Uint8Array, options?: WriteOptions): Promise<void>;
+    // BLE only, returns undefined if the characteristic is not found or the read fails
+    read?(endpointId: string, characteristic: string): Promise<Uint8Array | undefined>;
 
     onData(handler: (frame: Frame) => void): Unsubscribe;
     onLost(handler: (endpointId: string, reason: DisconnectReason) => void): Unsubscribe;

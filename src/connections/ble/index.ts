@@ -113,6 +113,11 @@ export class BleConnection implements Connection {
         await this.#backend.write(endpointId, characteristic as BleCharacteristic, data);
     }
 
+    async read(endpointId: string, characteristic: string): Promise<Uint8Array | undefined> {
+        if (!this.#open.has(endpointId)) throw new HaritoraXError("NOT_CONNECTED", `${endpointId} is not open`);
+        return this.#backend.read(endpointId, characteristic as BleCharacteristic);
+    }
+
     onData(handler: (frame: Frame) => void): Unsubscribe {
         this.#dataHandlers.add(handler);
         return () => this.#dataHandlers.delete(handler);

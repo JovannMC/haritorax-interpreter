@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it, mock } from "node:test";
-import { createHaritoraX } from "../dist/index.js";
+import { createHaritoraX, HaritoraXError, SettingsWriteError } from "../dist/index.js";
 import { BleConnection, type BleBackend, type BlePeripheralSummary } from "../dist/connections/ble/index.js";
 import type { Connection, Frame, ListOptions } from "../dist/connections/contract.js";
 import {
@@ -54,7 +54,9 @@ class FakeBleBackend implements BleBackend {
     readonly writes: Array<{ endpointId: string; characteristic: BleCharacteristic; data: number[] }> = [];
     readonly writeAttempts: Array<{ endpointId: string; characteristic: BleCharacteristic; data: number[] }> = [];
     readonly unsupportedWrites = new Set<BleCharacteristic>();
+    readonly readValues = new Map<BleCharacteristic, Uint8Array>();
     readonly opened = new Set<string>();
+    bodyPartReadbackAfterWrite: Uint8Array | undefined;
     writeGate: Promise<void> | undefined;
     // the real backend reads the device information while opening, a test can emit it from here
     onOpen: (() => void) | undefined;
@@ -78,15 +80,21 @@ class FakeBleBackend implements BleBackend {
         return Promise.resolve();
     }
 
-    read(): Promise<Uint8Array | undefined> {
-        return Promise.resolve(undefined);
+    read(_peripheralId: string, characteristic: BleCharacteristic): Promise<Uint8Array | undefined> {
+        const value = this.readValues.get(characteristic);
+        return Promise.resolve(value && new Uint8Array(value));
     }
 
     write(peripheralId: string, characteristic: BleCharacteristic, data: Uint8Array): Promise<void> {
         this.writeAttempts.push({ endpointId: peripheralId, characteristic, data: [...data] });
+        if (this.unsupportedWrites.has(characteristic) && characteristic === "wired-auto-calibration")
+            return Promise.reject(new HaritoraXError("NOT_SUPPORTED", `Unsupported characteristic: ${characteristic}`));
         if (this.unsupportedWrites.has(characteristic))
             return Promise.reject(new Error(`Unsupported characteristic: ${characteristic}`));
         this.writes.push({ endpointId: peripheralId, characteristic, data: [...data] });
+        if (characteristic === "body-part-write" && this.bodyPartReadbackAfterWrite) {
+            this.readValues.set("body-part", new Uint8Array(this.bodyPartReadbackAfterWrite));
+        }
         return this.writeGate ?? Promise.resolve();
     }
 
@@ -114,6 +122,7 @@ class FakeBleBackend implements BleBackend {
     }
 
     emit(endpointId: string, characteristic: BleCharacteristic, data: Uint8Array): void {
+        this.readValues.set(characteristic, new Uint8Array(data));
         for (const handler of this.#dataHandlers) handler(endpointId, characteristic, data);
     }
 
@@ -468,7 +477,7 @@ describe("BLE device", () => {
             app.on("tracker:disconnected", ({ trackerId }) => lost.push(trackerId));
 
             backend.emit("ble-1", "sensor", SENSOR_2IMU);
-            assert.deepEqual(samples, []);
+            assert.equal(samples.length, 0);
             // Longer than the registry's 10-second inactivity timeout.
             for (let tick = 0; tick < 120; tick++) {
                 mock.timers.tick(100);
@@ -658,6 +667,20 @@ describe("BLE device", () => {
         assert.equal(app.getTracker("BBBBB0:0")?.accelAccuracy, 3);
     });
 
+    it("does not emit an IMU sample if a mag listener disconnects the tracker", async () => {
+        const { app, backend } = await connected();
+        const samples: string[] = [];
+        app.on("imu", ({ trackerId }) => samples.push(trackerId));
+        app.on("mag", () => backend.lose("ble-1"));
+
+        const frame = new Uint8Array(16);
+        backend.emit("ble-1", "sensor2", frame);
+
+        assert.deepEqual(samples, []);
+        assert.deepEqual(app.getDevices(), []);
+        await app.dispose();
+    });
+
     it("writes BLE settings to the setting characteristics", async () => {
         const { app, backend } = await connected();
 
@@ -667,7 +690,7 @@ describe("BLE device", () => {
             sensorAutoCorrection: ["accel", "gyro", "mag"],
             ankleMotionDetection: true,
         };
-        await app.setSettings("BBBBB0", settings);
+        const result = await app.setSettings("BBBBB0", settings);
 
         assert.deepEqual(backend.writes, [
             { endpointId: "ble-1", characteristic: "sensor-mode", data: [5] },
@@ -675,7 +698,72 @@ describe("BLE device", () => {
             { endpointId: "ble-1", characteristic: "auto-calibration", data: [7] },
             { endpointId: "ble-1", characteristic: "tof", data: [1] },
         ]);
+        assert.deepEqual(result, {
+            applied: ["sensorMode", "fpsMode", "sensorAutoCorrection", "ankleMotionDetection"],
+            unsupported: [],
+        });
         assert.deepEqual(app.getDevice("BBBBB0")?.settings, settings);
+    });
+
+    it("rejects failed setting writes with the fields applied and failed", async () => {
+        const { app, backend } = await connected();
+        backend.unsupportedWrites.add("sensor-mode");
+        backend.unsupportedWrites.add("tof");
+
+        const error = await app
+            .setSettings("BBBBB0", {
+                sensorMode: 1,
+                fpsMode: 50,
+                sensorAutoCorrection: ["gyro"],
+                ankleMotionDetection: true,
+            })
+            .catch((reason: unknown) => reason);
+
+        assert.ok(error instanceof SettingsWriteError);
+        assert.equal(error.code, "WRITE_FAILED");
+        assert.deepEqual(error.result.applied, ["fpsMode", "sensorAutoCorrection"]);
+        assert.deepEqual(error.result.unsupported, []);
+        assert.deepEqual(
+            error.failures.map(({ setting, characteristic }) => [setting, characteristic]),
+            [
+                ["sensorMode", "sensor-mode"],
+                ["ankleMotionDetection", "tof"],
+            ],
+        );
+        assert.equal(app.getDevice("BBBBB0")?.settings?.fpsMode, 50);
+        assert.deepEqual(app.getDevice("BBBBB0")?.settings?.sensorAutoCorrection, ["gyro"]);
+        await app.dispose();
+    });
+
+    it("rejects when every BLE settings write fails", async () => {
+        const { app, backend } = await connected();
+        for (const characteristic of ["sensor-mode", "fps", "auto-calibration", "tof"] as const) {
+            backend.unsupportedWrites.add(characteristic);
+        }
+
+        const error = await app
+            .setSettings("BBBBB0", {
+                sensorMode: 2,
+                fpsMode: 50,
+                sensorAutoCorrection: [],
+                ankleMotionDetection: false,
+            })
+            .catch((reason: unknown) => reason);
+
+        assert.ok(error instanceof SettingsWriteError);
+        assert.deepEqual(error.result.applied, []);
+        assert.equal(error.failures.length, 4);
+        await app.dispose();
+    });
+
+    it("updates device metadata when a later software revision arrives", async () => {
+        const { app, backend } = await connected({ ...HXW_DEVICE, version: "1.0.5" });
+        assert.equal(app.getDevice("AAAAA7")?.version, "1.0.5");
+
+        backend.emit("ble-1", "software-revision", bytes("1.0.30"));
+
+        assert.equal(app.getDevice("AAAAA7")?.version, "1.0.30");
+        await app.dispose();
     });
 
     it("drops the device when the peripheral disconnects", async () => {
@@ -800,9 +888,26 @@ describe("setting the body part over BLE", () => {
             version: "1.0.22",
         });
 
+        backend.bodyPartReadbackAfterWrite = byte(2);
         await app.setBodyPart("AAAAA0", "leftKnee");
 
         assert.deepEqual(backend.writes.at(-1), { endpointId: "ble-1", characteristic: "body-part-write", data: [2] });
+        assert.equal(app.getBodyPart("AAAAA0:0"), "leftKnee");
+    });
+
+    it("fails without changing the snapshot when old firmware does not confirm a body-part write", async () => {
+        const { app, backend } = await connected({
+            ...HXW_DEVICE,
+            localName: "HaritoraXW-AAAAA0",
+            serial: "AAAAA0",
+            version: "1.0.22",
+        });
+
+        const error = await app.setBodyPart("AAAAA0", "leftKnee").catch((reason: unknown) => reason);
+
+        assert.equal((error as { code?: string }).code, "READ_FAILED");
+        assert.equal(app.getBodyPart("AAAAA0:0"), "leftElbow");
+        assert.equal(backend.writes.at(-1)?.characteristic, "body-part-write");
     });
 
     it("refuses a base tracker on firmware that still has the lock, before writing", async () => {
@@ -1043,7 +1148,7 @@ describe("wired tracker over BLE", () => {
         const { app, backend } = await connectedWired();
         backend.writes.length = 0;
 
-        await app.setSettings("0000021", {
+        const result = await app.setSettings("0000021", {
             sensorMode: 1,
             fpsMode: 50,
             sensorAutoCorrection: ["accel", "mag"],
@@ -1059,6 +1164,10 @@ describe("wired tracker over BLE", () => {
                 ["tof", [1]],
             ],
         );
+        assert.deepEqual(result, {
+            applied: ["sensorMode", "fpsMode", "sensorAutoCorrection", "ankleMotionDetection"],
+            unsupported: [],
+        });
     });
 
     it("continues applying settings when the calibration characteristic is unavailable", async () => {
@@ -1067,7 +1176,7 @@ describe("wired tracker over BLE", () => {
         backend.writes.length = 0;
         backend.writeAttempts.length = 0;
 
-        await app.setSettings("0000021", {
+        const result = await app.setSettings("0000021", {
             sensorMode: 2,
             fpsMode: 100,
             sensorAutoCorrection: [],
@@ -1082,6 +1191,10 @@ describe("wired tracker over BLE", () => {
             backend.writeAttempts.map((write) => write.characteristic),
             ["sensor-mode", "fps", "wired-auto-calibration", "tof"],
         );
+        assert.deepEqual(result, {
+            applied: ["sensorMode", "fpsMode", "ankleMotionDetection"],
+            unsupported: ["sensorAutoCorrection"],
+        });
     });
 
     it("uses the range bytes only when told they are there", () => {

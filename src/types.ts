@@ -77,6 +77,19 @@ export interface TrackerSettings {
     ankleMotionDetection: boolean;
 }
 
+export type TrackerSetting = keyof TrackerSettings;
+
+export interface SettingsApplyResult {
+    applied: readonly TrackerSetting[];
+    unsupported: readonly TrackerSetting[];
+}
+
+export interface SettingsWriteFailure {
+    setting: TrackerSetting;
+    characteristic: string;
+    error: Error;
+}
+
 export type ConnectionKind = "ble" | "serial";
 
 export type DisconnectReason = "requested" | "timeout" | "remote" | "error";

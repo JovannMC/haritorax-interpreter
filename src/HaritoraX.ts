@@ -21,6 +21,7 @@ import type {
     DeviceSnapshot,
     TrackerSnapshot,
     TrackerSettings,
+    SettingsApplyResult,
     Unsubscribe,
 } from "./types.js";
 
@@ -40,7 +41,7 @@ export class HaritoraX {
     readonly #openingEndpoints = new Set<string>();
     readonly #lostWhileOpening = new Set<string>();
     readonly #subscriptions: Unsubscribe[] = [];
-    readonly #endpointOperations = new Map<string, Promise<void>>();
+    readonly #endpointOperations = new Map<string, Promise<unknown>>();
 
     #scanController: AbortController | undefined;
     #scanning: Promise<EndpointDescriptor[]> | undefined;
@@ -53,9 +54,16 @@ export class HaritoraX {
         this.#log = options.logger ?? new Logger(options.logLevel ?? "info");
         this.#subscriptions.push(
             this.#log.onEntry((entry) => {
-                if (options.onLog) options.onLog(entry);
-                else if (!options.logger) console.log(`[${entry.level}] ${entry.message}`);
+                let sinkError: Error | undefined;
+                try {
+                    if (options.onLog) options.onLog(entry);
+                    else if (!options.logger) console.log(`[${entry.level}] ${entry.message}`);
+                } catch (error) {
+                    sinkError = toError(error);
+                }
+
                 this.#emitter.emit("log", entry);
+                if (sinkError) this.#emitter.emit("error", { error: sinkError });
             }),
         );
         this.#emitter.setErrorHandler((event, error) => {
@@ -94,6 +102,7 @@ export class HaritoraX {
             registry: this.#registry,
             connectionKind,
             write: (endpointId, characteristic, data) => this.#writeBleCommand(endpointId, characteristic, data),
+            read: (endpointId, characteristic) => this.#readBleCommand(endpointId, characteristic),
             buttonDebounceMs: options.buttonDebounceMs,
         });
 
@@ -258,7 +267,7 @@ export class HaritoraX {
      * device control
      */
 
-    setSettings(deviceId: string, settings: TrackerSettings): Promise<void> {
+    setSettings(deviceId: string, settings: TrackerSettings): Promise<SettingsApplyResult> {
         const device = this.#registry.getDevice(deviceId);
         if (!device) return Promise.reject(new HaritoraXError("DEVICE_NOT_FOUND", `Unknown device "${deviceId}"`));
         return this.#withEndpointOperation(device.endpointId, async () => {
@@ -267,9 +276,13 @@ export class HaritoraX {
             if (!this.#open.has(current.endpointId))
                 throw new HaritoraXError("NOT_CONNECTED", `${current.endpointId} is not connected`);
 
-            if (current.connection === "ble") await this.#ble.setSettings(current.endpointId, settings);
-            else if (current.model === "wired") await this.#wired.setSettings([current.endpointId], settings);
+            if (current.connection === "ble") return this.#ble.setSettings(current.endpointId, settings);
+            if (current.model === "wired") await this.#wired.setSettings([current.endpointId], settings);
             else await this.#dongle.setSettings(current.endpointId, current.slot, settings);
+            return {
+                applied: ["sensorMode", "fpsMode", "sensorAutoCorrection", "ankleMotionDetection"],
+                unsupported: [],
+            } satisfies SettingsApplyResult;
         });
     }
 
@@ -558,6 +571,14 @@ export class HaritoraX {
         return connection.write(endpointId, data, { characteristic });
     }
 
+    async #readBleCommand(endpointId: string, characteristic: BleCharacteristic): Promise<Uint8Array | undefined> {
+        const connection = this.#endpointOwners.get(endpointId);
+        if (!connection || connection.kind !== "ble" || !connection.read) {
+            throw new HaritoraXError("NOT_SUPPORTED", `BLE readback for "${characteristic}" is unavailable`);
+        }
+        return connection.read(endpointId, characteristic);
+    }
+
     #dropEndpoint(endpointId: string, reason: DisconnectReason): void {
         this.#forgetEndpointState(endpointId, reason);
         this.#emitter.emit("endpoint:disconnected", { endpointId, reason });
@@ -589,7 +610,7 @@ export class HaritoraX {
         this.#log.debug(`BLE RSSI update for ${device.deviceId}: ${rssi} dBm`);
     }
 
-    #withEndpointOperation(endpointId: string, operation: () => Promise<void>): Promise<void> {
+    #withEndpointOperation<T>(endpointId: string, operation: () => Promise<T>): Promise<T> {
         if (this.#disposed) return Promise.reject(new HaritoraXError("NOT_CONNECTED", "HaritoraX has been disposed"));
         const previous = this.#endpointOperations.get(endpointId) ?? Promise.resolve();
         const current = previous

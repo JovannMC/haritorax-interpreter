@@ -151,6 +151,10 @@ export class DeviceRegistry {
 
             existing.model = input.model;
             if (input.version) existing.version = input.version;
+            if (input.comm === undefined) delete existing.comm;
+            else existing.comm = input.comm;
+            if (input.commNext === undefined) delete existing.commNext;
+            else existing.commNext = input.commNext;
             this.#emitInfo(input);
             this.#emitDevices();
             return existing;
@@ -256,18 +260,18 @@ export class DeviceRegistry {
 
         const wasConnected = state.snapshot.connected;
         this.#markTrackerSeen(state);
+        if (this.#trackers.get(trackerId) !== state) return undefined;
         if (!wasConnected) {
             if (magStatus !== undefined) this.setMag(trackerId, magStatus);
             if (tap !== undefined) this.setTap(trackerId, tap);
-            return state.snapshot;
+            return this.#trackers.get(trackerId) === state ? state.snapshot : undefined;
         }
 
-        const magChanged = magStatus !== undefined && this.#setMagState(state, magStatus);
-        if (tap !== undefined) {
-            if (magChanged && this.#trackers.get(trackerId) !== state) this.setTap(trackerId, tap);
-            else this.#setTapState(state, tap);
-        }
-        return state.snapshot;
+        if (magStatus !== undefined) this.#setMagState(state, magStatus);
+        if (this.#trackers.get(trackerId) !== state) return undefined;
+        if (tap !== undefined) this.#setTapState(state, tap);
+
+        return this.#trackers.get(trackerId) === state ? state.snapshot : undefined;
     }
 
     #markTrackerSeen(state: TrackerState): void {
