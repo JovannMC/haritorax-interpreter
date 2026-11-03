@@ -515,6 +515,43 @@ describe("BLE device", () => {
         }
     });
 
+    it("keeps using sensor while sensor2 is intermittent and requires a healthy recovery", async () => {
+        mock.timers.enable({ apis: ["Date", "setTimeout"] });
+        const { app, backend } = await connected();
+        try {
+            const samples: string[] = [];
+            app.on("imu", (sample) => samples.push(sample.trackerId));
+
+            backend.emit("ble-1", "sensor2", SENSOR2_2IMU);
+            assert.equal(samples.length, 2);
+
+            // At 100 FPS, a gap beyond four expected frame periods marks sensor2 unhealthy.
+            mock.timers.tick(41);
+            backend.emit("ble-1", "sensor", SENSOR_2IMU);
+            assert.equal(samples.length, 4);
+
+            // A sporadic sensor2 notification does not switch sources or suppress basic frames.
+            backend.emit("ble-1", "sensor2", SENSOR2_2IMU);
+            backend.emit("ble-1", "sensor", SENSOR_2IMU);
+            assert.equal(samples.length, 6);
+
+            // Three consecutive sensor2 notifications within the healthy interval restore it.
+            for (let frame = 0; frame < 2; frame++) {
+                mock.timers.tick(10);
+                backend.emit("ble-1", "sensor2", SENSOR2_2IMU);
+            }
+            assert.equal(samples.length, 8);
+
+            mock.timers.tick(10);
+            backend.emit("ble-1", "sensor2", SENSOR2_2IMU);
+            backend.emit("ble-1", "sensor", SENSOR_2IMU);
+            assert.equal(samples.length, 10);
+        } finally {
+            await app.dispose();
+            mock.timers.reset();
+        }
+    });
+
     it("does not let malformed sensor2 notifications suppress valid basic frames", async () => {
         mock.timers.enable({ apis: ["Date", "setTimeout"] });
         const { app, backend } = await connected();

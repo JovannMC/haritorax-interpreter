@@ -46,6 +46,8 @@ const BLE_SLOT = "0";
 const BODY_PART_TIMEOUT_MS = 2_000;
 const MAX_BLE_BODY_PART_ID = 15;
 const SENSOR2_FALLBACK_MS = 250;
+const SENSOR2_RECOVERY_FRAMES = 3;
+const SENSOR2_MAX_FRAME_PERIODS = 4;
 
 export interface BleControllerOptions {
     emitter: Emitter;
@@ -101,6 +103,7 @@ export class BleController implements ProtocolHandler {
                     state.firmwareModel = firmware;
                     state.model = this.#modelFromFirmware(firmware);
                     state.sensor2Supported = undefined;
+                    this.#resetSensorSource(state);
                     state.device = undefined;
                 }
                 this.#ensureDevice(state);
@@ -111,6 +114,7 @@ export class BleController implements ProtocolHandler {
                 if (version && version !== state.version) {
                     state.version = version;
                     state.sensor2Supported = undefined;
+                    this.#resetSensorSource(state);
                     state.device = undefined;
                     this.#ensureDevice(state);
                 }
@@ -147,7 +151,20 @@ export class BleController implements ProtocolHandler {
                     state.sensorStartedAt ??= now;
                     const expectsSensor2 = state.model && (state.sensor2Supported ??= hasSensor2(state.model, state.version));
                     const preferredAt = state.sensor2LastSeen ?? (expectsSensor2 ? state.sensorStartedAt : undefined);
-                    if (preferredAt === undefined || now - preferredAt >= SENSOR2_FALLBACK_MS) {
+                    const sensor2Gap = state.sensor2LastSeen === undefined ? undefined : now - state.sensor2LastSeen;
+                    const sensor2Unhealthy =
+                        state.sensorSource === "sensor2" &&
+                        sensor2Gap !== undefined &&
+                        sensor2Gap > sensor2MaxGapMs(state.settings.fpsMode);
+                    const sensor2TimedOut =
+                        expectsSensor2 && preferredAt !== undefined && now - preferredAt >= SENSOR2_FALLBACK_MS;
+                    if (
+                        state.sensorSource === "sensor" ||
+                        sensor2Unhealthy ||
+                        preferredAt === undefined ||
+                        sensor2TimedOut
+                    ) {
+                        if (sensor2Unhealthy || sensor2TimedOut) state.sensor2FallbackActive = true;
                         this.#setSensorSource(state, "sensor");
                         this.#onSensor(state, data);
                     }
@@ -420,8 +437,19 @@ export class BleController implements ProtocolHandler {
     #onSensor2(state: BleState, data: Uint8Array): void {
         const slices = splitBleSensor2Frames(data);
         if (slices.length === 0) return;
+        const now = Date.now();
+        const previousAt = state.sensor2LastSeen;
+        state.sensor2LastSeen = now;
+
+        if (state.sensor2FallbackActive) {
+            const maxGap = sensor2MaxGapMs(state.settings.fpsMode);
+            state.sensor2RecoveryFrames =
+                previousAt !== undefined && now - previousAt <= maxGap ? (state.sensor2RecoveryFrames ?? 0) + 1 : 1;
+            if (state.sensor2RecoveryFrames < SENSOR2_RECOVERY_FRAMES) return;
+            state.sensor2FallbackActive = false;
+        }
+
         this.#setSensorSource(state, "sensor2");
-        state.sensor2LastSeen = Date.now();
 
         const device = this.#ensureDevice(state, true);
         if (!device) return;
@@ -461,6 +489,14 @@ export class BleController implements ProtocolHandler {
             firmwareVersion: state.version,
         });
         state.sensorSource = source;
+        state.sensor2RecoveryFrames = 0;
+    }
+
+    #resetSensorSource(state: BleState): void {
+        state.sensorSource = undefined;
+        state.sensor2LastSeen = undefined;
+        state.sensor2RecoveryFrames = 0;
+        state.sensor2FallbackActive = false;
     }
 
     #onWiredSensor(state: BleState, data: Uint8Array): void {
@@ -673,10 +709,16 @@ function isNoWiredEvent(state: BleState, data: Uint8Array): boolean {
     return state.model === "wired" && data[4] === 0xff;
 }
 
+function sensor2MaxGapMs(fpsMode: FpsMode | undefined): number {
+    return SENSOR2_MAX_FRAME_PERIODS * (1_000 / (fpsMode ?? 50));
+}
+
 interface BleState {
     endpointId: string;
     sensorStartedAt?: number;
     sensor2LastSeen?: number;
+    sensor2RecoveryFrames?: number;
+    sensor2FallbackActive?: boolean;
     sensorSource?: "sensor" | "sensor2";
     serial?: string;
     model?: TrackerModel;
