@@ -336,6 +336,47 @@ describe("container discovery and connection", () => {
         serial.emitFrame("COM4", "X0:QQV1");
         assert.deepEqual(frames, []);
     });
+
+    it("keeps ownership of an endpoint while it is opening across a scan", async () => {
+        const serial = memoryConnection(["COM4"]);
+        let finishOpen: (() => void) | undefined;
+        let closed = 0;
+        serial.open = () => new Promise<void>((resolve) => (finishOpen = resolve));
+        serial.close = async () => {
+            closed++;
+        };
+        const app = createHaritoraX({ connections: [serial], logLevel: "silent" });
+
+        await app.discover();
+        const connecting = app.connect("COM4");
+        await new Promise((resolve) => setImmediate(resolve));
+        await app.discover();
+        finishOpen?.();
+        await connecting;
+        await app.disconnect("COM4");
+
+        assert.equal(closed, 1, "disconnect closes the connection that completed opening");
+        await app.dispose();
+    });
+
+    it("makes concurrent dispose callers await the same cleanup", async () => {
+        const serial = memoryConnection(["COM4"]);
+        let finishDispose: (() => void) | undefined;
+        serial.dispose = () => new Promise<void>((resolve) => (finishDispose = resolve));
+        const app = createHaritoraX({ connections: [serial], logLevel: "silent" });
+        let secondFinished = false;
+
+        const first = app.dispose();
+        const second = app.dispose().then(() => {
+            secondFinished = true;
+        });
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.equal(secondFinished, false);
+        await assert.rejects(app.connect("COM4"), /disposed/);
+        finishDispose?.();
+        await Promise.all([first, second]);
+        assert.equal(secondFinished, true);
+    });
 });
 
 describe("class contract", () => {

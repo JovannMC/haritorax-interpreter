@@ -721,6 +721,7 @@ describe("BLE device", () => {
         app.on("endpoint:disconnected", ({ endpointId, reason }) => events.push(`${endpointId}:${reason}`));
 
         const poweringOff = app.powerOff("BBBBB0");
+        await new Promise((resolve) => setImmediate(resolve));
         assert.deepEqual(backend.writes, [{ endpointId: "ble-1", characteristic: "wireless-mode", data: [2] }]);
         assert.equal(backend.opened.has("ble-1"), true);
         assert.deepEqual(events, []);

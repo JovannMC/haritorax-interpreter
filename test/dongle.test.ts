@@ -392,9 +392,11 @@ describe("settings writing", () => {
         const secondWrite = app.setSettings("EEEEE1", second);
         await flush();
 
-        // Settings are based on the dongle's current slot values, so reply to both reads before writes proceed.
-        assert.deepEqual(serial.writes, ["COM4:o0:", "COM4:o1:"]);
+        // A dongle is one command channel, so complete slot 0 before reading slot 1.
+        assert.deepEqual(serial.writes, ["COM4:o0:"]);
         serial.emitFrame("o0:00000000100000");
+        await flush();
+        assert.deepEqual(serial.writes, ["COM4:o0:", "COM4:o0:00000110103001", "COM4:o1:"]);
         serial.emitFrame("o1:00000000100000");
         await Promise.all([firstWrite, secondWrite]);
 
@@ -402,10 +404,10 @@ describe("settings writing", () => {
         serial.emitFrame("o0:00000110103001");
         serial.emitFrame("o1:00000000100000");
 
-        assert.deepEqual(serial.writes, ["COM4:o0:", "COM4:o1:", "COM4:o0:00000110103001", "COM4:o1:00000000100000"]);
+        assert.deepEqual(serial.writes, ["COM4:o0:", "COM4:o0:00000110103001", "COM4:o1:", "COM4:o1:00000000100000"]);
         assert.deepEqual(app.getDevice("AAAAA7")?.settings, first);
         assert.deepEqual(app.getDevice("EEEEE1")?.settings, second);
-        assert.deepEqual(events, [second, second, first]);
+        assert.deepEqual(events, [second, first, second]);
     });
 
     it("rejects settings for an unknown device", async () => {
@@ -990,6 +992,28 @@ describe("power off and switching", () => {
             mock.timers.tick(1);
             await pending;
             assert.deepEqual(serial.writes, ["COM4:o0:00000110107020", "COM4:o0:00000110107000"]);
+        } finally {
+            mock.timers.reset();
+        }
+    });
+
+    it("serializes settings behind the complete power-off command sequence", async () => {
+        const { app, serial, pending } = await holdTimes(INFO_DUAL);
+        try {
+            const settings = {
+                sensorMode: 1,
+                fpsMode: 100,
+                sensorAutoCorrection: ["gyro"] as Array<"gyro">,
+                ankleMotionDetection: true,
+            };
+            const updating = app.setSettings("CCCCC3", settings);
+            await flush();
+            assert.equal(serial.writes.length, 1, "settings cannot interrupt the command hold");
+
+            mock.timers.tick(150);
+            await pending;
+            await updating;
+            assert.deepEqual(serial.writes, ["COM4:o0:00000110107020", "COM4:o0:00000110107000", "COM4:o0:00000110102001"]);
         } finally {
             mock.timers.reset();
         }

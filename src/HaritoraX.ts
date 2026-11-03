@@ -46,6 +46,7 @@ export class HaritoraX {
     #scanning: Promise<EndpointDescriptor[]> | undefined;
     #scanGeneration = 0;
     #disposed = false;
+    #disposal: Promise<void> | undefined;
 
     constructor(options: HaritoraXOptions = {}) {
         this.#connections = options.connections ?? [];
@@ -166,9 +167,15 @@ export class HaritoraX {
         this.#endpointOwners.clear();
         this.#handlers.clear();
 
-        for (const endpointId of this.#open) {
+        for (const endpointId of new Set([...this.#open, ...this.#openingEndpoints])) {
             const previous = this.#endpoints.find((descriptor) => descriptor.id === endpointId);
             if (previous) merged.set(endpointId, previous);
+
+            const owner = previousOwners.get(endpointId);
+            const handler = previousHandlers.get(endpointId);
+
+            if (owner) this.#endpointOwners.set(endpointId, owner);
+            if (handler) this.#handlers.set(endpointId, handler);
         }
 
         if (options?.targetEndpointId) {
@@ -251,23 +258,19 @@ export class HaritoraX {
      * device control
      */
 
-    async setSettings(deviceId: string, settings: TrackerSettings): Promise<void> {
+    setSettings(deviceId: string, settings: TrackerSettings): Promise<void> {
         const device = this.#registry.getDevice(deviceId);
-        if (!device) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown device "${deviceId}"`);
-        if (!this.#open.has(device.endpointId))
-            throw new HaritoraXError("NOT_CONNECTED", `${device.endpointId} is not connected`);
+        if (!device) return Promise.reject(new HaritoraXError("DEVICE_NOT_FOUND", `Unknown device "${deviceId}"`));
+        return this.#withEndpointOperation(device.endpointId, async () => {
+            const current = this.#registry.getDevice(deviceId);
+            if (!current) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown device "${deviceId}"`);
+            if (!this.#open.has(current.endpointId))
+                throw new HaritoraXError("NOT_CONNECTED", `${current.endpointId} is not connected`);
 
-        if (device.connection === "ble") {
-            await this.#ble.setSettings(device.endpointId, settings);
-            return;
-        }
-
-        if (device.model === "wired") {
-            await this.#wired.setSettings([device.endpointId], settings);
-            return;
-        }
-
-        await this.#dongle.setSettings(device.endpointId, device.slot, settings);
+            if (current.connection === "ble") await this.#ble.setSettings(current.endpointId, settings);
+            else if (current.model === "wired") await this.#wired.setSettings([current.endpointId], settings);
+            else await this.#dongle.setSettings(current.endpointId, current.slot, settings);
+        });
     }
 
     /*
@@ -283,77 +286,86 @@ export class HaritoraX {
     }
 
     setChannel(endpointId: string, channel: number): Promise<void> {
-        return this.#dongle.setChannel(endpointId, channel);
+        return this.#withEndpointOperation(endpointId, () => this.#dongle.setChannel(endpointId, channel));
     }
 
     pair(endpointId: string, slot: string | number): Promise<void> {
-        return this.#dongle.pair(endpointId, slot);
+        return this.#withEndpointOperation(endpointId, () => this.#dongle.pair(endpointId, slot));
     }
 
     unpair(endpointId: string, slot: string | number): Promise<void> {
-        return this.#dongle.unpair(endpointId, slot);
+        return this.#withEndpointOperation(endpointId, () => this.#dongle.unpair(endpointId, slot));
     }
 
     getDongleVersion(endpointId: string): string | undefined {
         return this.#dongle.getDongleVersion(endpointId);
     }
 
-    async setBodyPart(deviceId: string, bodyPart: BodyPart): Promise<void> {
+    setBodyPart(deviceId: string, bodyPart: BodyPart): Promise<void> {
         const device = this.#registry.getDevice(deviceId);
-        if (!device) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown device "${deviceId}"`);
-        if (device.model === "wired")
-            throw new HaritoraXError("NOT_SUPPORTED", "Wired trackers get their body parts from the order of their sensors");
-        if (!this.#open.has(device.endpointId))
-            throw new HaritoraXError("NOT_CONNECTED", `${device.endpointId} is not connected`);
+        if (!device) return Promise.reject(new HaritoraXError("DEVICE_NOT_FOUND", `Unknown device "${deviceId}"`));
+        return this.#withEndpointOperation(device.endpointId, async () => {
+            const current = this.#registry.getDevice(deviceId);
+            if (!current) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown device "${deviceId}"`);
 
-        if (bodyPartBaseLocked(device.model, device.version, device.deviceId) === true) {
-            throw new HaritoraXError(
-                "NOT_SUPPORTED",
-                `${device.deviceId} is a base tracker and keeps its body part on firmware ${device.version}. Update the tracker firmware to ${baseLockRemovedIn(device.model)} or newer to reassign it`,
-            );
-        }
+            if (current.model === "wired")
+                throw new HaritoraXError("NOT_SUPPORTED", "Wired trackers get their body parts from the order of their sensors");
+            if (!this.#open.has(current.endpointId))
+                throw new HaritoraXError("NOT_CONNECTED", `${current.endpointId} is not connected`);
 
-        if (device.connection === "ble") {
-            await this.#ble.setBodyPart(device.endpointId, bodyPart);
-            return;
-        }
+            if (bodyPartBaseLocked(current.model, current.version, current.deviceId) === true) {
+                throw new HaritoraXError(
+                    "NOT_SUPPORTED",
+                    `${current.deviceId} is a base tracker and keeps its body part on firmware ${current.version}. Update the tracker firmware to ${baseLockRemovedIn(current.model)} or newer to reassign it`,
+                );
+            }
 
-        await this.#dongle.setBodyPart(device.endpointId, device.slot, bodyPart);
+            if (current.connection === "ble") await this.#ble.setBodyPart(current.endpointId, bodyPart);
+            else await this.#dongle.setBodyPart(current.endpointId, current.slot, bodyPart);
+        });
     }
 
-    async powerOff(deviceId: string): Promise<void> {
+    powerOff(deviceId: string): Promise<void> {
         const device = this.#registry.getDevice(deviceId);
-        if (!device) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown device "${deviceId}"`);
-        if (device.model === "wired") throw new HaritoraXError("NOT_SUPPORTED", "Power-off is not supported for wired devices");
-        if (!this.#open.has(device.endpointId))
-            throw new HaritoraXError("NOT_CONNECTED", `${device.endpointId} is not connected`);
+        if (!device) return Promise.reject(new HaritoraXError("DEVICE_NOT_FOUND", `Unknown device "${deviceId}"`));
+        return this.#withEndpointOperation(device.endpointId, async () => {
+            const current = this.#registry.getDevice(deviceId);
+            if (!current) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown device "${deviceId}"`);
 
-        if (device.connection === "ble") {
-            await this.#ble.powerOff(device.endpointId);
-        } else {
-            await this.#dongle.powerOff(device.endpointId, device.slot);
-        }
+            if (current.model === "wired")
+                throw new HaritoraXError("NOT_SUPPORTED", "Power-off is not supported for wired devices");
+            if (!this.#open.has(current.endpointId))
+                throw new HaritoraXError("NOT_CONNECTED", `${current.endpointId} is not connected`);
 
-        this.#log.info(`Sent power-off command to ${deviceId}`);
+            if (current.connection === "ble") await this.#ble.powerOff(current.endpointId);
+            else await this.#dongle.powerOff(current.endpointId, current.slot);
+            this.#log.info(`Sent power-off command to ${deviceId}`);
+        });
     }
 
-    async switchCommunication(deviceId: string, mode: "ble" | "serial"): Promise<void> {
+    switchCommunication(deviceId: string, mode: "ble" | "serial"): Promise<void> {
         const device = this.#registry.getDevice(deviceId);
-        if (!device) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown device "${deviceId}"`);
-        if (device.model === "wired")
-            throw new HaritoraXError("NOT_SUPPORTED", "Switching communication is not supported for wired devices");
-        if (!this.#open.has(device.endpointId))
-            throw new HaritoraXError("NOT_CONNECTED", `${device.endpointId} is not connected`);
+        if (!device) return Promise.reject(new HaritoraXError("DEVICE_NOT_FOUND", `Unknown device "${deviceId}"`));
+        return this.#withEndpointOperation(device.endpointId, async () => {
+            const current = this.#registry.getDevice(deviceId);
+            if (!current) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown device "${deviceId}"`);
 
-        if (device.connection === "ble") {
-            if (mode === "ble") throw new HaritoraXError("NOT_SUPPORTED", "This tracker is already on BLE communication");
-            await this.#ble.switchCommunication(device.endpointId);
-        } else {
-            if (mode === "serial") throw new HaritoraXError("NOT_SUPPORTED", "This tracker is already on serial communication");
-            await this.#dongle.switchCommunication(device.endpointId, device.slot);
-        }
+            if (current.model === "wired")
+                throw new HaritoraXError("NOT_SUPPORTED", "Switching communication is not supported for wired devices");
+            if (!this.#open.has(current.endpointId))
+                throw new HaritoraXError("NOT_CONNECTED", `${current.endpointId} is not connected`);
 
-        this.#log.info(`Switching ${deviceId} to ${mode}`);
+            if (current.connection === "ble") {
+                if (mode === "ble") throw new HaritoraXError("NOT_SUPPORTED", "This tracker is already on BLE communication");
+                await this.#ble.switchCommunication(current.endpointId);
+            } else {
+                if (mode === "serial")
+                    throw new HaritoraXError("NOT_SUPPORTED", "This tracker is already on serial communication");
+                await this.#dongle.switchCommunication(current.endpointId, current.slot);
+            }
+
+            this.#log.info(`Switching ${deviceId} to ${mode}`);
+        });
     }
 
     async connect(endpointId: string): Promise<void> {
@@ -434,9 +446,14 @@ export class HaritoraX {
      * listeners and disposal
      */
 
-    async dispose(): Promise<void> {
-        if (this.#disposed) return;
+    dispose(): Promise<void> {
+        if (this.#disposal) return this.#disposal;
         this.#disposed = true;
+        this.#disposal = this.#disposeInternal();
+        return this.#disposal;
+    }
+
+    async #disposeInternal(): Promise<void> {
         this.#scanGeneration++;
         this.#scanController?.abort();
         this.#scanController = undefined;
@@ -573,8 +590,14 @@ export class HaritoraX {
     }
 
     #withEndpointOperation(endpointId: string, operation: () => Promise<void>): Promise<void> {
+        if (this.#disposed) return Promise.reject(new HaritoraXError("NOT_CONNECTED", "HaritoraX has been disposed"));
         const previous = this.#endpointOperations.get(endpointId) ?? Promise.resolve();
-        const current = previous.catch(() => undefined).then(operation);
+        const current = previous
+            .catch(() => undefined)
+            .then(() => {
+                if (this.#disposed) throw new HaritoraXError("NOT_CONNECTED", "HaritoraX has been disposed");
+                return operation();
+            });
         const tracked = current.finally(() => {
             if (this.#endpointOperations.get(endpointId) === tracked) this.#endpointOperations.delete(endpointId);
         });

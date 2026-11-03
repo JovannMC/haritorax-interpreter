@@ -95,6 +95,56 @@ function asciiEncode(text: string): Uint8Array {
 const WIRED_INFO_REPLY = 'i:{"model":"MC2", "version":"1.7.8", "serial no":"1111111", "comm":"BLT", "comm_next":"BTSPP"}\n';
 
 describe("serial connection", () => {
+    it("bounds serial probe startup and closes a handle that arrives after timeout", async () => {
+        const port = new FakePort();
+        let resolveOpen: ((value: SerialPort) => void) | undefined;
+        const connection = createSerialConnection({
+            backend: {
+                list: () => Promise.resolve([]),
+                open: () => new Promise<SerialPort>((resolve) => (resolveOpen = resolve)),
+            },
+            serialPorts: ["COM3"],
+            operationTimeoutMs: 15,
+            heartbeatIntervalMs: 0,
+        });
+
+        const started = Date.now();
+        const endpoints = await connection.list({ timeoutMs: 100 });
+        assert.ok(Date.now() - started < 500, "hung backend open does not hang discovery");
+        assert.deepEqual(
+            endpoints.map((endpoint) => endpoint.id),
+            ["COM3"],
+        );
+
+        resolveOpen?.(port);
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.equal(port.isOpen, false, "late native open is closed after the probe has timed out");
+        await connection.dispose();
+    });
+
+    it("bounds serial enumeration, writes and close callbacks", async () => {
+        const port = new FakePort();
+        const connection = createSerialConnection({
+            backend: {
+                list: () => new Promise<PortSummary[]>(() => {}),
+                open: () => Promise.resolve(port),
+            },
+            operationTimeoutMs: 15,
+            heartbeatIntervalMs: 0,
+        });
+
+        const started = Date.now();
+        await assert.rejects(connection.list(), /Timed out enumerating serial ports/);
+        assert.ok(Date.now() - started < 500);
+
+        await connection.open("COM3");
+        port.write = () => {};
+        await assert.rejects(connection.write("COM3", new Uint8Array([0x69])), /Timed out writing to COM3/);
+        port.close = () => {};
+        await connection.close("COM3");
+        await connection.dispose();
+    });
+
     it("lists only known dongle ports by VID/PID", async () => {
         const connection = createSerialConnection({
             backend: backendWith([

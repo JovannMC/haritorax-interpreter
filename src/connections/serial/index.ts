@@ -25,8 +25,8 @@ export interface PortSummary {
 }
 
 export interface SerialBackend {
-    list(): Promise<ReadonlyArray<PortSummary>>;
-    open(path: string): Promise<SerialPort>;
+    list(options?: ListOptions): Promise<ReadonlyArray<PortSummary>>;
+    open(path: string, signal?: AbortSignal): Promise<SerialPort>;
 }
 
 export interface SerialOptions {
@@ -34,6 +34,7 @@ export interface SerialOptions {
     heartbeatIntervalMs?: number;
     includeWired?: boolean;
     serialPorts?: readonly string[];
+    operationTimeoutMs?: number;
 }
 
 const DONGLE_IDS: Readonly<Record<string, "GX6" | "GX2">> = Object.freeze({
@@ -52,6 +53,7 @@ const HEARTBEAT_MS = 5_000;
 // on windows, serialport package can't read BusReportedDesc (only place that shows "HaritoraX"), so have to list all SPP ports (shown as BTHENUM) and check each one for a heartbeat reply
 const SPP_SERVICE_GUID = "00001101-0000-1000-8000-00805f9b34fb";
 const SPP_TIMEOUT = 800;
+const DEFAULT_OPERATION_TIMEOUT_MS = 5_000;
 
 const MAX_PENDING_BYTES = 64 * 1024;
 
@@ -71,6 +73,7 @@ export class SerialConnection implements Connection {
     readonly #heartbeatMs: number;
     readonly #includeWired: boolean;
     readonly #serialPorts: readonly string[];
+    readonly #operationTimeoutMs: number;
 
     readonly #ports = new Map<string, OpenPort>();
     readonly #wiredEndpoints = new Set<string>();
@@ -83,14 +86,29 @@ export class SerialConnection implements Connection {
         this.#heartbeatMs = options.heartbeatIntervalMs ?? HEARTBEAT_MS;
         this.#includeWired = options.includeWired ?? false;
         this.#serialPorts = options.serialPorts ?? [];
+        this.#operationTimeoutMs = Math.max(1, options.operationTimeoutMs ?? DEFAULT_OPERATION_TIMEOUT_MS);
     }
 
     async list(options?: ListOptions): Promise<EndpointDescriptor[]> {
         if (options?.signal?.aborted) return [];
+        const deadlineAt = Date.now() + Math.min(options?.timeoutMs ?? this.#operationTimeoutMs, this.#operationTimeoutMs);
+        const deadlineController = new AbortController();
+        const signal = options?.signal ? AbortSignal.any([options.signal, deadlineController.signal]) : deadlineController.signal;
+        const deadlineTimer = setTimeout(() => deadlineController.abort(), Math.max(1, deadlineAt - Date.now()));
+        try {
+            return await this.#listUntil({ ...options, signal }, deadlineAt);
+        } finally {
+            clearTimeout(deadlineTimer);
+        }
+    }
+
+    async #listUntil(options: ListOptions, deadlineAt: number): Promise<EndpointDescriptor[]> {
+        const signal = options.signal;
+        const remaining = (): number => Math.max(1, deadlineAt - Date.now());
 
         let ports: ReadonlyArray<PortSummary> = [];
         try {
-            ports = await this.#backend.list();
+            ports = await withDeadline(this.#backend.list(options), remaining(), "Timed out enumerating serial ports", signal);
         } catch (error: unknown) {
             if (this.#serialPorts.length === 0) {
                 if (error instanceof HaritoraXError) throw error;
@@ -98,7 +116,7 @@ export class SerialConnection implements Connection {
             }
             this.#log.warn("Serial enumeration failed, trying manually configured serial ports", { error: String(error) });
         }
-        if (options?.signal?.aborted) return [];
+        if (signal?.aborted) return [];
 
         const endpoints: EndpointDescriptor[] = [];
         const manualCandidates: PortSummary[] = [];
@@ -124,7 +142,7 @@ export class SerialConnection implements Connection {
         }
 
         for (const port of manualCandidates) {
-            if (options?.signal?.aborted) return [];
+            if (signal?.aborted || Date.now() >= deadlineAt) return endpoints;
             if (this.#ports.has(port.path)) {
                 const wired = this.#wiredEndpoints.has(port.path);
                 if (wired) {
@@ -144,7 +162,7 @@ export class SerialConnection implements Connection {
                 continue;
             }
 
-            const probe = await this.#probeSerialPort(port, options?.signal);
+            const probe = await this.#probeSerialPort(port, signal, remaining());
             if (probe.wired) {
                 wiredEndpoints.add(port.path);
                 endpoints.push({
@@ -163,7 +181,7 @@ export class SerialConnection implements Connection {
         }
 
         for (const port of wiredCandidates) {
-            if (options?.signal?.aborted) return [];
+            if (signal?.aborted || Date.now() >= deadlineAt) return endpoints;
             if (this.#ports.has(port.path)) {
                 if (this.#wiredEndpoints.has(port.path)) {
                     endpoints.push({
@@ -176,7 +194,7 @@ export class SerialConnection implements Connection {
                 continue;
             }
 
-            if ((await this.#probeSerialPort(port, options?.signal)).wired) {
+            if ((await this.#probeSerialPort(port, signal, remaining())).wired) {
                 wiredEndpoints.add(port.path);
                 endpoints.push({
                     id: port.path,
@@ -194,15 +212,19 @@ export class SerialConnection implements Connection {
     }
 
     // tries a port candidate by sending both the wired and generic serial info requests.
-    async #probeSerialPort(port: PortSummary, signal?: AbortSignal): Promise<{ wired: boolean }> {
+    async #probeSerialPort(
+        port: PortSummary,
+        signal?: AbortSignal,
+        timeoutMs = this.#operationTimeoutMs,
+    ): Promise<{ wired: boolean }> {
         if (signal?.aborted) return { wired: false };
         let handle: SerialPort | undefined;
         try {
-            handle = await this.#backend.open(port.path);
+            handle = await openWithLateCleanup(this.#backend.open(port.path, signal), timeoutMs, signal);
             return await new Promise<{ wired: boolean }>((resolve) => {
                 let settled = false;
                 let pending: Uint8Array = new Uint8Array(0);
-                const timer = setTimeout(() => finish({ wired: false }), SPP_TIMEOUT);
+                const timer = setTimeout(() => finish({ wired: false }), Math.min(SPP_TIMEOUT, timeoutMs));
 
                 const finish = (result: { wired: boolean }): void => {
                     if (settled) return;
@@ -223,6 +245,10 @@ export class SerialConnection implements Connection {
                 handle?.on("data", (chunk: Uint8Array) => {
                     const { lines, rest } = splitLines(pending, chunk);
                     pending = rest;
+                    if (pending.length > MAX_PENDING_BYTES) {
+                        finish({ wired: false });
+                        return;
+                    }
                     for (const line of lines) {
                         const { identifier, payload } = parseLine(line);
                         if (identifier !== "i") continue;
@@ -243,9 +269,12 @@ export class SerialConnection implements Connection {
 
                 if (handle) {
                     const target = handle;
-                    void this.#writeProbe(target, "report send info\nblt send info\n").then(() =>
-                        this.#writeProbe(target, "i:\n"),
-                    );
+                    void this.#writeProbe(target, "report send info\nblt send info\n")
+                        .then(() => (settled ? undefined : this.#writeProbe(target, "i:\n")))
+                        .catch((error: unknown) => {
+                            this.#log.debug(`Wired probe write failed: ${String(error)}`);
+                            finish({ wired: false });
+                        });
                 }
             });
         } catch (error) {
@@ -257,27 +286,39 @@ export class SerialConnection implements Connection {
     }
 
     #writeProbe(handle: SerialPort, data: string): Promise<void> {
-        return new Promise((resolve) => {
-            handle.write(data, (error) => {
-                if (error) this.#log.debug(`Wired probe write failed: ${String(error)}`);
-                resolve();
-            });
-        });
+        return withDeadline(
+            new Promise<void>((resolve, reject) => {
+                handle.write(data, (error) => {
+                    if (error) {
+                        this.#log.debug(`Wired probe write failed: ${String(error)}`);
+                        reject(error);
+                    } else resolve();
+                });
+            }),
+            this.#operationTimeoutMs,
+            "Timed out writing to serial probe",
+        );
     }
 
     #closeHandle(handle: SerialPort): Promise<void> {
         handle.removeAllListeners();
         if (!handle.isOpen) return Promise.resolve();
-        return new Promise((resolve) => handle.close(() => resolve()));
+        return withDeadline(
+            new Promise<void>((resolve, reject) => handle.close((error) => (error ? reject(error) : resolve()))),
+            this.#operationTimeoutMs,
+            "Timed out closing serial probe",
+        );
     }
 
     async open(endpointId: string): Promise<void> {
         if (this.#ports.has(endpointId)) return;
 
-        const port = await this.#backend.open(endpointId).catch((error: unknown) => {
-            if (error instanceof HaritoraXError) throw error;
-            throw new HaritoraXError("CONNECTION_FAILED", `Failed to open ${endpointId}`, { cause: error });
-        });
+        const port = await openWithLateCleanup(this.#backend.open(endpointId), this.#operationTimeoutMs).catch(
+            (error: unknown) => {
+                if (error instanceof HaritoraXError) throw error;
+                throw new HaritoraXError("CONNECTION_FAILED", `Failed to open ${endpointId}`, { cause: error });
+            },
+        );
 
         const entry: OpenPort = { port, pending: new Uint8Array(0), timers: [], intentional: false };
         this.#ports.set(endpointId, entry);
@@ -305,7 +346,13 @@ export class SerialConnection implements Connection {
 
         try {
             entry.port.removeAllListeners();
-            if (entry.port.isOpen) await new Promise<void>((resolve) => entry.port.close(() => resolve()));
+            if (entry.port.isOpen) {
+                await withDeadline(
+                    new Promise<void>((resolve, reject) => entry.port.close((error) => (error ? reject(error) : resolve()))),
+                    this.#operationTimeoutMs,
+                    `Timed out closing ${endpointId}`,
+                );
+            }
         } catch (error) {
             this.#log.error(`Failed to close ${endpointId}`, { error: String(error) });
         }
@@ -316,12 +363,16 @@ export class SerialConnection implements Connection {
         if (!entry) return Promise.reject(new HaritoraXError("DEVICE_NOT_FOUND", `${endpointId} is not open`));
 
         // the dongle expects every command wrapped in newlines
-        return new Promise((resolve, reject) => {
-            entry.port.write(`\n${asciiDecode(data)}\n`, (error) => {
-                if (error) reject(new HaritoraXError("WRITE_FAILED", `Failed to write to ${endpointId}`, { cause: error }));
-                else resolve();
-            });
-        });
+        return withDeadline(
+            new Promise<void>((resolve, reject) => {
+                entry.port.write(`\n${asciiDecode(data)}\n`, (error) => {
+                    if (error) reject(new HaritoraXError("WRITE_FAILED", `Failed to write to ${endpointId}`, { cause: error }));
+                    else resolve();
+                });
+            }),
+            this.#operationTimeoutMs,
+            `Timed out writing to ${endpointId}`,
+        );
     }
 
     onData(handler: (frame: Frame) => void): Unsubscribe {
@@ -380,6 +431,50 @@ export class SerialConnection implements Connection {
 
         this.#log.warn(`Lost ${endpointId}`);
         for (const handler of [...this.#lostHandlers]) handler(endpointId, "remote");
+    }
+}
+
+function withDeadline<T>(operation: Promise<T>, timeoutMs: number, message: string, signal?: AbortSignal): Promise<T> {
+    if (signal?.aborted) return Promise.reject(new HaritoraXError("LINK_UNAVAILABLE", message));
+    return new Promise<T>((resolve, reject) => {
+        let settled = false;
+        const finish = (callback: () => void): void => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", onAbort);
+            callback();
+        };
+        const onAbort = (): void => finish(() => reject(new HaritoraXError("LINK_UNAVAILABLE", message)));
+        const timer = setTimeout(() => finish(() => reject(new HaritoraXError("LINK_UNAVAILABLE", message))), timeoutMs);
+        signal?.addEventListener("abort", onAbort, { once: true });
+        if (signal?.aborted) onAbort();
+        operation.then(
+            (value) => finish(() => resolve(value)),
+            (error: unknown) => finish(() => reject(error instanceof Error ? error : new Error(String(error)))),
+        );
+    });
+}
+
+async function openWithLateCleanup(operation: Promise<SerialPort>, timeoutMs: number, signal?: AbortSignal): Promise<SerialPort> {
+    let waiting = true;
+    const guarded = operation.then((port) => {
+        if (!waiting) void closeLatePort(port);
+        return port;
+    });
+    try {
+        return await withDeadline(guarded, timeoutMs, "Timed out opening serial port", signal);
+    } finally {
+        waiting = false;
+    }
+}
+
+function closeLatePort(port: SerialPort): void {
+    try {
+        port.removeAllListeners();
+        if (port.isOpen) port.close(() => {});
+    } catch {
+        // ignore
     }
 }
 
