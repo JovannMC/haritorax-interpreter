@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { setImmediate } from "node:timers/promises";
 import { describe, it } from "node:test";
 import { createHaritoraX } from "../dist/index.js";
 import type { Connection, Frame, ListOptions } from "../dist/connections/contract.js";
@@ -362,14 +363,15 @@ describe("container discovery and connection", () => {
         let finishOpen: (() => void) | undefined;
         let closed = 0;
         serial.open = () => new Promise<void>((resolve) => (finishOpen = resolve));
-        serial.close = async () => {
+        serial.close = () => {
             closed++;
+            return Promise.resolve();
         };
         const app = createHaritoraX({ connections: [serial], logLevel: "silent" });
 
         await app.discover();
         const connecting = app.connect("COM4");
-        await new Promise((resolve) => setImmediate(resolve));
+        await setImmediate();
         await app.discover();
         finishOpen?.();
         await connecting;
@@ -390,7 +392,7 @@ describe("container discovery and connection", () => {
         const second = app.dispose().then(() => {
             secondFinished = true;
         });
-        await new Promise((resolve) => setImmediate(resolve));
+        await setImmediate();
         assert.equal(secondFinished, false);
         await assert.rejects(app.connect("COM4"), /disposed/);
         finishDispose?.();
@@ -465,12 +467,12 @@ describe("protocol dispatch", () => {
         serial.emitFrame("COM4", 'i0:{"version":"0.0.1","model":"mc4b","imu_num":2,"serial no":"AAAAA7"}');
 
         const device = app.getDevice("AAAAA7");
-        assert.equal(device?.imuCount, 2);
+        assert.equal(device.imuCount, 2);
         assert.deepEqual(
-            device?.trackers.map((tracker) => tracker.trackerId),
+            device.trackers.map((tracker) => tracker.trackerId),
             ["AAAAA7:0", "AAAAA7:1"],
         );
-        assert.equal(device?.model, "x2");
+        assert.equal(device.model, "x2");
     });
 
     it("identifies HX2 from the firmware model, even with one IMU", async () => {

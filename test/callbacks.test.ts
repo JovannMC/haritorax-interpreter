@@ -1,23 +1,30 @@
 import assert from "node:assert/strict";
+import { setImmediate } from "node:timers/promises";
 import { describe, it } from "node:test";
 import { Emitter } from "../dist/lib/emitter.js";
 import { Logger } from "../dist/lib/logging.js";
+
+function rejectedAsyncCallback(message: string): () => void {
+    // deliberate reject to test that the error handler is called and that other listeners are not affected
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises
+    return () => Promise.reject(new Error(message));
+}
 
 describe("callback safety", () => {
     it("reports rejected async event handlers without stopping synchronous listeners", async () => {
         const emitter = new Emitter();
         const failures: string[] = [];
         let laterListenerRan = false;
-        emitter.setErrorHandler((event, error) => failures.push(`${event}:${String(error)}`));
-        emitter.on("log", async () => {
-            throw new Error("async listener failed");
+        emitter.setErrorHandler((event, error) => {
+            failures.push(`${event}:${String(error)}`);
         });
+        emitter.on("log", rejectedAsyncCallback("async listener failed"));
         emitter.on("log", () => {
             laterListenerRan = true;
         });
 
         emitter.emit("log", { level: "info", message: "test", timestamp: 0 });
-        await new Promise((resolve) => setImmediate(resolve));
+        await setImmediate();
 
         assert.equal(laterListenerRan, true);
         assert.deepEqual(failures, ["log:Error: async listener failed"]);
@@ -32,15 +39,13 @@ describe("callback safety", () => {
         emitter.on("log", () => {
             throw new Error("listener failed");
         });
-        emitter.on("log", async () => {
-            throw new Error("async listener failed");
-        });
+        emitter.on("log", rejectedAsyncCallback("async listener failed"));
         emitter.on("log", () => {
             laterListenerRan = true;
         });
 
         assert.doesNotThrow(() => emitter.emit("log", { level: "info", message: "test", timestamp: 0 }));
-        await new Promise((resolve) => setImmediate(resolve));
+        await setImmediate();
         assert.equal(laterListenerRan, true);
     });
 
@@ -48,19 +53,19 @@ describe("callback safety", () => {
         const logger = new Logger("info");
         const failures: string[] = [];
         let laterSinkRan = false;
-        logger.setErrorHandler((error) => failures.push(String(error)));
+        logger.setErrorHandler((error) => {
+            failures.push(String(error));
+        });
         logger.onEntry(() => {
             throw new Error("sync sink failed");
         });
-        logger.onEntry(async () => {
-            throw new Error("async sink failed");
-        });
+        logger.onEntry(rejectedAsyncCallback("async sink failed"));
         logger.onEntry(() => {
             laterSinkRan = true;
         });
 
         assert.doesNotThrow(() => logger.info("test"));
-        await new Promise((resolve) => setImmediate(resolve));
+        await setImmediate();
 
         assert.equal(laterSinkRan, true);
         assert.deepEqual(failures, ["Error: sync sink failed", "Error: async sink failed"]);

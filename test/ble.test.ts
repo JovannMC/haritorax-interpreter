@@ -343,30 +343,30 @@ describe("BLE device", () => {
 
         const device = app.getDevice("BBBBB0");
         assert.ok(device);
-        assert.equal(device?.model, "x2");
-        assert.equal(device?.connection, "ble");
-        assert.equal(device?.imuCount, 1);
+        assert.equal(device.model, "x2");
+        assert.equal(device.connection, "ble");
+        assert.equal(device.imuCount, 1);
         assert.deepEqual(
-            device?.trackers.map((tracker) => [tracker.trackerId, tracker.bodyPart]),
+            device.trackers.map((tracker) => [tracker.trackerId, tracker.bodyPart]),
             [["BBBBB0:0", "leftElbow"]],
         );
-        assert.deepEqual(device?.settings, {
+        assert.deepEqual(device.settings, {
             sensorMode: 2,
             fpsMode: 100,
             sensorAutoCorrection: ["accel"],
             ankleMotionDetection: false,
         });
-        assert.equal(device?.battery?.level, 80);
-        assert.equal(device?.battery?.voltage, 4032);
-        assert.equal(device?.battery?.chargeStatus, "discharging");
+        assert.equal(device.battery?.level, 80);
+        assert.equal(device.battery?.voltage, 4032);
+        assert.equal(device.battery?.chargeStatus, "discharging");
     });
 
     it("registers an HXW over BLE, which reports its model as MC3", async () => {
         const { app } = await connected(HXW_DEVICE);
 
         const device = app.getDevice("AAAAA7");
-        assert.equal(device?.model, "wireless");
-        assert.equal(device?.version, "1.0.28");
+        assert.equal(device.model, "wireless");
+        assert.equal(device.version, "1.0.28");
         assert.equal(app.getTracker("AAAAA7:0")?.bodyPart, "leftElbow");
     });
 
@@ -1024,23 +1024,23 @@ describe("wired tracker over BLE", () => {
         const { app } = await connectedWired();
 
         const device = app.getDevice("0000021");
-        assert.equal(device?.model, "wired");
-        assert.equal(device?.version, "1.7.10");
-        assert.equal(device?.connection, "ble");
-        assert.equal(device?.imuCount, 6);
+        assert.equal(device.model, "wired");
+        assert.equal(device.version, "1.7.10");
+        assert.equal(device.connection, "ble");
+        assert.equal(device.imuCount, 6);
         assert.deepEqual(
-            device?.trackers.map((tracker) => tracker.bodyPart),
+            device.trackers.map((tracker) => tracker.bodyPart),
             ["chest", "leftKnee", "leftAnkle", "rightKnee", "rightAnkle", "hip"],
         );
-        assert.deepEqual(device?.settings, {
+        assert.deepEqual(device.settings, {
             sensorMode: 2,
             fpsMode: 100,
             sensorAutoCorrection: ["accel", "gyro", "mag"],
             ankleMotionDetection: false,
         });
-        assert.equal(device?.battery?.level, 65);
-        assert.equal(device?.battery?.voltage, 3856);
-        assert.equal(device?.battery?.chargeStatus, "discharging");
+        assert.equal(device.battery?.level, 65);
+        assert.equal(device.battery?.voltage, 3856);
+        assert.equal(device.battery?.chargeStatus, "discharging");
     });
 
     it("starts the sensor data after connecting, which only wired trackers need", async () => {

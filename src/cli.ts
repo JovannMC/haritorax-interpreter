@@ -7,6 +7,7 @@
  * npx haritorax-trace --log capture.txt      # custom log path
  * npx haritorax-trace --no-log               # console only
  * npx haritorax-trace --wired                # also list wired SPP ports
+ * npx haritorax-trace --start-wired-ble       # enable data notifications for wired BLE trackers
  * npx haritorax-trace --binding dbus         # force a noble binding (hci | dbus | mac | win)
  *
  */
@@ -16,6 +17,7 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import type { Connection } from "./connections/contract.js";
 import { Logger } from "./lib/logging.js";
+import { TraceOutput } from "./lib/trace-output.js";
 
 void (async () => {
     const { values } = parseArgs({
@@ -24,18 +26,29 @@ void (async () => {
             log: { type: "string" },
             "no-log": { type: "boolean", default: false },
             wired: { type: "boolean", default: false },
+            "start-wired-ble": { type: "boolean", default: false },
             binding: { type: "string" },
         },
     });
 
+    const requested = values.ports
+        ?.split(",")
+        .map((port) => port.trim())
+        .filter(Boolean);
     const logPath = values["no-log"] ? undefined : (values.log ?? defaultLogPath());
     const logStream = logPath ? createWriteStream(logPath) : undefined;
     if (logStream) await once(logStream, "open");
+    const output = new TraceOutput(
+        [process.stdout, ...(logStream ? [logStream] : [])],
+        [process.stderr, ...(logStream ? [logStream] : [])],
+        (error) => {
+            console.error(`Trace output failed: ${String(error)}`);
+            void shutdown(1);
+        },
+    );
 
     function writeLine(line: string, error = false): void {
-        if (error) console.error(line);
-        else console.log(line);
-        logStream?.write(`${line}\n`);
+        output.write(line, error);
     }
 
     if (logPath) writeLine(`Logging to ${resolve(logPath)}`);
@@ -46,7 +59,6 @@ void (async () => {
         writeLine(`[${entry.level}] ${entry.message}${details}`, entry.level === "error" || entry.level === "warn");
     });
 
-    const requested = values.ports?.split(",").map((port) => port.trim());
     const connections: Connection[] = [];
     const opened: string[] = [];
     const abort = new AbortController();
@@ -58,6 +70,11 @@ void (async () => {
         abort.abort();
 
         await Promise.all(connections.map((connection) => connection.dispose().catch(() => {})));
+        try {
+            await output.flush();
+        } catch {
+            // output errors are reported through TraceOutput's error handler
+        }
         if (logStream && !logStream.destroyed) await new Promise<void>((resolve) => logStream.end(resolve));
         process.exit(code);
     }
@@ -95,6 +112,20 @@ void (async () => {
             writeLine(`Opening ${target.displayName} (${target.id})...`);
             try {
                 await connection.open(target.id);
+                if (isBle && target.model === "wired") {
+                    if (values["start-wired-ble"]) {
+                        try {
+                            // enable notifications for wired BLE trackers
+                            await connection.write(target.id, new Uint8Array([1]), { characteristic: "sensor-data-control" });
+                        } catch (error) {
+                            await connection.close(target.id).catch(() => {});
+                            throw error;
+                        }
+                        writeLine(`Enabled wired BLE sensor stream for ${target.id}`);
+                    } else {
+                        writeLine(`Wired BLE sensor streaming is off for ${target.id}, pass --start-wired-ble to enable it`);
+                    }
+                }
                 opened.push(target.id);
                 writeLine(`Watching ${target.id}`);
             } catch (error) {
@@ -105,7 +136,7 @@ void (async () => {
 
     try {
         const { createSerialConnection } = await import("./connections/serial/serial-node.js");
-        await capture(createSerialConnection({ includeWired: values.wired, logger }));
+        await capture(createSerialConnection({ includeWired: values.wired, serialPorts: requested, logger }));
     } catch (error) {
         writeLine(`Serial unavailable: ${(error as Error).message}`, true);
     }

@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = path.join(ROOT, "src");
@@ -23,9 +25,8 @@ async function sourceFiles(dir: string): Promise<string[]> {
 const NODE_ONLY = /^(?:node:|node-ble$|@stoprocent\/|@serialport\/)/;
 
 /**
- * Walks the static import graph from src/index.ts. Type-only imports are
- * skipped: they are erased at build time and cannot pull a runtime dependency
- * into a bundle.
+ * Walks runtime imports, re-exports, dynamic imports, and require calls.
+ * Type-only edges are skipped because they are erased from the output.
  */
 async function importGraph(entry: string): Promise<Map<string, string[]>> {
     const graph = new Map<string, string[]>();
@@ -36,22 +37,53 @@ async function importGraph(entry: string): Promise<Map<string, string[]>> {
         if (!file || graph.has(file)) continue;
 
         const text = await readFile(file, "utf8");
+        const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
         const deps: string[] = [];
-
-        for (const match of text.matchAll(/^import\s+(type\s+)?[^;]*?from\s+["']([^"']+)["']/gm)) {
-            if (match[1]) continue; // type-only
-            const specifier = match[2];
-            if (!specifier) continue;
-
+        const add = (specifier: string): void => {
             if (!specifier.startsWith(".")) {
                 deps.push(specifier);
-                continue;
+                return;
             }
-
-            const resolved = path.resolve(path.dirname(file), specifier.replace(/\.js$/, ".ts"));
-            deps.push(resolved);
-            queue.push(resolved);
-        }
+            const base = path.resolve(path.dirname(file), specifier.replace(/\.(?:mjs|cjs|js)$/, ".ts"));
+            const candidates = /\.[cm]?tsx?$/.test(base) ? [base] : [`${base}.ts`, `${base}.tsx`, path.join(base, "index.ts")];
+            const resolved = candidates.find((candidate) => sourceFilesSyncExists(candidate));
+            const target = resolved ?? base;
+            deps.push(target);
+            queue.push(target);
+        };
+        const visit = (node: ts.Node): void => {
+            if (ts.isImportDeclaration(node)) {
+                const clause = node.importClause;
+                const typeOnly =
+                    clause?.isTypeOnly ||
+                    (clause?.namedBindings &&
+                        ts.isNamedImports(clause.namedBindings) &&
+                        clause.namedBindings.elements.length > 0 &&
+                        clause.namedBindings.elements.every((element) => element.isTypeOnly));
+                if (!typeOnly && ts.isStringLiteral(node.moduleSpecifier)) add(node.moduleSpecifier.text);
+            } else if (ts.isExportDeclaration(node)) {
+                const typeOnly =
+                    node.isTypeOnly ||
+                    (node.exportClause &&
+                        ts.isNamedExports(node.exportClause) &&
+                        node.exportClause.elements.length > 0 &&
+                        node.exportClause.elements.every((element) => element.isTypeOnly));
+                if (!typeOnly && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) add(node.moduleSpecifier.text);
+            } else if (
+                ts.isCallExpression(node) &&
+                node.arguments.length === 1 &&
+                node.arguments[0] &&
+                ts.isStringLiteral(node.arguments[0])
+            ) {
+                if (
+                    node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+                    (ts.isIdentifier(node.expression) && node.expression.text === "require")
+                )
+                    add(node.arguments[0].text);
+            }
+            ts.forEachChild(node, visit);
+        };
+        visit(source);
 
         graph.set(file, deps);
     }
@@ -59,7 +91,30 @@ async function importGraph(entry: string): Promise<Map<string, string[]>> {
     return graph;
 }
 
+function sourceFilesSyncExists(file: string): boolean {
+    try {
+        return ts.sys.fileExists(file);
+    } catch {
+        return false;
+    }
+}
+
 describe("mobile packaging gate", () => {
+    it("follows transitive value re-exports and dynamic imports", async () => {
+        const root = await mkdtemp(path.join(os.tmpdir(), "haritorax-architecture-"));
+        try {
+            const entry = path.join(root, "index.ts");
+            await writeFile(entry, 'export { value } from "./barrel.js";');
+            await writeFile(path.join(root, "barrel.ts"), 'export * from "@serialport/stream";\nvoid import("node:buffer");');
+
+            const graph = await importGraph(entry);
+            assert.deepEqual(graph.get(path.join(root, "index.ts")), [path.join(root, "barrel.ts")]);
+            assert.deepEqual(graph.get(path.join(root, "barrel.ts")), ["@serialport/stream", "node:buffer"]);
+        } finally {
+            await rm(root, { recursive: true, force: true });
+        }
+    });
+
     it("root entry point reaches no Node-only module", async () => {
         const graph = await importGraph(path.join(SRC, "index.ts"));
         const offenders: string[] = [];

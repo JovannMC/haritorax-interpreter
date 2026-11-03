@@ -4,6 +4,7 @@ import { fromByteArray as encodeBase64, toByteArray as decodeBase64 } from "base
 import { createHaritoraX } from "../dist/index.js";
 import type { Frame, ListOptions } from "../dist/connections/contract.js";
 import type { DisconnectReason, TrackerSettings, Unsubscribe } from "../dist/types.js";
+import { unrefTimerIfSupported } from "../dist/core/controller/dongle-controller.js";
 import {
     bodyPartCommands,
     bodyPartOfTracker,
@@ -111,6 +112,16 @@ async function connected(buttonDebounceMs?: number) {
 const INFO = 'i0:{"version":"1.0.22","model":"mc3s","imu_num":1,"serial no":"AAAAA7"}';
 const INFO_DUAL = 'i0:{"version":"1.0.5","model":"mc4b","imu_num":2,"serial no":"CCCCC3"}';
 const INFO_SLOT_1 = 'i1:{"version":"1.0.22","model":"mc3s","imu_num":1,"serial no":"EEEEE1"}';
+
+describe("portable timer handles", () => {
+    it("ignores numeric handles and unrefs Node-style timers", () => {
+        assert.doesNotThrow(() => unrefTimerIfSupported(42));
+
+        let unrefCalls = 0;
+        unrefTimerIfSupported({ unref: () => unrefCalls++ });
+        assert.equal(unrefCalls, 1);
+    });
+});
 
 describe("dongle protocol", () => {
     it("reads the RF channel from o:", () => {
@@ -289,8 +300,8 @@ describe("dongle protocol", () => {
     it("builds the v3 settings bitstring", () => {
         assert.equal(
             dongleSettingsCommand("0", {
-                sensorMode: 1,
-                fpsMode: 100,
+                sensorMode: 1 as const,
+                fpsMode: 100 as const,
                 sensorAutoCorrection: ["accel", "gyro"],
                 ankleMotionDetection: true,
             }),
@@ -1001,8 +1012,8 @@ describe("power off and switching", () => {
         const { app, serial, pending } = await holdTimes(INFO_DUAL);
         try {
             const settings = {
-                sensorMode: 1,
-                fpsMode: 100,
+                sensorMode: 1 as const,
+                fpsMode: 100 as const,
                 sensorAutoCorrection: ["gyro"] as Array<"gyro">,
                 ankleMotionDetection: true,
             };

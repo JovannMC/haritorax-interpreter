@@ -110,8 +110,8 @@ function assertConnection(
     const device = app.getDevice("B1TEST");
     assert.ok(device);
     assert.equal(device.connection, connection);
-    assert.equal(device?.endpointId, endpointId);
-    assert.equal(device?.trackers.length, count);
+    assert.equal(device.endpointId, endpointId);
+    assert.equal(device.trackers.length, count);
     assert.ok(device.trackers.every((tracker) => tracker.connected && tracker.endpointId === endpointId));
 }
 

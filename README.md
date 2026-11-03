@@ -48,10 +48,12 @@ await app.dispose();
 
 Bluetooth LE is used by using `createBleConnection` from `haritorax-interpreter/connections/ble`.
 
-You can use the optional trace CLI can capture serial port and BLE traffic from real devices:
+You can use the optional trace CLI to capture serial port and BLE traffic from real devices, logging to a timestamped file and the console by default. `--no-log` writes to the console only and you can pass explicit serial paths with `--ports` to probe directly. Wired BLE trackers stay in raw mode unless you opt into their sensor stream:
 
 ```bash
 npx haritorax-trace --no-log
+npx haritorax-trace --ports /dev/ttyACM0
+npx haritorax-trace --start-wired-ble
 ```
 
 ### Serial options
@@ -103,8 +105,8 @@ For Linux users, you (or your users) need to do some setup depending on the conn
 ### Serial ports / Bluetooth (SPP)
 
 - Run the following commands in your terminal:
-  - `sudo usermod -a -G dialout $USER`
-  - `sudo usermod -a -G uucp $USER` (for Arch-based distros)
+    - `sudo usermod -a -G dialout $USER`
+    - `sudo usermod -a -G uucp $USER` (for Arch-based distros)
 - Restart your computer
 
 ### Bluetooth (LE)

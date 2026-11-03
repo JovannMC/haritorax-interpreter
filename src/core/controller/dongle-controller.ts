@@ -793,7 +793,7 @@ export class DongleController {
                 this.#log.debug(`Latency ping to ${endpointId} failed`, { error: String(error) });
             });
         }, PING_INTERVAL_MS);
-        timer.unref();
+        unrefTimerIfSupported(timer);
 
         this.#pingTimers.set(endpointId, timer);
     }
@@ -821,6 +821,11 @@ export class DongleController {
 
         this.#registry.setTrackers(device.deviceId, unassignedParts(device.imuCount));
     }
+}
+
+export function unrefTimerIfSupported(timer: unknown): void {
+    const unref = typeof timer === "object" && timer !== null ? (timer as { unref?: unknown }).unref : undefined;
+    if (typeof unref === "function") (unref as () => void).call(timer);
 }
 
 /*
