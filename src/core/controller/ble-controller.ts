@@ -48,6 +48,7 @@ const MAX_BLE_BODY_PART_ID = 15;
 const SENSOR2_FALLBACK_MS = 250;
 const SENSOR2_RECOVERY_FRAMES = 3;
 const SENSOR2_MAX_FRAME_PERIODS = 4;
+const BLE_LATENCY_INTERVAL_MS = 5_000;
 
 export interface BleControllerOptions {
     emitter: Emitter;
@@ -69,6 +70,11 @@ export class BleController implements ProtocolHandler {
     readonly #states = new Map<string, BleState>();
     readonly #lastButtonPress = new Map<string, number>();
     readonly #bodyPartWaits = new Map<string, BodyPartWait>();
+    readonly #latencies = new Map<string, number>();
+    readonly #latencyTimers = new Map<string, ReturnType<typeof setInterval>>();
+    readonly #latencyGenerations = new Map<string, number>();
+    readonly #latencyReads = new Set<string>();
+    #nextLatencyGeneration = 0;
     readonly #buttonDebounceMs: number;
 
     constructor(options: BleControllerOptions) {
@@ -303,11 +309,17 @@ export class BleController implements ProtocolHandler {
     }
 
     forgetEndpoint(endpointId: string): void {
+        this.#stopLatencyPings(endpointId);
         this.#states.delete(endpointId);
         this.#cancelBodyPartWait(endpointId);
+        this.#latencies.delete(endpointId);
         for (const key of this.#lastButtonPress.keys()) {
             if (key.startsWith(endpointId)) this.#lastButtonPress.delete(key);
         }
+    }
+
+    getLatency(endpointId: string): number | undefined {
+        return this.#latencies.get(endpointId);
     }
 
     async powerOff(endpointId: string): Promise<void> {
@@ -393,16 +405,63 @@ export class BleController implements ProtocolHandler {
 
     // wired trackers stay silent over BLE until sensor data control has 1 written to it
     async start(endpointId: string): Promise<void> {
-        if (this.#states.get(endpointId)?.model !== "wired") return;
+        if (this.#states.get(endpointId)?.model === "wired") {
+            await this.#write(endpointId, "sensor-data-control", new Uint8Array([1]));
+            this.#log.info(`Started sensor data on BLE ${endpointId}`);
+        }
 
-        await this.#write(endpointId, "sensor-data-control", new Uint8Array([1]));
-        this.#log.info(`Started sensor data on BLE ${endpointId}`);
+        this.#startLatencyPings(endpointId);
     }
 
     dispose(): void {
+        for (const endpointId of this.#latencyTimers.keys()) this.#stopLatencyPings(endpointId);
         for (const endpointId of this.#bodyPartWaits.keys()) this.#cancelBodyPartWait(endpointId);
         this.#states.clear();
+        this.#latencies.clear();
         this.#lastButtonPress.clear();
+    }
+
+    #startLatencyPings(endpointId: string): void {
+        if (this.#latencyTimers.has(endpointId)) return;
+
+        const generation = ++this.#nextLatencyGeneration;
+        this.#latencyGenerations.set(endpointId, generation);
+        void this.#measureLatency(endpointId, generation);
+
+        const timer = setInterval(() => void this.#measureLatency(endpointId, generation), BLE_LATENCY_INTERVAL_MS);
+        if (typeof timer === "object" && "unref" in timer) timer.unref();
+        this.#latencyTimers.set(endpointId, timer);
+    }
+
+    async #measureLatency(endpointId: string, generation: number): Promise<void> {
+        if (this.#latencyReads.has(endpointId)) return;
+        this.#latencyReads.add(endpointId);
+        const startedAt = performance.now();
+
+        try {
+            const response = await this.#read(endpointId, "battery-level");
+            if (this.#latencyGenerations.get(endpointId) !== generation) return;
+            if (!response || response.byteLength === 0) {
+                this.#log.debug(`BLE latency unavailable for ${endpointId}: battery-level is not readable`);
+                this.#stopLatencyPings(endpointId);
+                return;
+            }
+
+            this.#latencies.set(endpointId, performance.now() - startedAt);
+        } catch (error) {
+            if (this.#latencyGenerations.get(endpointId) !== generation) return;
+            this.#log.debug(`BLE latency read failed for ${endpointId}`, { error: String(error) });
+            this.#stopLatencyPings(endpointId);
+        } finally {
+            this.#latencyReads.delete(endpointId);
+        }
+    }
+
+    #stopLatencyPings(endpointId: string): void {
+        const timer = this.#latencyTimers.get(endpointId);
+        if (timer !== undefined) clearInterval(timer);
+        this.#latencyTimers.delete(endpointId);
+        this.#latencyGenerations.delete(endpointId);
     }
 
     #createBodyPartWait(endpointId: string, bodyPart: BodyPart): BodyPartWait {
