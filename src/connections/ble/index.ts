@@ -19,6 +19,7 @@ export interface BleBackend {
     open(peripheralId: string): Promise<void>;
     close(peripheralId: string): Promise<void>;
     read(peripheralId: string, characteristic: BleCharacteristic): Promise<Uint8Array | undefined>;
+    readRssi?(peripheralId: string): Promise<number>;
     write(peripheralId: string, characteristic: BleCharacteristic, data: Uint8Array): Promise<void>;
     onData(handler: BleDataHandler): Unsubscribe;
     onLost(handler: (peripheralId: string, reason: DisconnectReason) => void): Unsubscribe;
@@ -116,6 +117,12 @@ export class BleConnection implements Connection {
     async read(endpointId: string, characteristic: string): Promise<Uint8Array | undefined> {
         if (!this.#open.has(endpointId)) throw new HaritoraXError("NOT_CONNECTED", `${endpointId} is not open`);
         return this.#backend.read(endpointId, characteristic as BleCharacteristic);
+    }
+
+    async readRssi(endpointId: string): Promise<number> {
+        if (!this.#open.has(endpointId)) throw new HaritoraXError("NOT_CONNECTED", `${endpointId} is not open`);
+        if (!this.#backend.readRssi) throw new HaritoraXError("NOT_SUPPORTED", "BLE RSSI readback is unavailable");
+        return this.#backend.readRssi(endpointId);
     }
 
     onData(handler: (frame: Frame) => void): Unsubscribe {

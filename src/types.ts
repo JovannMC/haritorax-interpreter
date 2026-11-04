@@ -58,6 +58,10 @@ export interface BatteryInfo {
     timestamp: number;
 }
 
+export interface RefreshOptions {
+    force: true;
+}
+
 export interface DeviceInfo {
     deviceId: string;
     version: string;

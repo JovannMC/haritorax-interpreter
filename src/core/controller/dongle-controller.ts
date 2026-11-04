@@ -37,7 +37,7 @@ import {
     dongleReportsAccelAccuracy,
 } from "../../protocol/firmware.js";
 import { decodeSettings, modelFromFirmware, parseBattery, parseInfo } from "../../protocol/codec/messages.js";
-import type { BodyPart, ConnectionKind, DeviceSnapshot, ImuRole, TrackerSettings } from "../../types.js";
+import type { BatteryInfo, BodyPart, ConnectionKind, DeviceSnapshot, ImuRole, TrackerSettings } from "../../types.js";
 
 const PLACEHOLDER_SERIAL = "A00000";
 const PAIRING_COMMAND_DELAY_MS = 1_000;
@@ -89,6 +89,13 @@ export class DongleController {
     readonly #settingsReads = new Map<string, SettingsRead>();
     readonly #latencies = new Map<string, number>();
     readonly #pingSentAt = new Map<string, number>();
+    readonly #pingWaiters = new Map<string, { resolve: (latency: number) => void }>();
+    readonly #batteryWaiters = new Map<
+        string,
+        { resolve: (battery: BatteryInfo) => void; timer: ReturnType<typeof setTimeout> }
+    >();
+    readonly #rssiWaiters = new Map<string, { resolve: (rssi: number) => void; timer: ReturnType<typeof setTimeout> }>();
+    readonly #infoWaiters = new Map<string, { resolve: () => void; timer: ReturnType<typeof setTimeout> }>();
     readonly #pingTimers = new Map<string, ReturnType<typeof setInterval>>();
 
     constructor(options: DongleControllerOptions) {
@@ -183,6 +190,91 @@ export class DongleController {
     // round trip to the dongle in ms, from the last `i:` ping
     getLatency(endpointId: string): number | undefined {
         return this.#latencies.get(endpointId);
+    }
+
+    async refreshLatency(endpointId: string): Promise<number> {
+        if (!this.#isOpen(endpointId)) throw new HaritoraXError("NOT_CONNECTED", `${endpointId} is not connected`);
+
+        if (this.#pingWaiters.has(endpointId))
+            throw new HaritoraXError("BUSY", `A latency refresh is already in progress for ${endpointId}`);
+
+        const started = Date.now();
+        return new Promise<number>((resolve, reject) => {
+            const timer = setTimeout(() => {
+                if (this.#pingWaiters.get(endpointId)?.resolve !== finish) return;
+                this.#pingWaiters.delete(endpointId);
+                reject(new HaritoraXError("TIMEOUT", `Latency refresh timed out for ${endpointId}`));
+            }, 3_000);
+
+            const finish = (latency: number): void => {
+                clearTimeout(timer);
+                this.#pingWaiters.delete(endpointId);
+                resolve(latency);
+            };
+
+            this.#pingSentAt.set(endpointId, started);
+            this.#pingWaiters.set(endpointId, { resolve: finish });
+            this.#write(endpointId, "i:").catch((error: unknown) => {
+                clearTimeout(timer);
+                this.#pingWaiters.delete(endpointId);
+                reject(error);
+            });
+        });
+    }
+
+    refreshBattery(endpointId: string, slot: string): Promise<BatteryInfo> {
+        const device = this.#registry.deviceAt(endpointId, slot);
+        if (!device) return Promise.reject(new HaritoraXError("DEVICE_NOT_FOUND", `No device at ${endpointId}:${slot}`));
+        return new Promise<BatteryInfo>((resolve, reject) => {
+            const key = endpointSlotKey(endpointId, slot);
+            const timer = setTimeout(() => {
+                this.#batteryWaiters.delete(key);
+                reject(new HaritoraXError("TIMEOUT", `Battery refresh timed out for ${endpointId}:${slot}`));
+            }, 3_000);
+            this.#batteryWaiters.set(key, { resolve, timer });
+            this.#write(endpointId, `v${slot}:`).catch((error: unknown) => {
+                clearTimeout(timer);
+                this.#batteryWaiters.delete(key);
+                reject(error);
+            });
+        });
+    }
+
+    refreshRssi(endpointId: string, slot: string): Promise<number> {
+        const device = this.#registry.deviceAt(endpointId, slot);
+        if (!device?.trackers[0])
+            return Promise.reject(new HaritoraXError("DEVICE_NOT_FOUND", `No tracker at ${endpointId}:${slot}`));
+        return new Promise<number>((resolve, reject) => {
+            const key = endpointSlotKey(endpointId, slot);
+            const timer = setTimeout(() => {
+                this.#rssiWaiters.delete(key);
+                reject(new HaritoraXError("TIMEOUT", `RSSI refresh timed out for ${endpointId}:${slot}`));
+            }, 3_000);
+            this.#rssiWaiters.set(key, { resolve, timer });
+            this.#write(endpointId, `a${slot}:`).catch((error: unknown) => {
+                clearTimeout(timer);
+                this.#rssiWaiters.delete(key);
+                reject(error);
+            });
+        });
+    }
+
+    async refreshTracker(endpointId: string, slot: string): Promise<void> {
+        await this.refreshBattery(endpointId, slot);
+        await this.refreshRssi(endpointId, slot);
+        await new Promise<void>((resolve, reject) => {
+            const key = endpointSlotKey(endpointId, slot);
+            const timer = setTimeout(() => {
+                this.#infoWaiters.delete(key);
+                reject(new HaritoraXError("TIMEOUT", `Info refresh timed out for ${endpointId}:${slot}`));
+            }, 3_000);
+            this.#infoWaiters.set(key, { resolve, timer });
+            this.#write(endpointId, `i${slot}:`).catch((error: unknown) => {
+                clearTimeout(timer);
+                this.#infoWaiters.delete(key);
+                reject(error);
+            });
+        });
     }
 
     async setChannel(endpointId: string, channel: number): Promise<void> {
@@ -529,6 +621,13 @@ export class DongleController {
         if (!decoded) return;
         this.#registry.trackerSeen(tracker.trackerId);
         this.#registry.setRssi(tracker.trackerId, decoded.dongle, decoded.sensor);
+        const waiterKey = endpointSlotKey(endpointId, slot);
+        const rssiWaiter = this.#rssiWaiters.get(waiterKey);
+        if (rssiWaiter) {
+            clearTimeout(rssiWaiter.timer);
+            this.#rssiWaiters.delete(waiterKey);
+            rssiWaiter.resolve(decoded.dongle);
+        }
     }
 
     #onInfo(endpointId: string, slot: string, payload: string): void {
@@ -557,6 +656,14 @@ export class DongleController {
             },
             false,
         );
+
+        const infoKey = endpointSlotKey(endpointId, slot);
+        const infoWaiter = this.#infoWaiters.get(infoKey);
+        if (infoWaiter) {
+            clearTimeout(infoWaiter.timer);
+            this.#infoWaiters.delete(infoKey);
+            infoWaiter.resolve();
+        }
 
         const dongleVersion = this.#dongleVersions.get(endpointId);
         if (model === "x2" && imuCount >= 2 && dongleCarriesTwoImus(dongleVersion) === false) {
@@ -635,6 +742,19 @@ export class DongleController {
             chargeStatus: parsed.chargeStatus,
             timestamp: Date.now(),
         });
+        const key = endpointSlotKey(endpointId, slot);
+        const waiter = this.#batteryWaiters.get(key);
+        if (waiter) {
+            clearTimeout(waiter.timer);
+            this.#batteryWaiters.delete(key);
+            waiter.resolve({
+                deviceId: device.deviceId,
+                level: parsed.level,
+                voltage: parsed.voltage,
+                chargeStatus: parsed.chargeStatus,
+                timestamp: Date.now(),
+            });
+        }
     }
 
     #isUnpaired(endpointId: string, slot: "0" | "1"): boolean {
@@ -787,7 +907,9 @@ export class DongleController {
         if (sent === undefined) return;
 
         this.#pingSentAt.delete(endpointId);
-        this.#latencies.set(endpointId, Date.now() - sent);
+        const latency = Date.now() - sent;
+        this.#latencies.set(endpointId, latency);
+        this.#pingWaiters.get(endpointId)?.resolve(latency);
     }
 
     #startPings(endpointId: string): void {
@@ -795,6 +917,7 @@ export class DongleController {
 
         const timer = setInterval(() => {
             if (!this.#isOpen(endpointId)) return;
+            if (this.#pingWaiters.has(endpointId)) return;
 
             this.#pingSentAt.set(endpointId, Date.now());
             this.#write(endpointId, "i:").catch((error: unknown) => {

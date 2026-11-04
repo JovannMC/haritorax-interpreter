@@ -19,6 +19,7 @@ import type {
     Events,
     LogLevel,
     DeviceSnapshot,
+    RefreshOptions,
     TrackerSnapshot,
     TrackerSettings,
     SettingsApplyResult,
@@ -298,11 +299,6 @@ export class HaritoraX {
         return this.#dongle.getChannel(endpointId);
     }
 
-    getLatency(endpointId: string): number | undefined {
-        if (this.#endpointOwners.get(endpointId)?.kind === "ble") return this.#ble.getLatency(endpointId);
-        return this.#dongle.getLatency(endpointId);
-    }
-
     setChannel(endpointId: string, channel: number): Promise<void> {
         return this.#withEndpointOperation(endpointId, () => this.#dongle.setChannel(endpointId, channel));
     }
@@ -317,6 +313,52 @@ export class HaritoraX {
 
     getDongleVersion(endpointId: string): string | undefined {
         return this.#dongle.getDongleVersion(endpointId);
+    }
+
+    /*
+     * device control
+     */
+
+    getLatency(endpointId: string): number | undefined;
+    getLatency(endpointId: string, options: RefreshOptions): Promise<number>;
+    getLatency(endpointId: string, options?: RefreshOptions): number | undefined | Promise<number> {
+        if (options?.force) {
+            if (this.#endpointOwners.get(endpointId)?.kind === "ble")
+                return this.#withEndpointOperation(endpointId, () => this.#ble.refreshLatency(endpointId));
+            return this.#withEndpointOperation(endpointId, () => this.#dongle.refreshLatency(endpointId));
+        }
+
+        if (this.#endpointOwners.get(endpointId)?.kind === "ble") return this.#ble.getLatency(endpointId);
+        return this.#dongle.getLatency(endpointId);
+    }
+
+    refreshTracker(trackerId: string): Promise<DeviceSnapshot> {
+        const tracker = this.#registry.getTracker(trackerId);
+        if (!tracker) return Promise.reject(new HaritoraXError("DEVICE_NOT_FOUND", `Unknown tracker "${trackerId}"`));
+        return this.#withEndpointOperation(tracker.endpointId, async () => {
+            const current = this.#registry.getTracker(trackerId);
+            if (!current) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown tracker "${trackerId}"`);
+
+            const device = this.#registry.getDevice(current.deviceId);
+            if (!device) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown device "${current.deviceId}"`);
+
+            if (!this.#open.has(device.endpointId))
+                throw new HaritoraXError("NOT_CONNECTED", `${device.endpointId} is not connected`);
+
+            if (device.connection === "ble") {
+                const connection = this.#endpointOwners.get(device.endpointId);
+                const readRssi = connection?.readRssi ? () => connection.readRssi!(device.endpointId) : undefined;
+                await this.#ble.refreshTracker(device.endpointId, readRssi, (rssi) => this.#onBleRssi(device.endpointId, rssi));
+            } else if (device.model === "wired" && device.connection === "serial") {
+                await this.#wired.refreshTracker(device.endpointId);
+            } else {
+                await this.#dongle.refreshTracker(device.endpointId, device.slot);
+            }
+
+            const refreshed = this.#registry.getDevice(current.deviceId);
+            if (!refreshed) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown device "${current.deviceId}"`);
+            return copyDeviceSnapshot(refreshed);
+        });
     }
 
     setBodyPart(deviceId: string, bodyPart: BodyPart): Promise<void> {

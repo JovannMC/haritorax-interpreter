@@ -385,6 +385,12 @@ class NobleBleBackend implements BleBackend {
         return new Uint8Array(buffer);
     }
 
+    async readRssi(peripheralId: string): Promise<number> {
+        const entry = this.#open.get(peripheralId);
+        if (!entry) throw new HaritoraXError("NOT_CONNECTED", `BLE peripheral "${peripheralId}" is not open`);
+        return this.#raceDisconnect(entry, entry.peripheral.updateRssiAsync(), peripheralId, "read RSSI");
+    }
+
     async write(peripheralId: string, characteristic: BleCharacteristic, data: Uint8Array): Promise<void> {
         const entry = this.#open.get(peripheralId);
         if (!entry) throw new HaritoraXError("DEVICE_NOT_FOUND", `BLE peripheral "${peripheralId}" is not open`);

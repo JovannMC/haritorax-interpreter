@@ -164,12 +164,7 @@ export class BleController implements ProtocolHandler {
                         sensor2Gap > sensor2MaxGapMs(state.settings.fpsMode);
                     const sensor2TimedOut =
                         expectsSensor2 && preferredAt !== undefined && now - preferredAt >= SENSOR2_FALLBACK_MS;
-                    if (
-                        state.sensorSource === "sensor" ||
-                        sensor2Unhealthy ||
-                        preferredAt === undefined ||
-                        sensor2TimedOut
-                    ) {
+                    if (state.sensorSource === "sensor" || sensor2Unhealthy || preferredAt === undefined || sensor2TimedOut) {
                         if (sensor2Unhealthy || sensor2TimedOut) state.sensor2FallbackActive = true;
                         this.#setSensorSource(state, "sensor");
                         this.#onSensor(state, data);
@@ -320,6 +315,75 @@ export class BleController implements ProtocolHandler {
 
     getLatency(endpointId: string): number | undefined {
         return this.#latencies.get(endpointId);
+    }
+
+    async refreshLatency(endpointId: string): Promise<number> {
+        if (this.#latencyReads.has(endpointId))
+            throw new HaritoraXError("BUSY", `A BLE latency read is already in progress for ${endpointId}`);
+
+        this.#latencyReads.add(endpointId);
+        const startedAt = performance.now();
+        try {
+            const response = await this.#read(endpointId, "battery-level");
+            if (!response?.byteLength)
+                throw new HaritoraXError("NOT_SUPPORTED", `Battery level is not readable on ${endpointId}`);
+
+            const latency = performance.now() - startedAt;
+            this.#latencies.set(endpointId, latency);
+
+            return latency;
+        } finally {
+            this.#latencyReads.delete(endpointId);
+        }
+    }
+
+    async refreshTracker(
+        endpointId: string,
+        readRssi: (() => Promise<number>) | undefined,
+        onRssi: (rssi: number) => void,
+    ): Promise<void> {
+        const state = this.#state(endpointId);
+        const characteristics: readonly BleCharacteristic[] = [
+            "serial-number",
+            "model-number",
+            "software-revision",
+            "number-of-imu",
+            "body-part",
+            "battery-level",
+            "battery-voltage",
+            "charge-status",
+            "sensor-mode",
+            "fps",
+            "auto-calibration",
+            "wired-auto-calibration",
+            "magnetometer",
+            "accel-accuracy",
+        ];
+
+        let completed = 0;
+        for (const characteristic of characteristics) {
+            try {
+                const data = await this.#read(endpointId, characteristic);
+                if (data?.byteLength) {
+                    this.handleBinaryFrame(endpointId, characteristic, data);
+                    completed++;
+                }
+            } catch (error) {
+                this.#log.debug(`BLE refresh read failed for ${endpointId}/${characteristic}`, { error: String(error) });
+            }
+        }
+
+        if (readRssi) {
+            try {
+                onRssi(await readRssi());
+                completed++;
+            } catch (error) {
+                this.#log.debug(`BLE RSSI refresh failed for ${endpointId}`, { error: String(error) });
+            }
+        }
+
+        if (completed === 0) throw new HaritoraXError("NOT_SUPPORTED", `No readable tracker information on ${endpointId}`);
+        if (!this.#ensureDevice(state)) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown BLE tracker on "${endpointId}"`);
     }
 
     async powerOff(endpointId: string): Promise<void> {

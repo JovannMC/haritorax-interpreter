@@ -1,4 +1,5 @@
 import { toByteArray as decodeBase64 } from "base64-js";
+import { HaritoraXError } from "../../lib/errors.js";
 import type { Emitter } from "../../lib/emitter.js";
 import type { Logger } from "../../lib/logging.js";
 import type { DeviceRegistry } from "../device-registry.js";
@@ -34,6 +35,8 @@ export class WiredController implements ProtocolHandler {
     readonly #write: (endpointId: string, command: string) => Promise<void>;
     readonly #states = new Map<string, WiredState>();
     readonly #infos = new Map<string, ParsedInfo>();
+    readonly #batteryWaiters = new Map<string, { resolve: () => void; timer: ReturnType<typeof setTimeout> }>();
+    readonly #infoWaiters = new Map<string, { resolve: () => void; timer: ReturnType<typeof setTimeout> }>();
 
     constructor(options: WiredControllerOptions) {
         this.#emitter = options.emitter;
@@ -87,6 +90,11 @@ export class WiredController implements ProtocolHandler {
         this.#infos.clear();
     }
 
+    async refreshTracker(endpointId: string): Promise<void> {
+        await this.#requestRefresh(endpointId, "v", this.#batteryWaiters);
+        await this.#requestRefresh(endpointId, "i", this.#infoWaiters);
+    }
+
     async setSettings(endpointIds: readonly string[], settings: TrackerSettings): Promise<void> {
         const commands = wiredSettingsCommands(settings);
 
@@ -111,6 +119,7 @@ export class WiredController implements ProtocolHandler {
 
         const state = this.#states.get(endpointId);
         if (state) this.#register(endpointId, info, state);
+        this.#resolveRefresh(this.#infoWaiters, endpointId);
     }
 
     #onState(endpointId: string, payload: string): void {
@@ -171,6 +180,39 @@ export class WiredController implements ProtocolHandler {
             chargeStatus: parsed.chargeStatus,
             timestamp: Date.now(),
         });
+        this.#resolveRefresh(this.#batteryWaiters, endpointId);
+    }
+
+    #requestRefresh(
+        endpointId: string,
+        identifier: "v" | "a" | "i",
+        waiters: Map<string, { resolve: () => void; timer: ReturnType<typeof setTimeout> }>,
+    ): Promise<void> {
+        return new Promise<void>((resolve, reject) => {
+            const timer = setTimeout(() => {
+                waiters.delete(endpointId);
+                reject(new HaritoraXError("TIMEOUT", `Timed out refreshing wired ${identifier} data from ${endpointId}`));
+            }, 3_000);
+
+            waiters.set(endpointId, { resolve, timer });
+            this.#write(endpointId, `${identifier}:`).catch((error: unknown) => {
+                clearTimeout(timer);
+                waiters.delete(endpointId);
+                reject(error);
+            });
+        });
+    }
+
+    #resolveRefresh(
+        waiters: Map<string, { resolve: () => void; timer: ReturnType<typeof setTimeout> }>,
+        endpointId: string,
+    ): void {
+        const waiter = waiters.get(endpointId);
+        if (!waiter) return;
+
+        clearTimeout(waiter.timer);
+        waiters.delete(endpointId);
+        waiter.resolve();
     }
 
     #onButton(endpointId: string, payload: string): void {
