@@ -467,6 +467,7 @@ describe("protocol dispatch", () => {
         serial.emitFrame("COM4", 'i0:{"version":"0.0.1","model":"mc4b","imu_num":2,"serial no":"AAAAA7"}');
 
         const device = app.getDevice("AAAAA7");
+        assert.ok(device);
         assert.equal(device.imuCount, 2);
         assert.deepEqual(
             device.trackers.map((tracker) => tracker.trackerId),

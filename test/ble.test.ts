@@ -365,6 +365,7 @@ describe("BLE device", () => {
         const { app } = await connected(HXW_DEVICE);
 
         const device = app.getDevice("AAAAA7");
+        assert.ok(device);
         assert.equal(device.model, "wireless");
         assert.equal(device.version, "1.0.28");
         assert.equal(app.getTracker("AAAAA7:0")?.bodyPart, "leftElbow");
@@ -1061,6 +1062,7 @@ describe("wired tracker over BLE", () => {
         const { app } = await connectedWired();
 
         const device = app.getDevice("0000021");
+        assert.ok(device);
         assert.equal(device.model, "wired");
         assert.equal(device.version, "1.7.10");
         assert.equal(device.connection, "ble");
