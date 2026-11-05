@@ -87,7 +87,10 @@ export class HaritoraX {
             connectionKind,
             hasBlePeer: (deviceId) =>
                 this.#endpoints.some(
-                    (endpoint) => endpoint.connection === "ble" && endpointNameHasSerial(endpoint.displayName, deviceId),
+                    (endpoint) =>
+                        endpoint.connection === "ble" &&
+                        this.#openingEndpoints.has(endpoint.id) &&
+                        endpointNameHasSerial(endpoint.displayName, deviceId),
                 ),
             write: (endpointId, command) => this.#writeCommand(endpointId, command),
             onChannel: (endpointId, channel) => this.#applyChannel(endpointId, channel),
