@@ -177,9 +177,9 @@ export class DongleController {
         const { portId, channel } = this.#pairingSlot(endpointId, slot);
 
         await this.#writeSequence(endpointId, unpairCommands(channel, portId));
-
         this.#forgetIdentity(endpointId, portId);
         this.#emitter.emit("unpaired", { endpointId, slot: portId });
+
         this.#log.info(`Unpaired ${endpointId}:${portId}`);
     }
 
@@ -214,10 +214,11 @@ export class DongleController {
 
             this.#pingSentAt.set(endpointId, started);
             this.#pingWaiters.set(endpointId, { resolve: finish });
+
             this.#write(endpointId, "i:").catch((error: unknown) => {
                 clearTimeout(timer);
                 this.#pingWaiters.delete(endpointId);
-                reject(error);
+                reject(toError(error));
             });
         });
     }
@@ -231,11 +232,13 @@ export class DongleController {
                 this.#batteryWaiters.delete(key);
                 reject(new HaritoraXError("TIMEOUT", `Battery refresh timed out for ${endpointId}:${slot}`));
             }, 3_000);
+
             this.#batteryWaiters.set(key, { resolve, timer });
+
             this.#write(endpointId, `v${slot}:`).catch((error: unknown) => {
                 clearTimeout(timer);
                 this.#batteryWaiters.delete(key);
-                reject(error);
+                reject(toError(error));
             });
         });
     }
@@ -250,11 +253,13 @@ export class DongleController {
                 this.#rssiWaiters.delete(key);
                 reject(new HaritoraXError("TIMEOUT", `RSSI refresh timed out for ${endpointId}:${slot}`));
             }, 3_000);
+
             this.#rssiWaiters.set(key, { resolve, timer });
+
             this.#write(endpointId, `a${slot}:`).catch((error: unknown) => {
                 clearTimeout(timer);
                 this.#rssiWaiters.delete(key);
-                reject(error);
+                reject(toError(error));
             });
         });
     }
@@ -262,17 +267,20 @@ export class DongleController {
     async refreshTracker(endpointId: string, slot: string): Promise<void> {
         await this.refreshBattery(endpointId, slot);
         await this.refreshRssi(endpointId, slot);
+
         await new Promise<void>((resolve, reject) => {
             const key = endpointSlotKey(endpointId, slot);
             const timer = setTimeout(() => {
                 this.#infoWaiters.delete(key);
                 reject(new HaritoraXError("TIMEOUT", `Info refresh timed out for ${endpointId}:${slot}`));
             }, 3_000);
+
             this.#infoWaiters.set(key, { resolve, timer });
+
             this.#write(endpointId, `i${slot}:`).catch((error: unknown) => {
                 clearTimeout(timer);
                 this.#infoWaiters.delete(key);
-                reject(error);
+                reject(toError(error));
             });
         });
     }
@@ -319,6 +327,7 @@ export class DongleController {
         const echo = await this.#requireEcho(endpointId, slot);
         const settings = decodeSettings(echo);
         if (!settings) throw new HaritoraXError("NOT_SUPPORTED", `Settings are not available for ${endpointId}:${slot}`);
+
         const command = dongleSettingsCommand(slot, settings, 2, undefined, echo);
         const restore = dongleSettingsCommand(slot, settings, 0, undefined, echo);
         await this.#write(endpointId, command);
@@ -337,6 +346,7 @@ export class DongleController {
         const echo = await this.#requireEcho(endpointId, slot);
         const settings = decodeSettings(echo);
         if (!settings) throw new HaritoraXError("NOT_SUPPORTED", `Settings are not available for ${endpointId}:${slot}`);
+
         const command = dongleSettingsCommand(slot, settings, 1, undefined, echo);
         const restore = dongleSettingsCommand(slot, settings, 0, undefined, echo);
         await this.#write(endpointId, command);
@@ -969,6 +979,10 @@ function unassignedParts(count: number): BodyPart[] {
 
 function delay(ms: number): Promise<void> {
     return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
+}
+
+function toError(value: unknown): Error {
+    return value instanceof Error ? value : new Error(String(value));
 }
 
 interface TrackerIdentity {

@@ -198,7 +198,7 @@ export class WiredController implements ProtocolHandler {
             this.#write(endpointId, `${identifier}:`).catch((error: unknown) => {
                 clearTimeout(timer);
                 waiters.delete(endpointId);
-                reject(error);
+                reject(toError(error));
             });
         });
     }
@@ -296,4 +296,8 @@ export class WiredController implements ProtocolHandler {
             this.#registry.setMag(`${deviceId}:${i}`, status);
         }
     }
+}
+
+function toError(value: unknown): Error {
+    return value instanceof Error ? value : new Error(String(value));
 }
