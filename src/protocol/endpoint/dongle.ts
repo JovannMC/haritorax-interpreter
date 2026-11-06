@@ -281,11 +281,17 @@ export function parseDongleButtons(payload: string, previous: DongleButtonState 
     if (!previous) return result;
 
     const pressed: ("main" | "sub")[] = [];
-    if (main !== previous.main) pressed.push("main");
+    // long press is power off for the main button, don't report as a press
+    if (main !== previous.main && parseEventCode(payload, 7) !== 0x04) pressed.push("main");
     if (sub !== previous.sub) pressed.push("sub");
     if (pressed.length > 0) result.pressed = pressed;
 
     return result;
+}
+
+function parseEventCode(payload: string, index: number): number | undefined {
+    const eventCode = Number.parseInt(payload.slice(index, index + 2), 16);
+    return Number.isNaN(eventCode) ? undefined : eventCode;
 }
 
 function counterDigit(payload: string, index: number): number {

@@ -588,12 +588,12 @@ class NobleBleBackend implements BleBackend {
         }
 
         await Promise.all([...this.#opening.values()].map((opening) => opening.catch(() => undefined)));
-        
+
         const results = await Promise.allSettled([...this.#open.keys()].map((peripheralId) => this.close(peripheralId)));
         for (const result of results) if (result.status === "rejected") failures.push(result.reason);
         const closing = await Promise.allSettled([...this.#closing.values()]);
         for (const result of closing) if (result.status === "rejected") failures.push(result.reason);
-        
+
         this.#dataHandlers.clear();
         this.#lostHandlers.clear();
         this.#rssiHandlers.clear();
@@ -720,7 +720,7 @@ class NobleBleBackend implements BleBackend {
                 entry.subscribed.push(characteristic);
             } catch (error) {
                 if (entry.intentional || this.#open.get(peripheralId) !== entry) throw error;
-                
+
                 const failure = new HaritoraXError(
                     "CONNECTION_FAILED",
                     `Failed to subscribe to "${characteristic}" on ${peripheralId}`,

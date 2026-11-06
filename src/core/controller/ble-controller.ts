@@ -203,7 +203,7 @@ export class BleController implements ProtocolHandler {
                 this.#maybeBattery(state);
                 break;
             case "main-button":
-                if (state.model !== "wired") this.#onButton(state, "main");
+                if (state.model !== "wired" && !isLongPress(data)) this.#onButton(state, "main");
                 break;
             case "secondary-button":
                 if (!isNoWiredEvent(state, data)) this.#onButton(state, state.model === "wired" ? "main" : "sub");
@@ -857,6 +857,11 @@ export class BleController implements ProtocolHandler {
 // the button characteristics of a wired tracker hold `ff` as the event type until the first press
 function isNoWiredEvent(state: BleState, data: Uint8Array): boolean {
     return state.model === "wired" && data[4] === 0xff;
+}
+
+// long press is power off for the main button, don't report as a pressz
+function isLongPress(data: Uint8Array): boolean {
+    return data[4] === 0x04;
 }
 
 function sensor2MaxGapMs(fpsMode: FpsMode | undefined): number {
