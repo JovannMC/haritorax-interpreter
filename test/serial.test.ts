@@ -141,7 +141,7 @@ describe("serial connection", () => {
         port.write = () => {};
         await assert.rejects(connection.write("COM3", new Uint8Array([0x69])), /Timed out writing to COM3/);
         port.close = () => {};
-        await connection.close("COM3");
+        await assert.rejects(connection.close("COM3"), /Failed to close COM3/);
         await connection.dispose();
     });
 

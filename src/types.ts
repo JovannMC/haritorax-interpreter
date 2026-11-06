@@ -161,8 +161,24 @@ export interface LogEntry {
  * events
  */
 
+export interface HaritoraXErrorEvent {
+    error: Error;
+    connection?: ConnectionKind;
+    endpointId?: string;
+    operation?: string;
+    characteristic?: string;
+    command?: string;
+    identifier?: string;
+    adapterState?: string;
+}
+
+export interface ConnectionErrorEvent extends HaritoraXErrorEvent {
+    connection: ConnectionKind;
+    operation: string;
+}
+
 export interface Events {
-    error: { error: Error };
+    error: HaritoraXErrorEvent;
     log: LogEntry;
     devices: { devices: DeviceSnapshot[] };
 

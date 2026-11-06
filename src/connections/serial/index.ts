@@ -1,9 +1,10 @@
+import { ErrorChannel } from "../../lib/error-channel.js";
 import { HaritoraXError } from "../../lib/errors.js";
 import { Logger } from "../../lib/logging.js";
 import { asciiDecode, asciiEncode, parseLine, splitLines } from "../../protocol/codec/framing.js";
 import { modelFromFirmware, parseInfo } from "../../protocol/codec/messages.js";
 import type { Connection, Frame, ListOptions } from "../contract.js";
-import type { EndpointDescriptor, DisconnectReason, Unsubscribe } from "../../types.js";
+import type { ConnectionErrorEvent, EndpointDescriptor, DisconnectReason, Unsubscribe } from "../../types.js";
 
 export interface SerialPort {
     readonly isOpen: boolean;
@@ -12,6 +13,7 @@ export interface SerialPort {
     on(event: "error", listener: (error: Error) => void): void;
     write(data: string, callback: (error?: Error | null) => void): void;
     close(callback?: (error?: Error | null) => void): void;
+    removeListener?(event: "data" | "close" | "error", listener: (arg?: unknown) => void): unknown;
     removeAllListeners(): void;
 }
 
@@ -63,6 +65,7 @@ interface OpenPort {
     timers: Array<ReturnType<typeof setTimeout>>;
     // true when close() was called by us, so the close event is not a loss
     intentional: boolean;
+    cleanup: () => void;
 }
 
 export class SerialConnection implements Connection {
@@ -75,6 +78,9 @@ export class SerialConnection implements Connection {
     readonly #serialPorts: readonly string[];
     readonly #operationTimeoutMs: number;
 
+    readonly #guardedPorts = new WeakSet<SerialPort>();
+    readonly #errors = new ErrorChannel();
+    #disposed = false;
     readonly #ports = new Map<string, OpenPort>();
     readonly #wiredEndpoints = new Set<string>();
     readonly #dataHandlers = new Set<(frame: Frame) => void>();
@@ -94,7 +100,10 @@ export class SerialConnection implements Connection {
         const deadlineAt = Date.now() + Math.min(options?.timeoutMs ?? this.#operationTimeoutMs, this.#operationTimeoutMs);
         const deadlineController = new AbortController();
         const signal = options?.signal ? AbortSignal.any([options.signal, deadlineController.signal]) : deadlineController.signal;
-        const deadlineTimer = setTimeout(() => deadlineController.abort(), Math.max(1, deadlineAt - Date.now()));
+        const deadlineTimer = setTimeout(
+            () => deadlineController.abort(new HaritoraXError("TIMEOUT", "Serial discovery deadline expired")),
+            Math.max(1, deadlineAt - Date.now()),
+        );
         try {
             return await this.#listUntil({ ...options, signal }, deadlineAt);
         } finally {
@@ -110,11 +119,12 @@ export class SerialConnection implements Connection {
         try {
             ports = await withDeadline(this.#backend.list(options), remaining(), "Timed out enumerating serial ports", signal);
         } catch (error: unknown) {
+            if (isCancelled(signal)) return [];
             if (this.#serialPorts.length === 0) {
                 if (error instanceof HaritoraXError) throw error;
                 throw new HaritoraXError("LINK_UNAVAILABLE", "Failed to enumerate serial ports", { cause: error });
             }
-            this.#log.warn("Serial enumeration failed, trying manually configured serial ports", { error: String(error) });
+            if (!isCancelled(signal)) this.#report("discover", error);
         }
         if (signal?.aborted) return [];
 
@@ -220,18 +230,19 @@ export class SerialConnection implements Connection {
         if (signal?.aborted) return { wired: false };
         let handle: SerialPort | undefined;
         try {
-            handle = await openWithLateCleanup(this.#backend.open(port.path, signal), timeoutMs, signal);
+            handle = await openWithLateCleanup(this.#backend.open(port.path, signal), timeoutMs, this.#guardedPorts, signal);
             return await new Promise<{ wired: boolean }>((resolve) => {
                 let settled = false;
                 let pending: Uint8Array = new Uint8Array(0);
                 const timer = setTimeout(() => finish({ wired: false }), Math.min(SPP_TIMEOUT, timeoutMs));
 
+                const listeners: Array<() => void> = [];
                 const finish = (result: { wired: boolean }): void => {
                     if (settled) return;
                     settled = true;
                     clearTimeout(timer);
                     signal?.removeEventListener("abort", onAbort);
-                    handle?.removeAllListeners();
+                    for (const cleanup of listeners) cleanup();
                     resolve(result);
                 };
 
@@ -242,46 +253,59 @@ export class SerialConnection implements Connection {
                     return;
                 }
 
-                handle?.on("data", (chunk: Uint8Array) => {
-                    const { lines, rest } = splitLines(pending, chunk);
-                    pending = rest;
-                    if (pending.length > MAX_PENDING_BYTES) {
-                        finish({ wired: false });
-                        return;
-                    }
-                    for (const line of lines) {
-                        const { identifier, payload } = parseLine(line);
-                        if (identifier !== "i") continue;
-                        const info = parseInfo(payload);
-                        if (!info) continue;
-                        let wired = false;
-                        try {
-                            wired = modelFromFirmware(info.model) === "wired";
-                        } catch {
-                            // unknown firmware is still a valid response for a manual port
+                if (!handle) return;
+                listeners.push(
+                    listen(handle, "data", (chunk: Uint8Array) => {
+                        const { lines, rest } = splitLines(pending, chunk);
+                        pending = rest;
+                        if (pending.length > MAX_PENDING_BYTES) {
+                            finish({ wired: false });
+                            return;
                         }
-                        finish({ wired });
-                        return;
-                    }
-                });
-                handle?.on("close", () => finish({ wired: false }));
-                handle?.on("error", () => finish({ wired: false }));
+                        for (const line of lines) {
+                            const { identifier, payload } = parseLine(line);
+                            if (identifier !== "i") continue;
+                            const info = parseInfo(payload);
+                            if (!info) continue;
+                            let wired = false;
+                            try {
+                                wired = modelFromFirmware(info.model) === "wired";
+                            } catch {
+                                // unknown firmware is still a valid response for a manual port
+                            }
+                            finish({ wired });
+                            return;
+                        }
+                    }),
+                );
+                listeners.push(listen(handle, "close", () => finish({ wired: false })));
+                listeners.push(
+                    listen(handle, "error", (error: Error) => {
+                        if (!isCancelled(signal) && this.#serialPorts.includes(port.path))
+                            this.#report("probe", error, port.path);
+                        finish({ wired: false });
+                    }),
+                );
 
                 if (handle) {
                     const target = handle;
                     void this.#writeProbe(target, "report send info\nblt send info\n")
                         .then(() => (settled ? undefined : this.#writeProbe(target, "i:\n")))
                         .catch((error: unknown) => {
-                            this.#log.debug(`Wired probe write failed: ${String(error)}`);
+                            if (!settled && !isCancelled(signal) && this.#serialPorts.includes(port.path))
+                                this.#report("probe", error, port.path);
                             finish({ wired: false });
                         });
                 }
             });
         } catch (error) {
-            this.#log.debug(`Wired probe failed on ${port.path}`, { error: String(error) });
+            if (!isCancelled(signal) && this.#serialPorts.includes(port.path)) this.#report("probe", error, port.path);
             return { wired: false };
         } finally {
-            if (handle) await this.#closeHandle(handle);
+            if (handle)
+                await this.#closeHandle(handle).catch((error: unknown) => {
+                    if (!isCancelled(signal) && this.#serialPorts.includes(port.path)) this.#report("close", error, port.path);
+                });
         }
     }
 
@@ -301,7 +325,6 @@ export class SerialConnection implements Connection {
     }
 
     #closeHandle(handle: SerialPort): Promise<void> {
-        handle.removeAllListeners();
         if (!handle.isOpen) return Promise.resolve();
         return withDeadline(
             new Promise<void>((resolve, reject) => handle.close((error) => (error ? reject(error) : resolve()))),
@@ -311,28 +334,51 @@ export class SerialConnection implements Connection {
     }
 
     async open(endpointId: string): Promise<void> {
+        if (this.#disposed) throw new HaritoraXError("NOT_CONNECTED", "Serial connection has been disposed");
         if (this.#ports.has(endpointId)) return;
 
-        const port = await openWithLateCleanup(this.#backend.open(endpointId), this.#operationTimeoutMs).catch(
-            (error: unknown) => {
-                if (error instanceof HaritoraXError) throw error;
-                throw new HaritoraXError("CONNECTION_FAILED", `Failed to open ${endpointId}`, { cause: error });
-            },
-        );
+        const port = await openWithLateCleanup(
+            this.#backend.open(endpointId),
+            this.#operationTimeoutMs,
+            this.#guardedPorts,
+        ).catch((error: unknown) => {
+            if (error instanceof HaritoraXError) throw error;
+            throw new HaritoraXError("CONNECTION_FAILED", `Failed to open ${endpointId}`, {
+                cause: error,
+                connection: "serial",
+                endpointId,
+                operation: "open",
+            });
+        });
 
-        const entry: OpenPort = { port, pending: new Uint8Array(0), timers: [], intentional: false };
+        if (this.#disposed) {
+            await this.#closeHandle(port);
+            throw new HaritoraXError("NOT_CONNECTED", "Serial connection has been disposed");
+        }
+        const entry: OpenPort = { port, pending: new Uint8Array(0), timers: [], intentional: false, cleanup: () => {} };
         this.#ports.set(endpointId, entry);
 
-        port.on("data", (chunk) => this.#onData(endpointId, chunk));
-        port.on("close", () => this.#onClose(endpointId));
-        port.on("error", (error) => this.#log.error(`Serial error on ${endpointId}`, { error: String(error) }));
+        const cleanups = [
+            listen(port, "data", (chunk: Uint8Array) => {
+                if (this.#ports.get(endpointId) === entry) this.#onData(endpointId, chunk);
+            }),
+            listen(port, "close", () => {
+                if (this.#ports.get(endpointId) === entry) this.#onClose(endpointId);
+            }),
+            listen(port, "error", (error: Error) => {
+                if (this.#ports.get(endpointId) === entry) this.#report("stream", error, endpointId);
+            }),
+        ];
+        entry.cleanup = () => {
+            for (const cleanup of cleanups) cleanup();
+        };
 
-        this.#send(endpointId, OPEN_COMMANDS);
-        entry.timers.push(setTimeout(() => this.#send(endpointId, DELAYED_COMMANDS), DELAYED_MS));
+        this.#send(endpointId, OPEN_COMMANDS, "startup");
+        entry.timers.push(setTimeout(() => this.#send(endpointId, DELAYED_COMMANDS, "startup"), DELAYED_MS));
 
         if (this.#heartbeatMs > 0) {
             const heartbeat = this.#wiredEndpoints.has(endpointId) ? WIRED_HEARTBEAT : DONGLE_HEARTBEAT;
-            entry.timers.push(setInterval(() => this.#send(endpointId, heartbeat), this.#heartbeatMs));
+            entry.timers.push(setInterval(() => this.#send(endpointId, heartbeat, "heartbeat"), this.#heartbeatMs));
         }
     }
 
@@ -345,7 +391,7 @@ export class SerialConnection implements Connection {
         for (const timer of entry.timers) clearTimeout(timer);
 
         try {
-            entry.port.removeAllListeners();
+            entry.cleanup();
             if (entry.port.isOpen) {
                 await withDeadline(
                     new Promise<void>((resolve, reject) => entry.port.close((error) => (error ? reject(error) : resolve()))),
@@ -354,7 +400,12 @@ export class SerialConnection implements Connection {
                 );
             }
         } catch (error) {
-            this.#log.error(`Failed to close ${endpointId}`, { error: String(error) });
+            throw new HaritoraXError("CONNECTION_FAILED", `Failed to close ${endpointId}`, {
+                cause: error,
+                connection: "serial",
+                endpointId,
+                operation: "close",
+            });
         }
     }
 
@@ -365,10 +416,20 @@ export class SerialConnection implements Connection {
         // the dongle expects every command wrapped in newlines
         return withDeadline(
             new Promise<void>((resolve, reject) => {
-                entry.port.write(`\n${asciiDecode(data)}\n`, (error) => {
-                    if (error) reject(new HaritoraXError("WRITE_FAILED", `Failed to write to ${endpointId}`, { cause: error }));
-                    else resolve();
-                });
+                const fail = (cause: unknown): void =>
+                    reject(
+                        new HaritoraXError("WRITE_FAILED", `Failed to write to ${endpointId}`, {
+                            cause,
+                            connection: "serial",
+                            endpointId,
+                            operation: "write",
+                        }),
+                    );
+                try {
+                    entry.port.write(`\n${asciiDecode(data)}\n`, (error) => (error ? fail(error) : resolve()));
+                } catch (cause) {
+                    fail(cause);
+                }
             }),
             this.#operationTimeoutMs,
             `Timed out writing to ${endpointId}`,
@@ -385,21 +446,41 @@ export class SerialConnection implements Connection {
         return () => this.#lostHandlers.delete(handler);
     }
 
-    async dispose(): Promise<void> {
-        for (const endpointId of [...this.#ports.keys()]) await this.close(endpointId);
+    onError(handler: (event: ConnectionErrorEvent) => void): Unsubscribe {
+        return this.#errors.on(handler);
+    }
 
+    async dispose(): Promise<void> {
+        this.#disposed = true;
+        const results = await Promise.allSettled([...this.#ports.keys()].map((endpointId) => this.close(endpointId)));
         this.#dataHandlers.clear();
         this.#lostHandlers.clear();
+        this.#errors.clear();
+        const failures = results.flatMap((result) => (result.status === "rejected" ? [result.reason as unknown] : []));
+        if (failures.length) throw new AggregateError(failures, "Failed to close serial ports");
     }
 
     /*
      * internals
      */
 
-    #send(endpointId: string, commands: readonly string[]): void {
+    #report(operation: string, error: unknown, endpointId?: string, command?: string): void {
+        if (this.#disposed) return;
+        this.#errors.emit({
+            error: error instanceof Error ? error : new Error(String(error)),
+            connection: this.kind,
+            operation,
+            ...(endpointId ? { endpointId } : {}),
+            ...(command ? { command } : {}),
+        });
+    }
+
+    #send(endpointId: string, commands: readonly string[], operation: string): void {
+        const entry = this.#ports.get(endpointId);
+        if (!entry) return;
         for (const command of commands) {
             void this.write(endpointId, asciiEncode(command)).catch((error: unknown) => {
-                this.#log.error(`Failed to send "${command}" to ${endpointId}`, { error: String(error) });
+                if (this.#ports.get(endpointId) === entry) this.#report(operation, error, endpointId, command);
             });
         }
     }
@@ -412,7 +493,11 @@ export class SerialConnection implements Connection {
         entry.pending = rest.length > MAX_PENDING_BYTES ? new Uint8Array(0) : rest;
 
         if (entry.pending.length === 0 && rest.length > 0) {
-            this.#log.warn(`Dropped ${rest.length} un-terminated bytes from ${endpointId}`);
+            this.#report(
+                "decode",
+                new HaritoraXError("DECODE_FAILED", `Dropped ${rest.length} un-terminated bytes from ${endpointId}`),
+                endpointId,
+            );
         }
 
         for (const line of lines) {
@@ -427,6 +512,7 @@ export class SerialConnection implements Connection {
         this.#ports.delete(endpointId);
         for (const timer of entry.timers) clearTimeout(timer);
 
+        entry.cleanup();
         if (entry.intentional) return;
 
         this.#log.warn(`Lost ${endpointId}`);
@@ -456,9 +542,18 @@ function withDeadline<T>(operation: Promise<T>, timeoutMs: number, message: stri
     });
 }
 
-async function openWithLateCleanup(operation: Promise<SerialPort>, timeoutMs: number, signal?: AbortSignal): Promise<SerialPort> {
+async function openWithLateCleanup(
+    operation: Promise<SerialPort>,
+    timeoutMs: number,
+    guardedPorts: WeakSet<SerialPort>,
+    signal?: AbortSignal,
+): Promise<SerialPort> {
     let waiting = true;
     const guarded = operation.then((port) => {
+        if (!guardedPorts.has(port)) {
+            port.on("error", () => {});
+            guardedPorts.add(port);
+        }
         if (!waiting) void closeLatePort(port);
         return port;
     });
@@ -471,7 +566,6 @@ async function openWithLateCleanup(operation: Promise<SerialPort>, timeoutMs: nu
 
 function closeLatePort(port: SerialPort): void {
     try {
-        port.removeAllListeners();
         if (port.isOpen) port.close(() => {});
     } catch {
         // ignore
@@ -487,4 +581,20 @@ function isWiredPort(port: PortSummary): boolean {
 
     const name = `${port.manufacturer ?? ""} ${port.pnpId ?? ""} ${port.serialNumber ?? ""}`.toLowerCase();
     return name.includes("haritora");
+}
+
+function listen<T>(port: SerialPort, event: "data" | "close" | "error", handler: (value: T) => void): () => void {
+    let active = true;
+    const listener = (value?: unknown): void => {
+        if (active) handler(value as T);
+    };
+    port.on(event as "error", listener);
+    return () => {
+        active = false;
+        port.removeListener?.(event, listener);
+    };
+}
+
+function isCancelled(signal?: AbortSignal): boolean {
+    return Boolean(signal?.aborted && !(signal.reason instanceof HaritoraXError && signal.reason.code === "TIMEOUT"));
 }

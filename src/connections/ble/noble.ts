@@ -1,11 +1,12 @@
 import { createRequire } from "node:module";
+import { ErrorChannel } from "../../lib/error-channel.js";
 import { HaritoraXError } from "../../lib/errors.js";
 import type { Logger } from "../../lib/logging.js";
 import { modelFromFirmware } from "../../protocol/codec/messages.js";
 import { bleCharacteristicFromUuid, bleText, parseBleDeviceName, type BleCharacteristic } from "../../protocol/endpoint/ble.js";
 import { BleConnection, type BleBackend, type BleConnectionOptions, type BlePeripheralSummary } from "./index.js";
 import type { ListOptions } from "../contract.js";
-import type { DisconnectReason, Unsubscribe } from "../../types.js";
+import type { ConnectionErrorEvent, DisconnectReason, Unsubscribe } from "../../types.js";
 import type { Characteristic, Noble, Peripheral } from "@stoprocent/noble";
 
 // the 2.8.0 type definitions do not include the newer BlueZ D-Bus binding yet
@@ -62,6 +63,14 @@ class NobleBleBackend implements BleBackend {
     readonly #lostHandlers = new Set<(peripheralId: string, reason: DisconnectReason) => void>();
     readonly #rssiHandlers = new Set<(peripheralId: string, rssi: number) => void>();
 
+    readonly #guardedCharacteristics = new WeakSet<Characteristic>();
+    readonly #errors = new ErrorChannel();
+    readonly #adapterWaiters = new Set<(error: HaritoraXError) => void>();
+    #disposed = false;
+    readonly #onNativeError = (cause: unknown): void => this.#adapterFailure(cause);
+    readonly #onStateChange = (state: string): void => {
+        if (state !== "poweredOn" && (this.#adapterWaiters.size || this.#open.size)) this.#adapterFailure(undefined, state);
+    };
     readonly #rssiTimers = new Map<string, ReturnType<typeof setInterval>>();
 
     constructor(
@@ -76,14 +85,73 @@ class NobleBleBackend implements BleBackend {
         this.#log = log;
         this.#binding = binding;
         this.#operationTimeoutMs = operationTimeoutMs;
+        noble.on("error", () => {}); // ignore late binding errors after disposal
+        noble.on("error", this.#onNativeError);
+        noble.on("stateChange", this.#onStateChange);
+    }
+
+    #adapterFailure(cause: unknown, adapterState: string = this.#noble.state): void {
+        if (this.#disposed) return;
+        const error = new HaritoraXError("LINK_UNAVAILABLE", `Bluetooth adapter unavailable (${adapterState})`, {
+            cause,
+            connection: "ble",
+            operation: "adapter",
+            adapterState,
+        });
+
+        if (this.#adapterWaiters.size) {
+            for (const reject of [...this.#adapterWaiters]) reject(error);
+        } else this.#report("adapter", error, undefined, undefined, adapterState);
+    }
+
+    async #raceAdapter<T>(
+        operation: Promise<T>,
+        timeoutMs?: number,
+        message = "BLE operation timed out",
+        signal?: AbortSignal,
+    ): Promise<T> {
+        let rejectAdapter!: (error: HaritoraXError) => void;
+        const failure = new Promise<never>((_resolve, reject) => {
+            rejectAdapter = reject;
+        });
+        this.#adapterWaiters.add(rejectAdapter);
+
+        try {
+            const raced = Promise.race([operation, failure]);
+            return await (timeoutMs === undefined ? raced : withTimeout(raced, timeoutMs, message, signal));
+        } finally {
+            this.#adapterWaiters.delete(rejectAdapter);
+        }
+    }
+
+    #report(operation: string, cause: unknown, endpointId?: string, characteristic?: string, adapterState?: string): void {
+        if (this.#disposed) return;
+        this.#errors.emit({
+            error: cause instanceof Error ? cause : new Error(String(cause)),
+            connection: "ble",
+            operation,
+            ...(endpointId ? { endpointId } : {}),
+            ...(characteristic ? { characteristic } : {}),
+            ...(adapterState ? { adapterState } : {}),
+        });
+    }
+
+    onError(handler: (event: ConnectionErrorEvent) => void): Unsubscribe {
+        return this.#errors.on(handler);
     }
 
     async scan(options?: ListOptions): Promise<BlePeripheralSummary[]> {
+        if (this.#disposed) throw new HaritoraXError("NOT_CONNECTED", "BLE backend has been disposed");
+        if (options?.signal?.aborted) return [];
+        const scanController = new AbortController();
+        const signal = options?.signal ? AbortSignal.any([options.signal, scanController.signal]) : scanController.signal;
         const scanStartedAt = Date.now();
         const found = new Map<string, BlePeripheralSummary>();
         let finishForTarget!: () => void;
         const targetFound = new Promise<void>((resolve) => (finishForTarget = resolve));
         const onDiscover = (peripheral: Peripheral): void => {
+            if (!this.#peripherals.has(peripheral.id)) peripheral.on("error", () => {});
+
             this.#peripherals.set(peripheral.id, peripheral);
 
             const existing = found.get(peripheral.id);
@@ -106,34 +174,38 @@ class NobleBleBackend implements BleBackend {
         try {
             const timeoutMs = options?.timeoutMs ?? 5_000;
             const powerWaitStartedAt = Date.now();
-            await withTimeout(
+            await this.#raceAdapter(
                 this.#noble.waitForPoweredOnAsync(timeoutMs),
                 timeoutMs,
                 "Timed out waiting for Bluetooth power",
-                options?.signal,
+                signal,
             );
             this.#log?.debug("Bluetooth adapter is powered on", { elapsedMs: Date.now() - powerWaitStartedAt });
             if (options?.signal?.aborted) return [];
 
             const scanStartStartedAt = Date.now();
-            await withTimeout(
-                this.#noble.startScanningAsync([], false),
-                timeoutMs,
-                "Timed out starting BLE scan",
-                options?.signal,
-            );
+            await this.#raceAdapter(this.#noble.startScanningAsync([], false), timeoutMs, "Timed out starting BLE scan", signal);
             this.#log?.debug("BLE scan started", { elapsedMs: Date.now() - scanStartStartedAt });
-            await waitForScanEnd(options?.signal, timeoutMs, options?.targetEndpointId ? targetFound : undefined);
+            await this.#raceAdapter(waitForScanEnd(signal, timeoutMs, options?.targetEndpointId ? targetFound : undefined));
         } catch (error) {
+            if (options?.signal?.aborted) return [];
             this.#log?.debug("BLE scan failed", { elapsedMs: Date.now() - scanStartedAt, error: String(error) });
-            throw error;
+            throw new HaritoraXError("LINK_UNAVAILABLE", "BLE discovery failed", {
+                cause: error,
+                connection: "ble",
+                operation: "discover",
+                adapterState: this.#noble.state,
+            });
         } finally {
+            scanController.abort();
             this.#noble.removeListener("discover", onDiscover);
-            await withTimeout(this.#noble.stopScanningAsync(), options?.timeoutMs ?? 5_000, "Timed out stopping BLE scan").catch(
-                (error: unknown) => {
-                    this.#log?.debug("Failed to stop BLE scanning", { error: String(error) });
-                },
-            );
+            await withTimeout(
+                Promise.resolve().then(() => this.#noble.stopScanningAsync()),
+                options?.timeoutMs ?? 5_000,
+                "Timed out stopping BLE scan",
+            ).catch((error: unknown) => {
+                if (!options?.signal?.aborted) this.#report("stop-scan", error);
+            });
         }
 
         const results = [...found.values()].filter(
@@ -190,6 +262,8 @@ class NobleBleBackend implements BleBackend {
             intentional: false,
             disconnected,
             openedAt: Date.now(),
+            nativeWaiters: new Set(),
+            errorSubscriptions: [],
         };
         entry.onDisconnect = (reason: number | string): void => {
             if (entry.intentional) return;
@@ -204,7 +278,9 @@ class NobleBleBackend implements BleBackend {
                 connectedForMs: Date.now() - entry.openedAt,
                 subscribed: [...entry.subscribed],
             });
-            void this.#cleanupConnection(peripheralId, entry, false);
+            void this.#cleanupConnection(peripheralId, entry, false).catch((error: unknown) =>
+                this.#report("close", error, peripheralId),
+            );
             for (const handler of [...this.#lostHandlers]) handler(peripheralId, "remote");
         };
 
@@ -212,7 +288,21 @@ class NobleBleBackend implements BleBackend {
             for (const handler of [...this.#rssiHandlers]) handler(peripheralId, rssi);
         };
 
+        entry.onError = (cause: unknown): void => {
+            if (entry.intentional || this.#disposed) return;
+            const error = new HaritoraXError("CONNECTION_FAILED", `BLE peripheral "${peripheralId}" failed`, {
+                cause,
+                endpointId: peripheralId,
+                connection: "ble",
+                operation: "stream",
+            });
+
+            if (entry.nativeWaiters.size) {
+                for (const reject of [...entry.nativeWaiters]) reject(error);
+            } else this.#report("stream", error, peripheralId);
+        };
         this.#open.set(peripheralId, entry);
+        peripheral.on("error", entry.onError);
         peripheral.on("disconnect", entry.onDisconnect);
         peripheral.on("rssiUpdate", entry.onRssiUpdate);
 
@@ -242,7 +332,7 @@ class NobleBleBackend implements BleBackend {
                                 );
                             }
                         })
-                        .catch(() => undefined);
+                        .catch((cleanupError: unknown) => this.#report("close", cleanupError, peripheralId));
                     throw error;
                 }
             }
@@ -259,7 +349,34 @@ class NobleBleBackend implements BleBackend {
             this.#assertOpenEntry(peripheralId, entry);
             for (const characteristic of characteristics) {
                 const name = bleCharacteristicFromUuid(characteristic.uuid);
-                if (name) entry.characteristics.set(name, characteristic);
+                if (name) {
+                    entry.characteristics.set(name, characteristic);
+                    if (!this.#guardedCharacteristics.has(characteristic)) {
+                        characteristic.on("error", () => {});
+                        this.#guardedCharacteristics.add(characteristic);
+                    }
+
+                    const handler = (error: Error): void => {
+                        if (entry.intentional || this.#disposed) return;
+                        const failure = new HaritoraXError(
+                            "CONNECTION_FAILED",
+                            `BLE characteristic "${name}" failed on ${peripheralId}`,
+                            {
+                                cause: error,
+                                endpointId: peripheralId,
+                                connection: "ble",
+                                operation: "stream",
+                                characteristic: name,
+                            },
+                        );
+
+                        if (entry.nativeWaiters.size) for (const reject of [...entry.nativeWaiters]) reject(failure);
+                        else this.#report("stream", failure, peripheralId, name);
+                    };
+
+                    characteristic.on("error", handler);
+                    entry.errorSubscriptions.push({ characteristic, handler });
+                }
             }
             if (this.#log?.enabled("debug")) {
                 this.#log.debug("Discovered BLE GATT database", {
@@ -281,24 +398,20 @@ class NobleBleBackend implements BleBackend {
             }
 
             const identityReadsStartedAt = Date.now();
-            const identityValues = await this.#readInitial(peripheralId, entry, STREAM_IDENTITY_READS);
+            const identityValues = await this.#readInitial(peripheralId, entry, STREAM_IDENTITY_READS, [
+                "serial-number",
+                "model-number",
+            ]);
             this.#assertOpenEntry(peripheralId, entry);
             const serial = bleText(identityValues.get("serial-number") ?? new Uint8Array(0));
             const firmwareModel = bleText(identityValues.get("model-number") ?? new Uint8Array(0));
-            let identityValid = Boolean(serial && firmwareModel);
-            if (identityValid) {
-                try {
-                    modelFromFirmware(firmwareModel);
-                } catch {
-                    identityValid = false;
-                }
-            }
-            if (!identityValid) {
+            if (!serial || !firmwareModel) {
                 throw new HaritoraXError(
                     "CONNECTION_FAILED",
                     `BLE peripheral "${peripheralId}" did not provide a valid serial number and supported model`,
                 );
             }
+            modelFromFirmware(firmwareModel);
             this.#log?.debug("Finished essential BLE identity reads", {
                 peripheralId,
                 elapsedMs: Date.now() - identityReadsStartedAt,
@@ -308,13 +421,27 @@ class NobleBleBackend implements BleBackend {
             });
 
             const sensorSubscriptionsStartedAt = Date.now();
-            await this.#subscribe(peripheralId, entry, ["sensor", "sensor2"]);
+            const sensorFailures = await this.#subscribe(peripheralId, entry, ["sensor", "sensor2"]);
             this.#assertOpenEntry(peripheralId, entry);
             const sensorSubscriptions = entry.subscribed.filter((name) => name === "sensor" || name === "sensor2");
             if (sensorSubscriptions.length === 0) {
                 throw new HaritoraXError(
                     "CONNECTION_FAILED",
                     `BLE peripheral "${peripheralId}" has no usable sensor notification characteristic`,
+                    {
+                        cause: new AggregateError(sensorFailures),
+                        endpointId: peripheralId,
+                        operation: "subscribe",
+                        connection: "ble",
+                    },
+                );
+            }
+            for (const failure of sensorFailures) {
+                this.#report(
+                    "subscribe",
+                    failure,
+                    peripheralId,
+                    failure instanceof HaritoraXError ? failure.context.characteristic : undefined,
                 );
             }
             this.#log?.debug("Subscribed to BLE sensor notifications", {
@@ -359,9 +486,14 @@ class NobleBleBackend implements BleBackend {
                 error: String(error),
                 subscribed: [...entry.subscribed],
             });
-            await this.#cleanupConnection(peripheralId, entry);
+            await this.#cleanupConnection(peripheralId, entry).catch((cleanupError: unknown) =>
+                this.#report("close", cleanupError, peripheralId),
+            );
             throw new HaritoraXError("CONNECTION_FAILED", `Failed to open BLE peripheral "${peripheralId}"`, {
                 cause: error,
+                connection: "ble",
+                endpointId: peripheralId,
+                operation: "open",
             });
         }
     }
@@ -377,12 +509,22 @@ class NobleBleBackend implements BleBackend {
 
     async read(peripheralId: string, characteristic: BleCharacteristic): Promise<Uint8Array | undefined> {
         const entry = this.#open.get(peripheralId);
-        if (!entry) return undefined;
+        if (!entry) throw new HaritoraXError("NOT_CONNECTED", `BLE peripheral "${peripheralId}" is not open`);
         const instance = entry.characteristics.get(characteristic);
         if (!instance) return undefined;
 
-        const buffer = await this.#raceDisconnect(entry, instance.readAsync(), peripheralId, `read ${characteristic}`);
-        return new Uint8Array(buffer);
+        try {
+            const buffer = await this.#raceDisconnect(entry, instance.readAsync(), peripheralId, `read ${characteristic}`);
+            return new Uint8Array(buffer);
+        } catch (cause) {
+            throw new HaritoraXError("READ_FAILED", `Failed to read "${characteristic}" from ${peripheralId}`, {
+                cause,
+                connection: "ble",
+                endpointId: peripheralId,
+                operation: "read",
+                characteristic,
+            });
+        }
     }
 
     async readRssi(peripheralId: string): Promise<number> {
@@ -411,6 +553,10 @@ class NobleBleBackend implements BleBackend {
         } catch (error) {
             throw new HaritoraXError("WRITE_FAILED", `Failed to write "${characteristic}" to ${peripheralId}`, {
                 cause: error,
+                connection: "ble",
+                endpointId: peripheralId,
+                operation: "write",
+                characteristic,
             });
         }
     }
@@ -431,50 +577,59 @@ class NobleBleBackend implements BleBackend {
     }
 
     async dispose(): Promise<void> {
+        this.#disposed = true;
         for (const timer of this.#rssiTimers.values()) clearInterval(timer);
         this.#rssiTimers.clear();
-
-        await withTimeout(this.#noble.stopScanningAsync(), 5_000, "Timed out stopping BLE scan").catch(() => undefined);
+        const failures: unknown[] = [];
+        try {
+            await withTimeout(this.#noble.stopScanningAsync(), 5_000, "Timed out stopping BLE scan");
+        } catch (error) {
+            failures.push(error);
+        }
 
         await Promise.all([...this.#opening.values()].map((opening) => opening.catch(() => undefined)));
-        await Promise.all([...this.#open.keys()].map((peripheralId) => this.close(peripheralId)));
-        await Promise.all([...this.#closing.values()]);
-
+        
+        const results = await Promise.allSettled([...this.#open.keys()].map((peripheralId) => this.close(peripheralId)));
+        for (const result of results) if (result.status === "rejected") failures.push(result.reason);
+        const closing = await Promise.allSettled([...this.#closing.values()]);
+        for (const result of closing) if (result.status === "rejected") failures.push(result.reason);
+        
         this.#dataHandlers.clear();
         this.#lostHandlers.clear();
         this.#rssiHandlers.clear();
+        this.#errors.clear();
         this.#peripherals.clear();
-        this.#noble.stop();
+        try {
+            this.#noble.stop();
+        } catch (error) {
+            failures.push(error);
+        }
+        this.#noble.removeListener("stateChange", this.#onStateChange);
+        this.#noble.removeListener("error", this.#onNativeError);
+        if (failures.length) throw new AggregateError(failures, "Failed to dispose BLE backend");
     }
 
     #startRssiPolling(peripheralId: string, entry: OpenPeripheral): void {
         if (this.#rssiPollMs <= 0) return;
-
-        // initial RSSI update
-        entry.peripheral
-            .updateRssiAsync()
-            .then((rssi) => {
-                for (const handler of [...this.#rssiHandlers]) handler(peripheralId, rssi);
-            })
-            .catch(() => undefined);
-
-        const timer = setInterval(() => {
-            if (!this.#open.has(peripheralId)) {
-                this.#stopRssiPolling(peripheralId);
-                return;
-            }
-
-            entry.peripheral
-                .updateRssiAsync()
+        let reading = false;
+        const poll = (): void => {
+            if (reading || this.#disposed || this.#open.get(peripheralId) !== entry) return;
+            reading = true;
+            void Promise.resolve()
+                .then(() => this.readRssi(peripheralId))
                 .then((rssi) => {
+                    if (this.#disposed || this.#open.get(peripheralId) !== entry) return;
                     for (const handler of [...this.#rssiHandlers]) handler(peripheralId, rssi);
                 })
                 .catch((error: unknown) => {
-                    this.#log?.debug(`RSSI update failed for ${peripheralId}`, { error: String(error) });
+                    if (this.#open.get(peripheralId) === entry) this.#report("rssi", error, peripheralId);
+                })
+                .finally(() => {
+                    reading = false;
                 });
-        }, this.#rssiPollMs);
-
-        this.#rssiTimers.set(peripheralId, timer);
+        };
+        poll();
+        this.#rssiTimers.set(peripheralId, setInterval(poll, this.#rssiPollMs));
     }
 
     #stopRssiPolling(peripheralId: string): void {
@@ -489,6 +644,7 @@ class NobleBleBackend implements BleBackend {
         peripheralId: string,
         entry: OpenPeripheral,
         reads: readonly BleCharacteristic[],
+        required: readonly BleCharacteristic[] = [],
     ): Promise<Map<BleCharacteristic, Uint8Array>> {
         const values = new Map<BleCharacteristic, Uint8Array>();
         const succeeded: string[] = [];
@@ -496,7 +652,16 @@ class NobleBleBackend implements BleBackend {
         for (const characteristic of reads) {
             this.#assertOpenEntry(peripheralId, entry);
             const instance = entry.characteristics.get(characteristic);
-            if (!instance) continue;
+            if (!instance) {
+                if (required.includes(characteristic))
+                    throw new HaritoraXError("NOT_SUPPORTED", `Missing required BLE characteristic "${characteristic}"`, {
+                        connection: "ble",
+                        endpointId: peripheralId,
+                        characteristic,
+                        operation: "read",
+                    });
+                continue;
+            }
 
             try {
                 const value = await this.#raceDisconnect(entry, instance.readAsync(), peripheralId, `read ${characteristic}`);
@@ -506,7 +671,16 @@ class NobleBleBackend implements BleBackend {
                 this.#emit(peripheralId, characteristic, bytes);
                 succeeded.push(characteristic);
             } catch (error) {
-                this.#log?.debug(`Failed to read "${characteristic}" from ${peripheralId}`, { error: String(error) });
+                if (entry.intentional || this.#open.get(peripheralId) !== entry) throw error;
+                const failure = new HaritoraXError("READ_FAILED", `Failed to read "${characteristic}" from ${peripheralId}`, {
+                    cause: error,
+                    connection: "ble",
+                    endpointId: peripheralId,
+                    characteristic,
+                    operation: "read",
+                });
+                if (required.includes(characteristic)) throw failure;
+                this.#report("read", failure, peripheralId, characteristic);
                 failed.push({ characteristic, uuid: instance.uuid, error: String(error) });
             }
         }
@@ -514,7 +688,12 @@ class NobleBleBackend implements BleBackend {
         return values;
     }
 
-    async #subscribe(peripheralId: string, entry: OpenPeripheral, characteristics: readonly BleCharacteristic[]): Promise<void> {
+    async #subscribe(
+        peripheralId: string,
+        entry: OpenPeripheral,
+        characteristics: readonly BleCharacteristic[],
+    ): Promise<Error[]> {
+        const failures: Error[] = [];
         const unsupported: string[] = [];
         const failed: Array<{ characteristic: string; uuid: string; error: string }> = [];
         for (const characteristic of characteristics) {
@@ -540,6 +719,22 @@ class NobleBleBackend implements BleBackend {
                 this.#assertOpenEntry(peripheralId, entry);
                 entry.subscribed.push(characteristic);
             } catch (error) {
+                if (entry.intentional || this.#open.get(peripheralId) !== entry) throw error;
+                
+                const failure = new HaritoraXError(
+                    "CONNECTION_FAILED",
+                    `Failed to subscribe to "${characteristic}" on ${peripheralId}`,
+                    {
+                        cause: error,
+                        connection: "ble",
+                        endpointId: peripheralId,
+                        operation: "subscribe",
+                        characteristic,
+                    },
+                );
+                failures.push(failure);
+                if (characteristic !== "sensor" && characteristic !== "sensor2")
+                    this.#report("subscribe", failure, peripheralId, characteristic);
                 const detail = { characteristic, uuid: instance.uuid, error: String(error) };
                 failed.push(detail);
                 if (characteristic === "sensor" || characteristic === "sensor2") {
@@ -556,6 +751,7 @@ class NobleBleBackend implements BleBackend {
             }
         }
         this.#log?.debug("BLE subscription results", { peripheralId, subscribed: [...entry.subscribed], unsupported, failed });
+        return failures;
     }
 
     async #cleanupConnection(peripheralId: string, entry: OpenPeripheral, disconnect = true): Promise<void> {
@@ -564,12 +760,14 @@ class NobleBleBackend implements BleBackend {
         entry.intentional = true;
         if (entry.onDisconnect) entry.peripheral.removeListener("disconnect", entry.onDisconnect);
         if (entry.onRssiUpdate) entry.peripheral.removeListener("rssiUpdate", entry.onRssiUpdate);
+        if (entry.onError) entry.peripheral.removeListener("error", entry.onError);
         if (this.#open.get(peripheralId) === entry) {
             this.#stopRssiPolling(peripheralId);
             this.#open.delete(peripheralId);
         }
 
         for (const { characteristic, handler } of entry.subscriptions) characteristic.removeListener("data", handler);
+        for (const { characteristic, handler } of entry.errorSubscriptions) characteristic.removeListener("error", handler);
 
         entry.cleanup = disconnect ? this.#disconnectPeripheral(peripheralId, entry.peripheral) : Promise.resolve();
         return entry.cleanup;
@@ -584,12 +782,10 @@ class NobleBleBackend implements BleBackend {
                 peripheral.disconnectAsync(),
                 Math.min(this.#operationTimeoutMs, DISCONNECT_TIMEOUT_MS),
                 `Timed out disconnecting from ${peripheralId}`,
-            ).catch((error: unknown) => {
-                this.#log?.debug(`Failed to disconnect from ${peripheralId}`, { error: String(error) });
-            });
+            );
         };
 
-        const operation = previous ? previous.then(disconnect) : disconnect();
+        const operation = previous ? previous.catch(() => undefined).then(disconnect) : disconnect();
         const tracked = operation.finally(() => {
             if (this.#closing.get(peripheralId) === tracked) this.#closing.delete(peripheralId);
         });
@@ -605,7 +801,15 @@ class NobleBleBackend implements BleBackend {
                 this.#operationTimeoutMs,
             );
         });
-        return Promise.race([operation, entry.disconnected, timeout]).finally(() => clearTimeout(timer));
+        let rejectNative!: (error: Error) => void;
+        const nativeFailure = new Promise<never>((_resolve, reject) => {
+            rejectNative = reject;
+        });
+        entry.nativeWaiters.add(rejectNative);
+        return this.#raceAdapter(Promise.race([operation, entry.disconnected, timeout, nativeFailure])).finally(() => {
+            clearTimeout(timer);
+            entry.nativeWaiters.delete(rejectNative);
+        });
     }
 
     #assertOpenEntry(peripheralId: string, entry: OpenPeripheral): void {
@@ -622,8 +826,16 @@ class NobleBleBackend implements BleBackend {
 function createNobleBackend(options: NobleBleOptions = {}): BleBackend {
     const binding = resolveBinding(options.binding);
     const module = loadNoble(binding);
-    const noble = module.withBindings(binding);
-
+    let noble: Noble;
+    try {
+        noble = module.withBindings(binding);
+    } catch (cause) {
+        throw new HaritoraXError("LINK_UNAVAILABLE", `Failed to initialize BLE binding "${binding}"`, {
+            cause,
+            connection: "ble",
+            operation: "initialize",
+        });
+    }
     return new NobleBleBackend(noble, options.rssiPollMs ?? 0, options.logger, binding, options.operationTimeoutMs);
 }
 
@@ -716,6 +928,9 @@ interface OpenPeripheral {
     openedAt: number;
     intentional: boolean;
     disconnected: Promise<never>;
+    nativeWaiters: Set<(error: Error) => void>;
+    errorSubscriptions: Array<{ characteristic: Characteristic; handler: (error: Error) => void }>;
+    onError?: (error: unknown) => void;
     cleanup?: Promise<void>;
     onDisconnect?: (reason: number | string) => void;
     onRssiUpdate?: (rssi: number) => void;

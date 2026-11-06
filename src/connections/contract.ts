@@ -1,4 +1,6 @@
-import type { ConnectionKind, EndpointDescriptor, DisconnectReason, Unsubscribe } from "../types.js";
+import type { ConnectionKind, ConnectionErrorEvent, EndpointDescriptor, DisconnectReason, Unsubscribe } from "../types.js";
+
+export type { ConnectionErrorEvent } from "../types.js";
 
 export interface Frame {
     // the endpoint the bytes came from - a BLE local name or a serial path
@@ -30,13 +32,15 @@ export interface Connection {
     open(endpointId: string): Promise<void>;
     close(endpointId: string): Promise<void>;
     write(endpointId: string, data: Uint8Array, options?: WriteOptions): Promise<void>;
-    // BLE only, returns undefined if the characteristic is not found or the read fails
+    // BLE only, returns undefined if the characteristic is unavailable, rejects on read failures
     read?(endpointId: string, characteristic: string): Promise<Uint8Array | undefined>;
     readRssi?(endpointId: string): Promise<number>;
 
     onData(handler: (frame: Frame) => void): Unsubscribe;
     onLost(handler: (endpointId: string, reason: DisconnectReason) => void): Unsubscribe;
     onRssi?(handler: (endpointId: string, rssi: number) => void): Unsubscribe;
+    // other failures that occur during normal operation
+    onError?(handler: (event: ConnectionErrorEvent) => void): Unsubscribe;
 
     dispose(): Promise<void>;
 }

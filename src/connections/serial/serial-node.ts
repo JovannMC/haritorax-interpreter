@@ -35,6 +35,7 @@ function createNodeBackend(options: NodeSerialOptions): SerialBackend {
         },
         open: async (path, signal) => {
             const port = new SerialPortStream({ path, baudRate: BAUD_RATE, binding, autoOpen: false });
+            port.on("error", () => {});
             const opening = new Promise<void>((resolve, reject) => {
                 port.open((error) => (error ? reject(error) : resolve()));
             });
@@ -57,7 +58,7 @@ function createNodeBackend(options: NodeSerialOptions): SerialBackend {
 async function autoBindWiredPorts(signal: AbortSignal | undefined, timeoutMs: number): Promise<void> {
     if (process.platform !== "linux") return;
 
-    const devices = await runCommand("bluetoothctl", ["devices", "Paired"], timeoutMs, signal).catch(() => "");
+    const devices = await runCommand("bluetoothctl", ["devices", "Paired"], timeoutMs, signal);
     const candidates = [...devices.matchAll(/^Device\s+([0-9a-f:]{17})\s+(.+)$/gim)].filter((match) =>
         /haritora/i.test(match[2] ?? ""),
     );
@@ -66,10 +67,10 @@ async function autoBindWiredPorts(signal: AbortSignal | undefined, timeoutMs: nu
         const address = candidate[1];
         if (!address) continue;
 
-        const info = await runCommand("bluetoothctl", ["info", address], timeoutMs, signal).catch(() => "");
+        const info = await runCommand("bluetoothctl", ["info", address], timeoutMs, signal);
         if (!/Connected:\s+yes/i.test(info)) continue;
 
-        const records = await runCommand("sdptool", ["browse", address], timeoutMs, signal).catch(() => "");
+        const records = await runCommand("sdptool", ["browse", address], timeoutMs, signal);
         if (!hasSerialPortService(records)) continue;
 
         const channel = /Channel:\s*(\d+)/i.exec(records)?.[1];
@@ -78,7 +79,7 @@ async function autoBindWiredPorts(signal: AbortSignal | undefined, timeoutMs: nu
         const device = await firstFreeRfcommDevice(timeoutMs, signal);
         if (device === undefined) return;
 
-        await runCommand("rfcomm", ["bind", String(device), address, channel], timeoutMs, signal).catch(() => undefined);
+        await runCommand("rfcomm", ["bind", String(device), address, channel], timeoutMs, signal);
     }
 }
 
@@ -87,7 +88,7 @@ function hasSerialPortService(records: string): boolean {
 }
 
 async function firstFreeRfcommDevice(timeoutMs: number, signal?: AbortSignal): Promise<number | undefined> {
-    const existing = await runCommand("rfcomm", ["-a"], timeoutMs, signal).catch(() => "");
+    const existing = await runCommand("rfcomm", ["-a"], timeoutMs, signal);
     const used = new Set(
         [...existing.matchAll(/rfcomm(\d+):/gi)].map((match) => Number.parseInt(match[1] ?? "", 10)).filter(Number.isInteger),
     );

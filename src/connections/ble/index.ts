@@ -1,8 +1,9 @@
+import { ErrorChannel } from "../../lib/error-channel.js";
 import { HaritoraXError } from "../../lib/errors.js";
 import type { Logger } from "../../lib/logging.js";
 import { parseBleDeviceName, type BleCharacteristic } from "../../protocol/endpoint/ble.js";
 import type { Connection, Frame, ListOptions, WriteOptions } from "../contract.js";
-import type { DisconnectReason, EndpointDescriptor, Unsubscribe } from "../../types.js";
+import type { ConnectionErrorEvent, DisconnectReason, EndpointDescriptor, Unsubscribe } from "../../types.js";
 
 export interface BlePeripheralSummary {
     id: string;
@@ -21,6 +22,7 @@ export interface BleBackend {
     read(peripheralId: string, characteristic: BleCharacteristic): Promise<Uint8Array | undefined>;
     readRssi?(peripheralId: string): Promise<number>;
     write(peripheralId: string, characteristic: BleCharacteristic, data: Uint8Array): Promise<void>;
+    onError?(handler: (event: ConnectionErrorEvent) => void): Unsubscribe;
     onData(handler: BleDataHandler): Unsubscribe;
     onLost(handler: (peripheralId: string, reason: DisconnectReason) => void): Unsubscribe;
     onRssi(handler: (peripheralId: string, rssi: number) => void): Unsubscribe;
@@ -41,7 +43,7 @@ export class BleConnection implements Connection {
 
     readonly #backend: BleBackend;
     readonly #scanTimeoutMs: number;
-    readonly #log: Logger | undefined;
+    readonly #errors = new ErrorChannel();
 
     readonly #open = new Set<string>();
     readonly #dataHandlers = new Set<(frame: Frame) => void>();
@@ -52,8 +54,8 @@ export class BleConnection implements Connection {
     constructor(backend: BleBackend, options: BleConnectionOptions = {}) {
         this.#backend = backend;
         this.#scanTimeoutMs = options.scanTimeoutMs ?? DEFAULT_SCAN_TIMEOUT_MS;
-        this.#log = options.logger;
 
+        if (backend.onError) this.#subscriptions.push(backend.onError((event) => this.#errors.emit(event)));
         this.#subscriptions.push(
             backend.onData((peripheralId, characteristic, data) => {
                 const frame: Frame = { endpointId: peripheralId, characteristic, data };
@@ -140,6 +142,10 @@ export class BleConnection implements Connection {
         return () => this.#rssiHandlers.delete(handler);
     }
 
+    onError(handler: (event: ConnectionErrorEvent) => void): Unsubscribe {
+        return this.#errors.on(handler);
+    }
+
     async dispose(): Promise<void> {
         for (const unsubscribe of this.#subscriptions) unsubscribe();
         this.#subscriptions.length = 0;
@@ -148,9 +154,8 @@ export class BleConnection implements Connection {
         this.#lostHandlers.clear();
         this.#rssiHandlers.clear();
 
-        await this.#backend.dispose().catch((error: unknown) => {
-            this.#log?.error("Failed to dispose the BLE backend", { error: String(error) });
-        });
+        this.#errors.clear();
         this.#open.clear();
+        await this.#backend.dispose();
     }
 }

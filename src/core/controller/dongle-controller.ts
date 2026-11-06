@@ -130,7 +130,7 @@ export class DongleController {
             timeoutMs: this.#pairingTimeoutMs,
         });
 
-        let result: Awaited<typeof completion> | undefined;
+        const failures: unknown[] = [];
         try {
             const [reset, hold] = pairCommands(channel, portId);
             if (reset === undefined || hold === undefined) throw new HaritoraXError("NOT_SUPPORTED", "No pairing commands");
@@ -142,31 +142,33 @@ export class DongleController {
             session.armed = true;
             await this.#write(endpointId, hold);
 
-            result = await completion;
+            const result = await completion;
+            if (result === "timeout") {
+                this.#log.warn(`Pairing timed out on ${endpointId}:${portId}`, {
+                    elapsedMs: Date.now() - pairingStartedAt,
+                    timeoutMs: this.#pairingTimeoutMs,
+                });
+                throw new HaritoraXError("TIMEOUT", `Pairing on ${endpointId} timed out`);
+            }
+
+            if (result !== "paired") {
+                throw new HaritoraXError("CONNECTION_FAILED", `Pairing on ${endpointId} was cancelled`);
+            }
         } catch (error) {
             this.#pairings.cancel(endpointId);
-            throw error;
+            failures.push(error);
         } finally {
             this.#pairingSlots.delete(endpointId);
 
             // never leave the dongle in pairing mode, whether or not a tracker paired
             await this.#write(endpointId, setChannelCommand(channel)).catch((error: unknown) => {
-                this.#log.warn(`Could not return ${endpointId} to sensing mode`, { error: String(error) });
+                failures.push(error);
             });
         }
 
-        if (result === "timeout") {
-            this.#log.warn(`Pairing timed out on ${endpointId}:${portId}`, {
-                elapsedMs: Date.now() - pairingStartedAt,
-                timeoutMs: this.#pairingTimeoutMs,
-            });
-            throw new HaritoraXError("TIMEOUT", `Pairing on ${endpointId} timed out`);
-        }
-
-        if (result !== "paired") {
-            throw new HaritoraXError("CONNECTION_FAILED", `Pairing on ${endpointId} was cancelled`);
-        }
-
+        if (failures.length === 1) throw failures[0];
+        if (failures.length > 1)
+            throw new AggregateError(failures, `Pairing and sensing-mode restoration failed on ${endpointId}`);
         await this.#write(endpointId, `r${portId}:`);
 
         this.#emitter.emit("paired", { endpointId, slot: portId });
@@ -642,7 +644,7 @@ export class DongleController {
 
     #onInfo(endpointId: string, slot: string, payload: string): void {
         const parsed = parseInfo(payload);
-        if (!parsed) return;
+        if (!parsed) throw new HaritoraXError("DECODE_FAILED", "Invalid tracker info frame");
 
         const serial = parsed.serialNumber;
         if (serial === PLACEHOLDER_SERIAL) return;
@@ -740,7 +742,7 @@ export class DongleController {
 
     #onBattery(endpointId: string, slot: string, payload: string): void {
         const parsed = parseBattery(payload);
-        if (!parsed) return;
+        if (!parsed) throw new HaritoraXError("DECODE_FAILED", "Invalid battery frame");
 
         const device = this.#registry.deviceAt(endpointId, slot);
         if (!device) return;
@@ -847,11 +849,18 @@ export class DongleController {
         const settings = decodeSettings(payload);
         if (first && settings && payload.length === 14 && payload.charAt(12) !== "0") {
             this.#write(endpointId, dongleSettingsCommand(slot, settings, 0, undefined, payload)).catch((error: unknown) => {
-                this.#log.warn(`Could not clear the leftover command on ${endpointId}:${slot}`, { error: String(error) });
+                if (!this.#isOpen(endpointId)) return;
+                this.#emitter.emit("error", {
+                    error: error instanceof Error ? error : new Error(String(error)),
+                    connection: this.#connectionKind(endpointId),
+                    endpointId,
+                    operation: "clear-command",
+                    command: `o${slot}:`,
+                });
             });
         }
 
-        if (!settings) return;
+        if (!settings) throw new HaritoraXError("DECODE_FAILED", "Invalid settings frame");
 
         const device = this.#registry.deviceAt(endpointId, slot);
         if (!device) return;
@@ -863,7 +872,7 @@ export class DongleController {
         const input = this.#registry.registrationAt(endpointId, slot);
         if (!input) return; // drop packet if device is unidentified still
         const slices = splitDongleImuBytes(decodeBase64(payload), input.parts.length);
-        if (slices.length === 0) return;
+        if (slices.length === 0) throw new HaritoraXError("DECODE_FAILED", "Invalid tracker IMU frame");
         const identity = this.#identities.get(endpointSlotKey(endpointId, slot));
         const device =
             this.#registry.deviceAt(endpointId, slot) ??
@@ -931,7 +940,14 @@ export class DongleController {
 
             this.#pingSentAt.set(endpointId, Date.now());
             this.#write(endpointId, "i:").catch((error: unknown) => {
-                this.#log.debug(`Latency ping to ${endpointId} failed`, { error: String(error) });
+                if (!this.#isOpen(endpointId)) return;
+                this.#emitter.emit("error", {
+                    error: error instanceof Error ? error : new Error(String(error)),
+                    connection: this.#connectionKind(endpointId),
+                    endpointId,
+                    operation: "latency-ping",
+                    command: "i:",
+                });
             });
         }, PING_INTERVAL_MS);
         unrefTimerIfSupported(timer);

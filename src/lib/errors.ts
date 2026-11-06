@@ -1,4 +1,6 @@
-import type { SettingsApplyResult, SettingsWriteFailure } from "../types.js";
+import type { HaritoraXErrorEvent, SettingsApplyResult, SettingsWriteFailure } from "../types.js";
+
+export type ErrorContext = Omit<HaritoraXErrorEvent, "error">;
 
 export type ErrorCode =
     | "LINK_UNAVAILABLE"
@@ -14,11 +16,15 @@ export type ErrorCode =
 
 export class HaritoraXError extends Error {
     readonly code: ErrorCode;
+    readonly context: ErrorContext;
 
-    constructor(code: ErrorCode, message: string, options?: { cause?: unknown }) {
+    constructor(code: ErrorCode, message: string, options?: ErrorContext & { cause?: unknown }) {
         super(message, options?.cause === undefined ? undefined : { cause: options.cause });
         this.name = "HaritoraXError";
         this.code = code;
+        const context = { ...options };
+        delete context.cause;
+        this.context = context;
         Object.setPrototypeOf(this, new.target.prototype);
     }
 }

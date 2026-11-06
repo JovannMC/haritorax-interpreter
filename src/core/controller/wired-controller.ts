@@ -113,7 +113,7 @@ export class WiredController implements ProtocolHandler {
 
     #onInfo(endpointId: string, payload: string): void {
         const info = parseInfo(payload);
-        if (!info || !info.serialNumber) return;
+        if (!info || !info.serialNumber) throw new HaritoraXError("DECODE_FAILED", "Invalid wired info frame");
 
         this.#infos.set(endpointId, info);
 
@@ -124,10 +124,7 @@ export class WiredController implements ProtocolHandler {
 
     #onState(endpointId: string, payload: string): void {
         const state = parseWiredState(payload);
-        if (!state) {
-            this.#log.debug(`Ignored wired state from ${endpointId}`, { payload });
-            return;
-        }
+        if (!state) throw new HaritoraXError("DECODE_FAILED", "Invalid wired state frame");
 
         this.#states.set(endpointId, state);
 
@@ -168,7 +165,7 @@ export class WiredController implements ProtocolHandler {
 
     #onBattery(endpointId: string, payload: string): void {
         const parsed = parseBattery(payload);
-        if (!parsed) return;
+        if (!parsed) throw new HaritoraXError("DECODE_FAILED", "Invalid wired battery frame");
 
         const device = this.#registry.deviceAt(endpointId, WIRED_SLOT);
         if (!device) return;
@@ -231,7 +228,7 @@ export class WiredController implements ProtocolHandler {
 
         const parts = this.#states.get(endpointId)?.parts ?? input.parts;
         const slices = splitWiredImuBytes(decodeBase64(payload), parts.length);
-        if (slices.length === 0) return;
+        if (slices.length === 0) throw new HaritoraXError("DECODE_FAILED", "Invalid wired IMU frame");
 
         const device = this.#registry.deviceAt(endpointId, WIRED_SLOT) ?? this.#registry.register({ ...input, parts });
         this.#emitImu(device, slices);
@@ -243,7 +240,7 @@ export class WiredController implements ProtocolHandler {
 
         const parts = this.#states.get(endpointId)?.parts ?? input.parts;
         const slices = splitWiredFloatImuBytes(decodeBase64(payload), parts.length);
-        if (slices.length === 0) return;
+        if (slices.length === 0) throw new HaritoraXError("DECODE_FAILED", "Invalid wired IMU frame");
 
         const device = this.#registry.deviceAt(endpointId, WIRED_SLOT) ?? this.#registry.register({ ...input, parts });
         this.#emitImu(device, slices);

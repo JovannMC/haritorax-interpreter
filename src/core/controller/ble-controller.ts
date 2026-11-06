@@ -361,6 +361,7 @@ export class BleController implements ProtocolHandler {
         ];
 
         let completed = 0;
+        const failures: Error[] = [];
         for (const characteristic of characteristics) {
             try {
                 const data = await this.#read(endpointId, characteristic);
@@ -369,7 +370,16 @@ export class BleController implements ProtocolHandler {
                     completed++;
                 }
             } catch (error) {
-                this.#log.debug(`BLE refresh read failed for ${endpointId}/${characteristic}`, { error: String(error) });
+                if (error instanceof HaritoraXError && error.code === "NOT_SUPPORTED") continue;
+                failures.push(
+                    new HaritoraXError("READ_FAILED", `BLE refresh read failed for ${endpointId}/${characteristic}`, {
+                        cause: error,
+                        connection: "ble",
+                        endpointId,
+                        operation: "refresh",
+                        characteristic,
+                    }),
+                );
             }
         }
 
@@ -378,10 +388,25 @@ export class BleController implements ProtocolHandler {
                 onRssi(await readRssi());
                 completed++;
             } catch (error) {
-                this.#log.debug(`BLE RSSI refresh failed for ${endpointId}`, { error: String(error) });
+                if (!(error instanceof HaritoraXError && error.code === "NOT_SUPPORTED"))
+                    failures.push(
+                        new HaritoraXError("READ_FAILED", `BLE RSSI refresh failed for ${endpointId}`, {
+                            cause: error,
+                            connection: "ble",
+                            endpointId,
+                            operation: "rssi",
+                        }),
+                    );
             }
         }
 
+        if (failures.length)
+            throw new HaritoraXError("READ_FAILED", `Failed to refresh ${failures.length} tracker field(s) on ${endpointId}`, {
+                cause: new AggregateError(failures),
+                connection: "ble",
+                endpointId,
+                operation: "refresh",
+            });
         if (completed === 0) throw new HaritoraXError("NOT_SUPPORTED", `No readable tracker information on ${endpointId}`);
         if (!this.#ensureDevice(state)) throw new HaritoraXError("DEVICE_NOT_FOUND", `Unknown BLE tracker on "${endpointId}"`);
     }
@@ -514,7 +539,13 @@ export class BleController implements ProtocolHandler {
             this.#latencies.set(endpointId, performance.now() - startedAt);
         } catch (error) {
             if (this.#latencyGenerations.get(endpointId) !== generation) return;
-            this.#log.debug(`BLE latency read failed for ${endpointId}`, { error: String(error) });
+            this.#emitter.emit("error", {
+                error: error instanceof Error ? error : new Error(String(error)),
+                connection: "ble",
+                endpointId,
+                operation: "latency-ping",
+                characteristic: "battery-level",
+            });
             this.#stopLatencyPings(endpointId);
         } finally {
             this.#latencyReads.delete(endpointId);
@@ -559,7 +590,7 @@ export class BleController implements ProtocolHandler {
     // IMU data, mag status, taps, ToF range
     #onSensor2(state: BleState, data: Uint8Array): void {
         const slices = splitBleSensor2Frames(data);
-        if (slices.length === 0) return;
+        if (slices.length === 0) throw new HaritoraXError("DECODE_FAILED", `Invalid BLE sensor frame on ${state.endpointId}`);
         const now = Date.now();
         const previousAt = state.sensor2LastSeen;
         state.sensor2LastSeen = now;
@@ -590,7 +621,7 @@ export class BleController implements ProtocolHandler {
     // only IMU data and ToF range
     #onSensor(state: BleState, data: Uint8Array): void {
         const slices = splitBleImu(data);
-        if (slices.length === 0) return;
+        if (slices.length === 0) throw new HaritoraXError("DECODE_FAILED", `Invalid BLE sensor frame on ${state.endpointId}`);
 
         const device = this.#ensureDevice(state, true);
         if (!device) return;
@@ -624,7 +655,7 @@ export class BleController implements ProtocolHandler {
 
     #onWiredSensor(state: BleState, data: Uint8Array): void {
         const slices = splitWiredImuBytes(data, this.#parts(state).length, state.settings.ankle === true);
-        if (slices.length === 0) return;
+        if (slices.length === 0) throw new HaritoraXError("DECODE_FAILED", `Invalid BLE sensor frame on ${state.endpointId}`);
 
         const device = this.#ensureDevice(state, true);
         if (!device) return;
@@ -805,11 +836,7 @@ export class BleController implements ProtocolHandler {
     }
 
     #modelFromFirmware(firmware: string): TrackerModel | undefined {
-        try {
-            return modelFromFirmware(firmware);
-        } catch {
-            return undefined;
-        }
+        return modelFromFirmware(firmware);
     }
 
     #state(endpointId: string): BleState {

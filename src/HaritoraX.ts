@@ -24,6 +24,7 @@ import type {
     TrackerSettings,
     SettingsApplyResult,
     Unsubscribe,
+    HaritoraXErrorEvent,
 } from "./types.js";
 
 export class HaritoraX {
@@ -57,8 +58,12 @@ export class HaritoraX {
             this.#log.onEntry((entry) => {
                 let sinkError: Error | undefined;
                 try {
-                    if (options.onLog) options.onLog(entry);
-                    else if (!options.logger) console.log(`[${entry.level}] ${entry.message}`);
+                    if (options.onLog) {
+                        const result: unknown = options.onLog(entry);
+                        void Promise.resolve(result).catch((error: unknown) => {
+                            if (!this.#disposed) this.#emitter.emit("error", { error: toError(error), operation: "log" });
+                        });
+                    } else if (!options.logger) console.log(`[${entry.level}] ${entry.message}`);
                 } catch (error) {
                     sinkError = toError(error);
                 }
@@ -68,8 +73,8 @@ export class HaritoraX {
             }),
         );
         this.#emitter.setErrorHandler((event, error) => {
-            if (event === "log") return;
-            this.#log.error(`Listener for "${event}" threw`, { error: String(error) });
+            if (event === "error" || this.#disposed) return;
+            this.#emitter.emit("error", { error: toError(error), operation: `listener:${event}` });
         });
 
         const connectionKind = (endpointId: string): ConnectionKind => this.#endpointOwners.get(endpointId)?.kind ?? "serial";
@@ -83,7 +88,7 @@ export class HaritoraX {
             emitter: this.#emitter,
             log: this.#log,
             registry: this.#registry,
-            isOpen: (endpointId) => this.#open.has(endpointId),
+            isOpen: (endpointId) => !this.#disposed && this.#open.has(endpointId),
             connectionKind,
             hasBlePeer: (deviceId) =>
                 this.#endpoints.some(
@@ -116,6 +121,13 @@ export class HaritoraX {
 
         for (const connection of this.#connections) {
             this.#subscriptions.push(connection.onData((frame) => this.#onFrame(frame)));
+            if (connection.onError) {
+                this.#subscriptions.push(
+                    connection.onError((event) => {
+                        if (!this.#disposed) this.#emitter.emit("error", { ...event, connection: connection.kind });
+                    }),
+                );
+            }
             this.#subscriptions.push(connection.onLost((endpointId, reason) => this.#onLost(endpointId, reason)));
             if (connection.kind === "ble" && connection.onRssi) {
                 this.#subscriptions.push(
@@ -163,7 +175,12 @@ export class HaritoraX {
                     const failure = toError(error);
                     failures.push(failure);
                     this.#log.error(`Discovery failed for "${connection.kind}"`, { error: String(error) });
-                    this.#emitter.emit("error", { error: failure });
+                    this.#emitter.emit("error", {
+                        ...(failure instanceof HaritoraXError ? failure.context : {}),
+                        error: failure,
+                        connection: connection.kind,
+                        operation: "discover",
+                    });
                     return { connection, found: [] as EndpointDescriptor[] };
                 }
             }),
@@ -446,9 +463,7 @@ export class HaritoraX {
                 await connection.open(endpointId);
             } catch (error) {
                 await connection.close(endpointId).catch((closeError: unknown) => {
-                    this.#log.warn(`Could not close ${endpointId} after connection startup failed`, {
-                        error: String(closeError),
-                    });
+                    this.#reportEndpointError(endpointId, "close", closeError);
                 });
                 this.#forgetEndpointState(endpointId, "error");
                 this.#lostWhileOpening.delete(endpointId);
@@ -459,7 +474,7 @@ export class HaritoraX {
 
             if (this.#lostWhileOpening.delete(endpointId)) {
                 await connection.close(endpointId).catch((error: unknown) => {
-                    this.#log.warn(`Could not close ${endpointId} after losing it during startup`, { error: String(error) });
+                    this.#reportEndpointError(endpointId, "close", error);
                 });
                 this.#forgetEndpointState(endpointId, "remote");
                 throw new HaritoraXError("CONNECTION_FAILED", `Lost ${endpointId} while the connection was starting`);
@@ -476,7 +491,7 @@ export class HaritoraX {
                     await this.#ble.start(endpointId);
                 } catch (error) {
                     await connection.close(endpointId).catch((closeError: unknown) => {
-                        this.#log.warn(`Could not close ${endpointId} after BLE startup failed`, { error: String(closeError) });
+                        this.#reportEndpointError(endpointId, "close", closeError);
                     });
                     if (this.#open.delete(endpointId)) this.#dropEndpoint(endpointId, "error");
                     throw error;
@@ -533,13 +548,7 @@ export class HaritoraX {
         for (const unsubscribe of this.#subscriptions) unsubscribe();
         this.#subscriptions.length = 0;
 
-        await Promise.all(
-            this.#connections.map((connection) =>
-                connection.dispose().catch((error: unknown) => {
-                    this.#log.error(`Connection "${connection.kind}" failed to dispose`, { error: String(error) });
-                }),
-            ),
-        );
+        const results = await Promise.allSettled(this.#connections.map((connection) => connection.dispose()));
 
         this.#emitter.removeAllListeners();
         this.#open.clear();
@@ -550,6 +559,8 @@ export class HaritoraX {
         this.#handlers.clear();
         this.#registry.dispose();
         this.#log.info("Disposed");
+        const failures = results.flatMap((result) => (result.status === "rejected" ? [result.reason as unknown] : []));
+        if (failures.length) throw new AggregateError(failures, "Failed to dispose connections");
     }
 
     on<E extends keyof Events>(event: E, handler: EventHandler<E>): Unsubscribe {
@@ -561,6 +572,7 @@ export class HaritoraX {
      */
 
     #onFrame(frame: Frame): void {
+        if (this.#disposed) return;
         let identifier = "";
 
         try {
@@ -593,10 +605,32 @@ export class HaritoraX {
             const handler = this.#handlers.get(frame.endpointId) ?? this.#dongle;
             handler.handleFrame(frame.endpointId, parsed.name, parsed.slot, payload, rawIdentifier.replace(/\d+$/, ""));
         } catch (error) {
-            this.#log.warn(`Failed to handle "${identifier || "(unknown)"}" from ${frame.endpointId}`, {
-                error: String(error),
-            });
+            this.#reportEndpointError(
+                frame.endpointId,
+                "decode",
+                new HaritoraXError("DECODE_FAILED", `Failed to decode frame from ${frame.endpointId}`, { cause: error }),
+                {
+                    ...(identifier ? { identifier } : {}),
+                    ...(frame.characteristic ? { characteristic: frame.characteristic } : {}),
+                },
+            );
         }
+    }
+
+    #reportEndpointError(
+        endpointId: string,
+        operation: string,
+        error: unknown,
+        context: Partial<HaritoraXErrorEvent> = {},
+    ): void {
+        if (this.#disposed) return;
+        this.#emitter.emit("error", {
+            ...context,
+            error: toError(error),
+            endpointId,
+            operation,
+            connection: this.#endpointOwners.get(endpointId)?.kind,
+        });
     }
 
     #applyChannel(endpointId: string, channel: number): void {
