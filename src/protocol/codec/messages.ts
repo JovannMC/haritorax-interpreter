@@ -7,6 +7,7 @@ import type {
     TrackerModel,
     TrackerSettings,
     WiredComm,
+    WiredTrackerModel,
 } from "../../types.js";
 
 export interface ParsedInfo {
@@ -87,4 +88,17 @@ export function modelFromFirmware(model: string): TrackerModel {
     else if (firmware === "mc3s" || firmware === "mc3") return "wireless";
     else if (firmware === "mc4b") return "x2";
     else throw new HaritoraXError("DECODE_FAILED", `Unknown firmware model "${model}"`);
+}
+
+export function wiredModelFromFirmware(model: string): WiredTrackerModel | undefined {
+    switch (model.toLowerCase()) {
+        case "mc1":
+            return "1.0";
+        case "mc2":
+            return "1.1";
+        case "mc2b":
+            return "1.1b";
+        default:
+            return undefined;
+    }
 }

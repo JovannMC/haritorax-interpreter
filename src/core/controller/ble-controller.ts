@@ -6,7 +6,7 @@ import type { ProtocolHandler } from "../protocol-handler.js";
 import { bodyPartsFor, isButtonDebounced, trackerIdOfBodyPart } from "../../protocol/endpoint/dongle.js";
 import { decodeImuBytes, decodeImuBytesAt, decodeRange } from "../../protocol/codec/imu.js";
 import { bodyPartNotifies, hasSensor2 } from "../../protocol/firmware.js";
-import { modelFromFirmware } from "../../protocol/codec/messages.js";
+import { modelFromFirmware, wiredModelFromFirmware } from "../../protocol/codec/messages.js";
 import {
     bleAccelAccuracy,
     bleAutoCorrection,
@@ -768,6 +768,7 @@ export class BleController implements ProtocolHandler {
                 existing.trackers.some((tracker, index) => tracker.bodyPart !== parts[index]);
             const metadataChanged =
                 existing.model !== state.model ||
+                (state.model === "wired" && existing.wiredModel !== wiredModelFromFirmware(state.firmwareModel ?? "")) ||
                 (state.version !== undefined && state.version !== "" && existing.version !== state.version);
             if (!metadataChanged) {
                 if (partsChanged) this.#registry.setTrackers(state.serial, parts);

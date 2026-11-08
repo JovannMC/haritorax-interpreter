@@ -1,4 +1,5 @@
 export type TrackerModel = "wireless" | "x2" | "wired";
+export type WiredTrackerModel = "1.0" | "1.1" | "1.1b";
 
 export type BodyPart =
     | "chest"
@@ -133,7 +134,9 @@ export interface DeviceSnapshot {
     slot: string;
     imuCount: number;
     model: TrackerModel;
-    // firmware version reported by the device e.g. "1.0.5"
+    // for wired trackers, the specific model of it (e.g. "1.1b")
+    wiredModel?: WiredTrackerModel;
+    // firmware version reported by the device (e.g. "1.0.5")
     version?: string;
     connection: ConnectionKind;
     trackers: TrackerSnapshot[];
@@ -195,6 +198,7 @@ export interface Events {
         slot: string;
         connection: ConnectionKind;
         model: TrackerModel;
+        wiredModel?: WiredTrackerModel;
         imuCount: number;
     };
     "device:disconnected": { deviceId: string; endpointId: string; reason: DisconnectReason };

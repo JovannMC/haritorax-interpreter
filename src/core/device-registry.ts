@@ -1,5 +1,6 @@
 import type { Emitter } from "../lib/emitter.js";
 import type { Logger } from "../lib/logging.js";
+import { wiredModelFromFirmware } from "../protocol/codec/messages.js";
 import type {
     AccelAccuracy,
     BatteryInfo,
@@ -150,6 +151,9 @@ export class DeviceRegistry {
             }
 
             existing.model = input.model;
+            const wiredModel = input.model === "wired" ? wiredModelFromFirmware(input.firmwareModel) : undefined;
+            if (wiredModel === undefined) delete existing.wiredModel;
+            else existing.wiredModel = wiredModel;
             if (input.version) existing.version = input.version;
             if (input.comm === undefined) delete existing.comm;
             else existing.comm = input.comm;
@@ -166,6 +170,9 @@ export class DeviceRegistry {
             slot,
             imuCount,
             model: input.model,
+            ...(input.model === "wired" && wiredModelFromFirmware(input.firmwareModel)
+                ? { wiredModel: wiredModelFromFirmware(input.firmwareModel) }
+                : {}),
             ...(input.version ? { version: input.version } : {}),
             ...(input.comm === undefined ? {} : { comm: input.comm }),
             ...(input.commNext === undefined ? {} : { commNext: input.commNext }),
@@ -181,6 +188,9 @@ export class DeviceRegistry {
             slot,
             connection: input.connection,
             model: input.model,
+            ...(input.model === "wired" && wiredModelFromFirmware(input.firmwareModel)
+                ? { wiredModel: wiredModelFromFirmware(input.firmwareModel) }
+                : {}),
             imuCount,
         });
         this.#emitInfo(input);
