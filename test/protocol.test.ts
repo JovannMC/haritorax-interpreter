@@ -92,7 +92,7 @@ describe("IMU decoding", () => {
     });
 
     it("leaves no acceleration for a tracker lying still with gravity on one axis", () => {
-        // identity orientation (the decoder flips the sign of w), 1 g on z. HX2 sends 2048 LSB per g, HXW and wired Q8 m/s²
+        // identity orientation (q and -q are equivalent), 1 g on z. HX2 sends 2048 LSB per g, HXW and wired Q8 m/s²
         const frame = (accelZ: number) => {
             const bytes = new Uint8Array(14);
             const view = new DataView(bytes.buffer);

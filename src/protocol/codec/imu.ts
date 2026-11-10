@@ -130,8 +130,8 @@ function decodeImuFrame(
     const rotation: Quaternion = {
         x: readInt16LE(bytes, byteOffset) * ROTATION_SCALAR,
         y: readInt16LE(bytes, byteOffset + 2) * ROTATION_SCALAR,
-        z: readInt16LE(bytes, byteOffset + 4) * -ROTATION_SCALAR,
-        w: readInt16LE(bytes, byteOffset + 6) * -ROTATION_SCALAR,
+        z: readInt16LE(bytes, byteOffset + 4) * ROTATION_SCALAR,
+        w: readInt16LE(bytes, byteOffset + 6) * ROTATION_SCALAR,
     };
 
     const accelScalar = ACCEL_SCALAR[model];
@@ -149,19 +149,27 @@ function decodeImuFrame(
         magStatus = MAG_BY_CHAR[legacyMagCharacter] ?? "veryBad";
     }
 
-    const hrpW = rotation.z * GRAVITY_CONSTANT;
-    const hrpX = -rotation.y * GRAVITY_CONSTANT;
-    const hrpY = rotation.x * GRAVITY_CONSTANT;
-    const hrpZ = rotation.w * GRAVITY_CONSTANT;
-    const gravityX = hrpW * rotation.x + hrpX * rotation.w + hrpY * rotation.z - hrpZ * rotation.y;
-    const gravityY = hrpW * rotation.y - hrpX * rotation.z + hrpY * rotation.w + hrpZ * rotation.x;
-    const gravityZ = hrpW * rotation.z + hrpX * rotation.y - hrpY * rotation.x + hrpZ * rotation.w;
+    const gravityX = 2 * (rotation.x * rotation.z - rotation.w * rotation.y) * GRAVITY_CONSTANT;
+    const gravityY = 2 * (rotation.y * rotation.z + rotation.w * rotation.x) * GRAVITY_CONSTANT;
+    const gravityZ =
+        (rotation.w * rotation.w + rotation.z * rotation.z - rotation.x * rotation.x - rotation.y * rotation.y) *
+        GRAVITY_CONSTANT;
 
     const acceleration: Vector = {
-        x: gravityRawX + gravityX,
-        y: gravityRawY + gravityY,
+        x: gravityRawX - gravityX,
+        y: gravityRawY - gravityY,
         z: gravityRawZ - gravityZ,
     };
+
+    if (model === "x2") {
+        const rotationX = rotation.x;
+        rotation.x = -rotation.y;
+        rotation.y = rotationX;
+
+        const accelerationX = acceleration.x;
+        acceleration.x = -acceleration.y;
+        acceleration.y = accelerationX;
+    }
 
     return { rotation, acceleration, magStatus, tap };
 }
