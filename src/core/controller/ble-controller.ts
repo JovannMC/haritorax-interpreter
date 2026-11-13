@@ -356,6 +356,7 @@ export class BleController implements ProtocolHandler {
             "fps",
             "auto-calibration",
             "wired-auto-calibration",
+            "tof",
             "magnetometer",
             "accel-accuracy",
         ];

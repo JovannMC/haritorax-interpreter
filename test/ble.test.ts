@@ -332,6 +332,17 @@ describe("BLE device", () => {
         assert.equal(found[0]?.displayName, "HaritoraX2-BBBBB0");
     });
 
+    it("returns detached discovery descriptors", async () => {
+        const { app } = await connected();
+        const found = await app.discover();
+        found[0]!.id = "mutated";
+        found.length = 0;
+
+        assert.equal(app.getEndpoints()[0]?.id, "ble-1");
+        assert.equal(app.getEndpoints().length, 1);
+        await app.dispose();
+    });
+
     it("registers a device, trackers, settings and battery from initial reads", async () => {
         const { app, infos } = await connected();
 

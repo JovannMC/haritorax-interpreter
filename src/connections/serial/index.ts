@@ -152,7 +152,7 @@ export class SerialConnection implements Connection {
         }
 
         for (const port of manualCandidates) {
-            if (signal?.aborted || Date.now() >= deadlineAt) return endpoints;
+            if (signal?.aborted || Date.now() >= deadlineAt) break;
             if (this.#ports.has(port.path)) {
                 const wired = this.#wiredEndpoints.has(port.path);
                 if (wired) {
@@ -191,7 +191,7 @@ export class SerialConnection implements Connection {
         }
 
         for (const port of wiredCandidates) {
-            if (signal?.aborted || Date.now() >= deadlineAt) return endpoints;
+            if (signal?.aborted || Date.now() >= deadlineAt) break;
             if (this.#ports.has(port.path)) {
                 if (this.#wiredEndpoints.has(port.path)) {
                     endpoints.push({

@@ -145,7 +145,7 @@ export class HaritoraX {
 
     // check what endpoints every connection can see, serial ports and BLE peripherals
     discover(options?: ListOptions): Promise<EndpointDescriptor[]> {
-        if (this.#disposed || options?.signal?.aborted) return Promise.resolve(this.#endpoints);
+        if (this.#disposed || options?.signal?.aborted) return Promise.resolve(this.getEndpoints());
         if (this.#scanning) return this.#scanning;
 
         const controller = new AbortController();
@@ -186,7 +186,7 @@ export class HaritoraX {
             }),
         );
         const results = await raceWithAbort(scanning, signal);
-        if (!results || signal.aborted || this.#disposed || generation !== this.#scanGeneration) return this.#endpoints;
+        if (!results || signal.aborted || this.#disposed || generation !== this.#scanGeneration) return this.getEndpoints();
         if (this.#connections.length > 0 && failures.length === this.#connections.length) {
             throw new HaritoraXError("CONNECTION_FAILED", "Discovery failed for every configured connection", {
                 cause: new AggregateError(failures),
@@ -250,7 +250,7 @@ export class HaritoraX {
             ids: this.#endpoints.map((descriptor) => descriptor.id).join(","),
         });
 
-        return this.#endpoints;
+        return this.getEndpoints();
     }
 
     stopDiscovery(): Promise<void> {

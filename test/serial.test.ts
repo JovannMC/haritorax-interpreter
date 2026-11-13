@@ -218,6 +218,29 @@ describe("serial connection", () => {
         );
     });
 
+    it("retains a confirmed wired classification when a later probe times out", async () => {
+        const port = new FakePort();
+        const connection = createSerialConnection({
+            backend: backendWith([], port, new Map([["COM14", WIRED_INFO_REPLY]])),
+            serialPorts: ["COM14", "COM15"],
+            includeWired: true,
+        });
+
+        const found = await connection.list({ timeoutMs: 50 });
+        assert.deepEqual(
+            found.map(({ id, model }) => [id, model]),
+            [
+                ["COM14", "wired"],
+                ["COM15", undefined],
+            ],
+        );
+
+        await connection.open("COM14");
+        const rediscovered = await connection.list({ timeoutMs: 50 });
+        assert.equal(rediscovered.find(({ id }) => id === "COM14")?.model, "wired");
+        await connection.dispose();
+    });
+
     it("keeps manually configured non-wired serial ports as generic endpoints", async () => {
         const port = new FakePort();
         const connection = createSerialConnection({
