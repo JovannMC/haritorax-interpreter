@@ -71,6 +71,7 @@ export class DongleController {
     readonly #onChannel: (endpointId: string, channel: number) => void;
 
     readonly #channels = new Map<string, number>();
+    readonly #channelReservations = new Map<number, string>();
     // pending/current dongle identity, keyed by endpointId:slot
     readonly #identities = new Map<string, TrackerIdentity>();
     readonly #buttons = new Map<string, DongleButtonState>();
@@ -303,8 +304,18 @@ export class DongleController {
             }
         }
 
-        await this.#write(endpointId, setChannelCommand(channel));
-        this.#updateChannel(endpointId, channel);
+        const reservedBy = this.#channelReservations.get(channel);
+        if (reservedBy !== undefined && reservedBy !== endpointId) {
+            throw new HaritoraXError("NOT_SUPPORTED", `Channel ${channel} is already being assigned to ${reservedBy}`);
+        }
+
+        this.#channelReservations.set(channel, endpointId);
+        try {
+            await this.#write(endpointId, setChannelCommand(channel));
+            this.#updateChannel(endpointId, channel);
+        } finally {
+            if (this.#channelReservations.get(channel) === endpointId) this.#channelReservations.delete(channel);
+        }
     }
 
     async setSettings(endpointId: string, slot: string, settings: TrackerSettings): Promise<void> {
@@ -313,7 +324,9 @@ export class DongleController {
         }
 
         const echo = await this.#requireEcho(endpointId, slot);
-        await this.#write(endpointId, dongleSettingsCommand(slot, settings, undefined, undefined, echo));
+        const command = dongleSettingsCommand(slot, settings, undefined, undefined, echo);
+        await this.#write(endpointId, command);
+        this.#settingsEchoes.set(endpointSlotKey(endpointId, slot), command.slice(command.indexOf(":") + 1));
 
         const device = this.#registry.deviceAt(endpointId, slot);
         if (device) this.#registry.setSettings(device.deviceId, settings);
@@ -457,6 +470,9 @@ export class DongleController {
 
     forgetEndpoint(endpointId: string): void {
         this.#channels.delete(endpointId);
+        for (const [channel, reservedBy] of this.#channelReservations) {
+            if (reservedBy === endpointId) this.#channelReservations.delete(channel);
+        }
         this.#dongleVersions.delete(endpointId);
         this.#pairings.cancel(endpointId);
         this.#pairingSlots.delete(endpointId);
@@ -503,6 +519,7 @@ export class DongleController {
         this.#pairingSlots.clear();
         this.#dongleVersions.clear();
         this.#channels.clear();
+        this.#channelReservations.clear();
         this.#identities.clear();
         this.#buttons.clear();
         this.#lastButtonPress.clear();

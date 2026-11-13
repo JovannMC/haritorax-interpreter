@@ -368,6 +368,21 @@ describe("dongle channel", () => {
         assert.equal(app.getChannel("COM4"), 10);
     });
 
+    it("reserves a channel before concurrent endpoint writes complete", async () => {
+        const first = memoryConnection("COM4");
+        const second = memoryConnection("COM5");
+        const app = createHaritoraX({ connections: [first, second], logLevel: "silent" });
+        await app.discover();
+        await app.connect("COM4");
+        await app.connect("COM5");
+
+        const assignments = await Promise.allSettled([app.setChannel("COM4", 6), app.setChannel("COM5", 6)]);
+
+        assert.equal(assignments.filter(({ status }) => status === "fulfilled").length, 1);
+        assert.equal(assignments.filter(({ status }) => status === "rejected").length, 1);
+        assert.equal(first.writes.length + second.writes.length, 1);
+    });
+
     it("rejects an invalid channel", async () => {
         const { app } = await connected();
 
@@ -434,6 +449,33 @@ describe("settings writing", () => {
             .catch((err: unknown) => err);
 
         assert.equal((error as { code?: string }).code, "DEVICE_NOT_FOUND");
+    });
+
+    it("uses newly written settings for an immediate power-off command", async () => {
+        const { app, serial } = await connected();
+        serial.emitFrame(INFO_DUAL);
+        serial.emitFrame(SETTINGS);
+
+        const settings: TrackerSettings = {
+            sensorMode: 1,
+            fpsMode: 100,
+            sensorAutoCorrection: ["gyro"],
+            ankleMotionDetection: true,
+        };
+        mock.timers.enable({ apis: ["setTimeout"] });
+        try {
+            const updating = app.setSettings("CCCCC3", settings);
+            const poweringOff = app.powerOff("CCCCC3");
+            await updating;
+            await flush();
+
+            assert.deepEqual(serial.writes, ["COM4:o0:00000110102001", "COM4:o0:00000110102021"]);
+
+            mock.timers.tick(600);
+            await poweringOff;
+        } finally {
+            mock.timers.reset();
+        }
     });
 });
 
