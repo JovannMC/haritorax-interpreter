@@ -614,7 +614,11 @@ describe("BLE device", () => {
         const { app, backend } = await connected();
 
         const ranges: Array<number | undefined> = [];
-        app.on("imu", (sample) => ranges.push(sample.range));
+        const samples: object[] = [];
+        app.on("imu", (sample) => {
+            ranges.push(sample.range);
+            samples.push(sample);
+        });
 
         // 16 bytes is IMU + status, 18 adds the range at byte 16
         const withoutRange = new Uint8Array(16);
@@ -625,9 +629,16 @@ describe("BLE device", () => {
 
         backend.emit("ble-1", "sensor2", withoutRange);
         backend.emit("ble-1", "sensor2", withRange);
+        backend.emit("ble-1", "sensor2", withoutRange);
 
         // a 16-byte frame has no range
-        assert.deepEqual(ranges, [undefined, 700]);
+        assert.deepEqual(ranges, [undefined, 700, undefined]);
+        assert.deepEqual(
+            samples.map((sample) => Object.hasOwn(sample, "range")),
+            [false, true, false],
+        );
+        assert.notEqual(samples[0], samples[1]);
+        assert.notEqual(samples[1], samples[2]);
     });
 
     for (const buttonDebounceMs of [undefined, 500]) {

@@ -30,6 +30,7 @@ import type {
     BodyPart,
     ConnectionKind,
     DeviceSnapshot,
+    Events,
     FpsMode,
     ImuRole,
     SensorAutoCorrection,
@@ -699,16 +700,17 @@ export class BleController implements ProtocolHandler {
 
         const distance = decodeRange(device.model, range);
 
-        this.#emitter.emit("imu", {
+        const sample: Events["imu"] = {
             trackerId: tracker.trackerId,
             deviceId: device.deviceId,
             bodyPart: tracker.bodyPart,
             role,
             rotation: decoded.rotation,
             acceleration: decoded.acceleration,
-            ...(distance === undefined ? {} : { range: distance }),
             timestamp: Date.now(),
-        });
+        };
+        if (distance !== undefined) sample.range = distance;
+        this.#emitter.emit("imu", sample);
     }
 
     #onButton(state: BleState, button: "main" | "sub" | "sub2"): void {

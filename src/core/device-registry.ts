@@ -270,18 +270,18 @@ export class DeviceRegistry {
 
         const wasConnected = state.snapshot.connected;
         this.#markTrackerSeen(state);
-        if (this.#trackers.get(trackerId) !== state) return undefined;
         if (!wasConnected) {
+            if (this.#trackers.get(trackerId) !== state) return undefined;
             if (magStatus !== undefined) this.setMag(trackerId, magStatus);
             if (tap !== undefined) this.setTap(trackerId, tap);
             return this.#trackers.get(trackerId) === state ? state.snapshot : undefined;
         }
 
-        if (magStatus !== undefined) this.#setMagState(state, magStatus);
-        if (this.#trackers.get(trackerId) !== state) return undefined;
-        if (tap !== undefined) this.#setTapState(state, tap);
+        if (magStatus !== undefined && this.#setMagState(state, magStatus) && this.#trackers.get(trackerId) !== state)
+            return undefined;
+        if (tap !== undefined && this.#setTapState(state, tap) && this.#trackers.get(trackerId) !== state) return undefined;
 
-        return this.#trackers.get(trackerId) === state ? state.snapshot : undefined;
+        return state.snapshot;
     }
 
     #markTrackerSeen(state: TrackerState): void {
@@ -347,11 +347,12 @@ export class DeviceRegistry {
         this.#setTapState(state, count);
     }
 
-    #setTapState(state: TrackerState, count: number): void {
-        if (state.snapshot.tap === count) return;
+    #setTapState(state: TrackerState, count: number): boolean {
+        if (state.snapshot.tap === count) return false;
 
         state.snapshot.tap = count;
         this.#emitter.emit("tap", { trackerId: state.snapshot.trackerId, deviceId: state.snapshot.deviceId, count });
+        return true;
     }
 
     setAccelAccuracy(trackerId: string, accuracy: AccelAccuracy): void {
