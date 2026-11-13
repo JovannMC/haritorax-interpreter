@@ -17,7 +17,7 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import type { Connection } from "./connections/contract.js";
 import { Logger } from "./lib/logging.js";
-import { TraceOutput } from "./lib/trace-output.js";
+import { formatConnectionError, TraceOutput } from "./lib/trace-output.js";
 
 void (async () => {
     const { values } = parseArgs({
@@ -63,20 +63,29 @@ void (async () => {
     const opened: string[] = [];
     const abort = new AbortController();
     let stopping = false;
+    let shutdownPromise: Promise<void> | undefined;
+    let exitCode = 0;
 
-    async function shutdown(code = 0): Promise<void> {
-        if (stopping) return;
+    function shutdown(code = 0): Promise<void> {
+        if (shutdownPromise) {
+            if (code !== 0) exitCode = code;
+            return shutdownPromise;
+        }
         stopping = true;
+        exitCode = code;
         abort.abort();
 
-        await Promise.all(connections.map((connection) => connection.dispose().catch(() => {})));
-        try {
-            await output.flush();
-        } catch {
-            // output errors are reported through TraceOutput's error handler
-        }
-        if (logStream && !logStream.destroyed) await new Promise<void>((resolve) => logStream.end(resolve));
-        process.exit(code);
+        shutdownPromise = (async () => {
+            await Promise.all(connections.map((connection) => connection.dispose().catch(() => {})));
+            try {
+                await output.flush();
+            } catch {
+                // output errors are reported through TraceOutput's error handler
+            }
+            if (logStream && !logStream.destroyed) await endLogStream(logStream, 5_000);
+            process.exit(exitCode);
+        })();
+        return shutdownPromise;
     }
 
     process.on("SIGINT", () => void shutdown());
@@ -97,6 +106,9 @@ void (async () => {
         });
         connection.onLost((id, reason) => {
             writeLine(`Lost ${id}: ${reason}`, true);
+        });
+        connection.onError?.((event) => {
+            writeLine(formatConnectionError(event), true);
         });
 
         writeLine(`Discovering ${isBle ? "BLE" : "serial"} endpoints...`);
@@ -182,4 +194,23 @@ function hex(bytes: Uint8Array) {
     let text = "";
     for (const byte of bytes) text += byte.toString(16).padStart(2, "0");
     return text;
+}
+
+function endLogStream(stream: ReturnType<typeof createWriteStream>, timeoutMs: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+        let settled = false;
+        function finish(): void {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            stream.removeListener("close", finish);
+            stream.removeListener("error", finish);
+            resolve();
+        }
+
+        const timeout = setTimeout(finish, timeoutMs);
+        stream.end(finish);
+        stream.once("close", finish);
+        stream.once("error", finish);
+    });
 }
