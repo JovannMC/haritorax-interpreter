@@ -915,13 +915,14 @@ export class DongleController {
         if (!input) return; // drop packet if device is unidentified still
         const slices = splitDongleImuBytes(decodeBase64(payload), input.parts.length);
         if (slices.length === 0) throw new HaritoraXError("DECODE_FAILED", "Invalid tracker IMU frame");
-        const identity = this.#identities.get(endpointSlotKey(endpointId, slot));
-        const device =
-            this.#registry.deviceAt(endpointId, slot) ??
-            this.#registry.register({
+        let device = this.#registry.deviceForRegistration(input);
+        if (!device) {
+            const identity = this.#identities.get(endpointSlotKey(endpointId, slot));
+            device = this.#registry.register({
                 ...input,
                 parts: identity ? bodyPartsFor(identity.bodyPart, input.parts.length) : input.parts,
             });
+        }
 
         for (const slice of slices) {
             this.#emitSample(

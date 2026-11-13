@@ -83,8 +83,12 @@ export class DeviceRegistry {
 
     deviceAt(endpointId: string, slot: string): DeviceSnapshot | undefined {
         const registration = this.registrationAt(endpointId, slot);
-        const device = registration && this.#devices.get(registration.deviceId);
-        return device?.endpointId === endpointId && device.slot === slot ? device : undefined;
+        return registration && this.deviceForRegistration(registration);
+    }
+
+    deviceForRegistration(registration: DeviceRegistration): DeviceSnapshot | undefined {
+        const device = this.#devices.get(registration.deviceId);
+        return device?.endpointId === registration.endpointId && device.slot === registration.slot ? device : undefined;
     }
 
     registrationAt(endpointId: string, slot: string): DeviceRegistration | undefined {

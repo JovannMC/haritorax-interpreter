@@ -23,6 +23,7 @@ export class TraceOutput {
     readonly #maxQueuedBytes: number;
     readonly #drainTimeoutMs: number;
     readonly #onError: (error: unknown) => void;
+    readonly #encodedChunk = new Uint8Array(4096);
     readonly #queue: Array<{ chunk: string; error: boolean; size: number } | undefined> = [];
     #queueHead = 0;
     #queuedBytes = 0;
@@ -47,7 +48,7 @@ export class TraceOutput {
     write(line: string, error = false): void {
         if (this.#failed) return;
         const chunk = `${line}\n`;
-        const size = textEncoder.encode(chunk).byteLength;
+        const size = this.#byteLength(chunk);
         if (size > this.#maxQueuedBytes || this.#queuedBytes + size > this.#maxQueuedBytes) {
             this.#droppedLines++;
             return;
@@ -68,7 +69,7 @@ export class TraceOutput {
             const dropped = this.#droppedLines;
             this.#droppedLines = 0;
             const chunk = `[trace] Dropped ${dropped} output line(s) because the output queue was full.\n`;
-            const size = textEncoder.encode(chunk).byteLength;
+            const size = this.#byteLength(chunk);
             this.#queue.push({ chunk, error: false, size });
             this.#queuedBytes = size;
             this.#startDrain();
@@ -77,6 +78,17 @@ export class TraceOutput {
                 await this.#waitForDrain();
             }
         }
+    }
+
+    #byteLength(chunk: string): number {
+        let offset = 0;
+        let size = 0;
+        while (offset < chunk.length) {
+            const { read, written } = textEncoder.encodeInto(chunk.slice(offset), this.#encodedChunk);
+            offset += read;
+            size += written;
+        }
+        return size;
     }
 
     #startDrain(): void {

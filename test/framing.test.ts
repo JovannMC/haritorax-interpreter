@@ -55,6 +55,20 @@ describe("serial framing", () => {
     it("decodes ASCII without TextDecoder", () => {
         assert.equal(asciiDecode(new Uint8Array([0x58, 0x30, 0x3a, 0x41])), "X0:A");
     });
+
+    it("preserves every byte value and respects offset views", () => {
+        const bytes = Uint8Array.from({ length: 258 }, (_, index) => (index - 1) & 0xff);
+        const expected = Array.from({ length: 256 }, (_, index) => String.fromCharCode(index)).join("");
+        assert.equal(asciiDecode(bytes.subarray(1, 257)), expected);
+        assert.equal(asciiDecode(Buffer.from(bytes).subarray(1, 257)), expected);
+        assert.equal(asciiDecode(new Uint8Array()), "");
+    });
+
+    it("decodes long input without exceeding the argument limit", () => {
+        const bytes = Uint8Array.from({ length: 200000 }, (_, index) => index & 0xff);
+        const expected = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
+        assert.equal(asciiDecode(bytes), expected);
+    });
 });
 
 function asciiEncode(text: string): Uint8Array {

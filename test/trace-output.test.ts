@@ -110,6 +110,56 @@ describe("trace output", () => {
         errorSink.end();
     });
 
+    for (const line of [
+        "ascii",
+        "\u00e9",
+        "\u4e2d\u6587",
+        "\ud83d\ude00",
+        "\ud800",
+        "\udc00",
+        "e\u0301",
+        "x".repeat(4095) + "\ud83d\ude00",
+        "\ud800".repeat(5000),
+        "x".repeat(20000),
+    ]) {
+        const label = line.length > 64 ? `${line.length} UTF-16 code units` : JSON.stringify(line);
+        it(`preserves the exact UTF-8 queue limit for ${label}`, async () => {
+            let releaseFirst: (() => void) | undefined;
+            const written: string[] = [];
+            const sink = new Writable({
+                highWaterMark: 1,
+                write(chunk, _encoding, callback) {
+                    written.push(String(chunk));
+                    if (written.length === 1) releaseFirst = callback;
+                    else callback();
+                },
+            });
+            const failures: unknown[] = [];
+            const output = new TraceOutput(
+                [sink],
+                [],
+                (error) => failures.push(error),
+                new TextEncoder().encode(`${line}\n`).byteLength,
+            );
+
+            output.write("");
+            output.write(line);
+            output.write(line);
+            releaseFirst?.();
+            await output.flush();
+            output.write(line);
+            await output.flush();
+
+            const encodedLine = new TextDecoder().decode(new TextEncoder().encode(`${line}\n`));
+            assert.equal(written[1], encodedLine);
+            assert.match(written[2]!, /Dropped 1 output line/);
+            assert.equal(written[3], encodedLine);
+            assert.equal(written.length, 4);
+            assert.deepEqual(failures, []);
+            sink.end();
+        });
+    }
+
     it("settles a blocked drain when the sink closes", async () => {
         const sink = new Writable({
             highWaterMark: 1,

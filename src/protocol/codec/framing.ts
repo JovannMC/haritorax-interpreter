@@ -7,8 +7,12 @@ export interface LineFrame {
 }
 
 export function asciiDecode(bytes: Uint8Array): string {
+    const chunkSize = 8192;
+    if (bytes.length <= chunkSize) return Reflect.apply(String.fromCharCode, undefined, bytes) as string;
+
     let text = "";
-    for (const byte of bytes) text += String.fromCharCode(byte);
+    for (let offset = 0; offset < bytes.length; offset += chunkSize)
+        text += Reflect.apply(String.fromCharCode, undefined, bytes.subarray(offset, offset + chunkSize)) as string;
     return text;
 }
 
