@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { createSerialConnection } from "../dist/connections/serial/serial-node.js";
 import type { PortSummary, SerialBackend, SerialPort } from "../dist/connections/serial/serial-node.js";
 import type { Frame } from "../dist/connections/contract.js";
-import type { DisconnectReason } from "../dist/types.js";
+import type { ConnectionErrorEvent, DisconnectReason } from "../dist/types.js";
 
 /** A fake serialport stream that lets the test push bytes and observe writes. */
 class FakePort implements SerialPort {
@@ -373,6 +373,56 @@ describe("serial connection", () => {
         assert.equal(frames[0]?.endpointId, "COM3");
 
         await connection.close("COM3");
+    });
+
+    it("preserves the pending limit and valid lines while recovering from overflow", async () => {
+        const port = new FakePort();
+        const connection = createSerialConnection({ backend: backendWith([], port), heartbeatIntervalMs: 0 });
+        const frames: Frame[] = [];
+        const errors: ConnectionErrorEvent[] = [];
+        connection.onData((frame) => frames.push(frame));
+        assert.ok(connection.onError);
+        connection.onError((event) => errors.push(event));
+        await connection.open("COM3");
+
+        port.receiveText("x".repeat(65536));
+        assert.equal(errors.length, 0);
+        port.receiveText("\n");
+        assert.equal(frames[0]?.data.length, 65536);
+        port.receiveText(`ok:\n${"y".repeat(65537)}`);
+        assert.equal(errors.length, 1);
+        assert.equal(errors[0]?.operation, "decode");
+        assert.match(errors[0]!.error.message, /65537/);
+        port.receiveText("next:\r\n");
+        assert.deepEqual(
+            frames.slice(1).map((frame) => asciiDecode(frame.data)),
+            ["ok:", "next:"],
+        );
+        await connection.close("COM3");
+    });
+
+    it("recognizes a wired probe reply delivered one byte at a time", async () => {
+        const port = new FakePort();
+        const write = port.write.bind(port);
+        let replied = false;
+        port.write = (data, callback) => {
+            write(data, callback);
+            if (replied) return;
+            replied = true;
+            queueMicrotask(() => {
+                for (const byte of asciiEncode(WIRED_INFO_REPLY)) port.receive(Uint8Array.of(byte));
+            });
+        };
+        const connection = createSerialConnection({
+            backend: backendWith([], port),
+            serialPorts: ["COM3"],
+            includeWired: true,
+            heartbeatIntervalMs: 0,
+        });
+        const endpoints = await connection.list();
+        assert.equal(endpoints[0]?.id, "COM3");
+        assert.equal(endpoints[0]?.model, "wired");
+        await connection.dispose();
     });
 
     it("sends the v3 open commands wrapped in newlines", async () => {

@@ -44,6 +44,72 @@ describe("trace output", () => {
         sink.end();
     });
 
+    it("preserves a large backlog across compaction and subsequent writes", async () => {
+        let releaseFirst: (() => void) | undefined;
+        const written: string[] = [];
+        const sink = new Writable({
+            highWaterMark: 1,
+            write(chunk, _encoding, callback) {
+                written.push(String(chunk));
+                if (written.length === 1) releaseFirst = callback;
+                else callback();
+            },
+        });
+        const failures: unknown[] = [];
+        const output = new TraceOutput([sink], [], (error) => failures.push(error));
+        const lines = Array.from({ length: 5000 }, (_, index) => `line ${index}`);
+
+        output.write("start");
+        for (const line of lines) output.write(line);
+        releaseFirst?.();
+        await output.flush();
+        output.write("after");
+        await output.flush();
+
+        assert.deepEqual(written, ["start\n", ...lines.map((line) => `${line}\n`), "after\n"]);
+        assert.deepEqual(failures, []);
+        sink.end();
+    });
+
+    it("accounts for UTF-8 bytes while routing queued output", async () => {
+        let releaseFirst: (() => void) | undefined;
+        const stdout: string[] = [];
+        const stderr: string[] = [];
+        const sink = new Writable({
+            highWaterMark: 1,
+            write(chunk, _encoding, callback) {
+                stdout.push(String(chunk));
+                if (stdout.length === 1) releaseFirst = callback;
+                else callback();
+            },
+        });
+        const errorSink = new Writable({
+            write(chunk, _encoding, callback) {
+                stderr.push(String(chunk));
+                callback();
+            },
+        });
+        const failures: unknown[] = [];
+        const output = new TraceOutput([sink], [errorSink], (error) => failures.push(error), 6);
+
+        output.write("go");
+        output.write("\u00e9");
+        output.write("ok", true);
+        output.write("no");
+        releaseFirst?.();
+        await output.flush();
+        output.write("\u00e9", true);
+        await output.flush();
+
+        assert.deepEqual(stdout.slice(0, 2), ["go\n", "\u00e9\n"]);
+        assert.match(stdout[2]!, /Dropped 1 output line/);
+        assert.equal(stdout.length, 3);
+        assert.deepEqual(stderr, ["ok\n", "\u00e9\n"]);
+        assert.deepEqual(failures, []);
+        sink.end();
+        errorSink.end();
+    });
+
     it("settles a blocked drain when the sink closes", async () => {
         const sink = new Writable({
             highWaterMark: 1,

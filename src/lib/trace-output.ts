@@ -23,7 +23,8 @@ export class TraceOutput {
     readonly #maxQueuedBytes: number;
     readonly #drainTimeoutMs: number;
     readonly #onError: (error: unknown) => void;
-    readonly #queue: Array<{ chunk: string; error: boolean }> = [];
+    readonly #queue: Array<{ chunk: string; error: boolean; size: number } | undefined> = [];
+    #queueHead = 0;
     #queuedBytes = 0;
     #droppedLines = 0;
     #draining: Promise<void> | undefined;
@@ -52,7 +53,7 @@ export class TraceOutput {
             return;
         }
 
-        this.#queue.push({ chunk, error });
+        this.#queue.push({ chunk, error, size });
         this.#queuedBytes += size;
         this.#startDrain();
     }
@@ -67,8 +68,9 @@ export class TraceOutput {
             const dropped = this.#droppedLines;
             this.#droppedLines = 0;
             const chunk = `[trace] Dropped ${dropped} output line(s) because the output queue was full.\n`;
-            this.#queue.push({ chunk, error: false });
-            this.#queuedBytes = textEncoder.encode(chunk).byteLength;
+            const size = textEncoder.encode(chunk).byteLength;
+            this.#queue.push({ chunk, error: false, size });
+            this.#queuedBytes = size;
             this.#startDrain();
             while (this.#draining || this.#queue.length > 0) {
                 if (!this.#draining) this.#startDrain();
@@ -83,6 +85,7 @@ export class TraceOutput {
             .catch((error: unknown) => {
                 this.#failed = true;
                 this.#queue.length = 0;
+                this.#queueHead = 0;
                 this.#queuedBytes = 0;
                 this.#onError(error);
             })
@@ -97,16 +100,23 @@ export class TraceOutput {
     }
 
     async #drain(): Promise<void> {
-        while (this.#queue.length > 0) {
-            const item = this.#queue.shift();
+        while (this.#queueHead < this.#queue.length) {
+            const item = this.#queue[this.#queueHead];
+            this.#queue[this.#queueHead++] = undefined;
             if (item === undefined) continue;
-            this.#queuedBytes -= textEncoder.encode(item.chunk).byteLength;
+            this.#queuedBytes -= item.size;
+            if (this.#queueHead >= 1024 && this.#queueHead * 2 >= this.#queue.length) {
+                this.#queue.splice(0, this.#queueHead);
+                this.#queueHead = 0;
+            }
 
             const sinks = item.error ? this.#stderrSinks : this.#stdoutSinks;
             for (const sink of sinks) {
                 if (!sink.write(item.chunk)) await waitForDrain(sink, this.#drainTimeoutMs);
             }
         }
+        this.#queue.length = 0;
+        this.#queueHead = 0;
     }
 }
 
