@@ -93,10 +93,16 @@ export class DongleController {
     readonly #pingWaiters = new Map<string, { resolve: (latency: number) => void }>();
     readonly #batteryWaiters = new Map<
         string,
-        { resolve: (battery: BatteryInfo) => void; timer: ReturnType<typeof setTimeout> }
+        { resolve: (battery: BatteryInfo) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
     >();
-    readonly #rssiWaiters = new Map<string, { resolve: (rssi: number) => void; timer: ReturnType<typeof setTimeout> }>();
-    readonly #infoWaiters = new Map<string, { resolve: () => void; timer: ReturnType<typeof setTimeout> }>();
+    readonly #rssiWaiters = new Map<
+        string,
+        { resolve: (rssi: number) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
+    >();
+    readonly #infoWaiters = new Map<
+        string,
+        { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
+    >();
     readonly #pingTimers = new Map<string, ReturnType<typeof setInterval>>();
 
     constructor(options: DongleControllerOptions) {
@@ -137,7 +143,13 @@ export class DongleController {
             if (reset === undefined || hold === undefined) throw new HaritoraXError("NOT_SUPPORTED", "No pairing commands");
 
             await this.#write(endpointId, reset);
-            await delay(PAIRING_COMMAND_DELAY_MS);
+            const delayResult = await Promise.race([delay(PAIRING_COMMAND_DELAY_MS).then(() => undefined), completion]);
+            if (delayResult === "cancelled") {
+                throw new HaritoraXError("CONNECTION_FAILED", `Pairing on ${endpointId} was cancelled`);
+            }
+            if (delayResult === "timeout") {
+                throw new HaritoraXError("TIMEOUT", `Pairing on ${endpointId} timed out`);
+            }
 
             session.wasUnpaired = this.#isUnpaired(endpointId, portId);
             session.armed = true;
@@ -236,7 +248,7 @@ export class DongleController {
                 reject(new HaritoraXError("TIMEOUT", `Battery refresh timed out for ${endpointId}:${slot}`));
             }, 3_000);
 
-            this.#batteryWaiters.set(key, { resolve, timer });
+            this.#batteryWaiters.set(key, { resolve, reject, timer });
 
             this.#write(endpointId, `v${slot}:`).catch((error: unknown) => {
                 clearTimeout(timer);
@@ -257,7 +269,7 @@ export class DongleController {
                 reject(new HaritoraXError("TIMEOUT", `RSSI refresh timed out for ${endpointId}:${slot}`));
             }, 3_000);
 
-            this.#rssiWaiters.set(key, { resolve, timer });
+            this.#rssiWaiters.set(key, { resolve, reject, timer });
 
             this.#write(endpointId, `a${slot}:`).catch((error: unknown) => {
                 clearTimeout(timer);
@@ -278,7 +290,7 @@ export class DongleController {
                 reject(new HaritoraXError("TIMEOUT", `Info refresh timed out for ${endpointId}:${slot}`));
             }, 3_000);
 
-            this.#infoWaiters.set(key, { resolve, timer });
+            this.#infoWaiters.set(key, { resolve, reject, timer });
 
             this.#write(endpointId, `i${slot}:`).catch((error: unknown) => {
                 clearTimeout(timer);
@@ -484,6 +496,7 @@ export class DongleController {
                 this.#settleSettingsRead(key, undefined, new HaritoraXError("NOT_CONNECTED", `${endpointId} disconnected`));
             }
         }
+        this.#rejectRefreshWaiters(endpointId, new HaritoraXError("NOT_CONNECTED", `${endpointId} disconnected`));
 
         this.#stopPings(endpointId);
         this.#registers.delete(endpointId);
@@ -507,6 +520,7 @@ export class DongleController {
     }
 
     dispose(): void {
+        this.#rejectRefreshWaiters(undefined, new HaritoraXError("NOT_CONNECTED", "Dongle controller disposed"));
         for (const key of this.#bodyPartWaits.keys()) this.#cancelBodyPartWait(key);
         for (const key of this.#settingsReads.keys()) {
             this.#settleSettingsRead(key, undefined, new HaritoraXError("NOT_CONNECTED", "Dongle controller disposed"));
@@ -523,6 +537,17 @@ export class DongleController {
         this.#identities.clear();
         this.#buttons.clear();
         this.#lastButtonPress.clear();
+    }
+
+    #rejectRefreshWaiters(endpointId: string | undefined, error: Error): void {
+        for (const waiters of [this.#batteryWaiters, this.#rssiWaiters, this.#infoWaiters]) {
+            for (const [key, waiter] of waiters) {
+                if (endpointId !== undefined && !key.startsWith(`${endpointId}:`)) continue;
+                clearTimeout(waiter.timer);
+                waiters.delete(key);
+                waiter.reject(error);
+            }
+        }
     }
 
     #createBodyPartWait(key: string, bodyPart: BodyPart): BodyPartWait {

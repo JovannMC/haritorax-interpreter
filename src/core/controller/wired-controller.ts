@@ -35,8 +35,14 @@ export class WiredController implements ProtocolHandler {
     readonly #write: (endpointId: string, command: string) => Promise<void>;
     readonly #states = new Map<string, WiredState>();
     readonly #infos = new Map<string, ParsedInfo>();
-    readonly #batteryWaiters = new Map<string, { resolve: () => void; timer: ReturnType<typeof setTimeout> }>();
-    readonly #infoWaiters = new Map<string, { resolve: () => void; timer: ReturnType<typeof setTimeout> }>();
+    readonly #batteryWaiters = new Map<
+        string,
+        { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
+    >();
+    readonly #infoWaiters = new Map<
+        string,
+        { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
+    >();
 
     constructor(options: WiredControllerOptions) {
         this.#emitter = options.emitter;
@@ -83,9 +89,13 @@ export class WiredController implements ProtocolHandler {
     forgetEndpoint(endpointId: string): void {
         this.#states.delete(endpointId);
         this.#infos.delete(endpointId);
+        this.#rejectRefresh(this.#batteryWaiters, endpointId);
+        this.#rejectRefresh(this.#infoWaiters, endpointId);
     }
 
     dispose(): void {
+        for (const endpointId of this.#batteryWaiters.keys()) this.#rejectRefresh(this.#batteryWaiters, endpointId);
+        for (const endpointId of this.#infoWaiters.keys()) this.#rejectRefresh(this.#infoWaiters, endpointId);
         this.#states.clear();
         this.#infos.clear();
     }
@@ -183,7 +193,7 @@ export class WiredController implements ProtocolHandler {
     #requestRefresh(
         endpointId: string,
         identifier: "v" | "a" | "i",
-        waiters: Map<string, { resolve: () => void; timer: ReturnType<typeof setTimeout> }>,
+        waiters: Map<string, { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>,
     ): Promise<void> {
         return new Promise<void>((resolve, reject) => {
             const timer = setTimeout(() => {
@@ -191,7 +201,7 @@ export class WiredController implements ProtocolHandler {
                 reject(new HaritoraXError("TIMEOUT", `Timed out refreshing wired ${identifier} data from ${endpointId}`));
             }, 3_000);
 
-            waiters.set(endpointId, { resolve, timer });
+            waiters.set(endpointId, { resolve, reject, timer });
             this.#write(endpointId, `${identifier}:`).catch((error: unknown) => {
                 clearTimeout(timer);
                 waiters.delete(endpointId);
@@ -201,7 +211,7 @@ export class WiredController implements ProtocolHandler {
     }
 
     #resolveRefresh(
-        waiters: Map<string, { resolve: () => void; timer: ReturnType<typeof setTimeout> }>,
+        waiters: Map<string, { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>,
         endpointId: string,
     ): void {
         const waiter = waiters.get(endpointId);
@@ -210,6 +220,18 @@ export class WiredController implements ProtocolHandler {
         clearTimeout(waiter.timer);
         waiters.delete(endpointId);
         waiter.resolve();
+    }
+
+    #rejectRefresh(
+        waiters: Map<string, { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>,
+        endpointId: string,
+    ): void {
+        const waiter = waiters.get(endpointId);
+        if (!waiter) return;
+
+        clearTimeout(waiter.timer);
+        waiters.delete(endpointId);
+        waiter.reject(new HaritoraXError("NOT_CONNECTED", `${endpointId} disconnected`));
     }
 
     #onButton(endpointId: string, payload: string): void {

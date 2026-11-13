@@ -443,6 +443,41 @@ describe("BLE native error propagation", () => {
         await connection.dispose();
     });
 
+    it("stops a native scan that starts after cancellation before starting another scan", async () => {
+        const native = new Noble();
+        let finishFirstStart!: () => void;
+        let starts = 0;
+        let stops = 0;
+        native.startScanningAsync = () => {
+            starts++;
+            if (starts === 1) return new Promise<void>((resolve) => (finishFirstStart = resolve));
+            native.emit("discover", native.peripheral);
+            return Promise.resolve();
+        };
+        native.stopScanningAsync = () => {
+            stops++;
+            return Promise.resolve();
+        };
+        const connection = ble(native);
+        const controller = new AbortController();
+        const firstListing = connection.list({ signal: controller.signal, timeoutMs: 100 });
+        await setImmediate();
+        controller.abort();
+        assert.deepEqual(await firstListing, []);
+
+        const secondListing = connection.list({ timeoutMs: 10 });
+        await setImmediate();
+        assert.equal(starts, 1);
+        finishFirstStart();
+        assert.deepEqual(
+            (await secondListing).map(({ id }) => id),
+            ["ble-1"],
+        );
+        assert.equal(starts, 2);
+        assert.equal(stops, 3);
+        await connection.dispose();
+    });
+
     it("preserves required identity read errors and characteristic context", async () => {
         const native = new Noble();
         const failure = new Error("GATT denied");

@@ -67,6 +67,7 @@ class NobleBleBackend implements BleBackend {
     readonly #errors = new ErrorChannel();
     readonly #adapterWaiters = new Set<(error: HaritoraXError) => void>();
     #disposed = false;
+    #scanStartPending: Promise<void> | undefined;
     readonly #onNativeError = (cause: unknown): void => this.#adapterFailure(cause);
     readonly #onStateChange = (state: string): void => {
         if (state !== "poweredOn" && (this.#adapterWaiters.size || this.#open.size)) this.#adapterFailure(undefined, state);
@@ -143,6 +144,8 @@ class NobleBleBackend implements BleBackend {
     async scan(options?: ListOptions): Promise<BlePeripheralSummary[]> {
         if (this.#disposed) throw new HaritoraXError("NOT_CONNECTED", "BLE backend has been disposed");
         if (options?.signal?.aborted) return [];
+        if (this.#scanStartPending) await this.#scanStartPending;
+        if (this.#disposed || options?.signal?.aborted) return [];
         const scanController = new AbortController();
         const signal = options?.signal ? AbortSignal.any([options.signal, scanController.signal]) : scanController.signal;
         const scanStartedAt = Date.now();
@@ -184,7 +187,17 @@ class NobleBleBackend implements BleBackend {
             if (options?.signal?.aborted) return [];
 
             const scanStartStartedAt = Date.now();
-            await this.#raceAdapter(this.#noble.startScanningAsync([], false), timeoutMs, "Timed out starting BLE scan", signal);
+            const startOperation = this.#noble.startScanningAsync([], false);
+            const pendingStart = startOperation
+                .then(async () => {
+                    if (signal.aborted || this.#disposed) await this.#noble.stopScanningAsync();
+                })
+                .catch(() => {})
+                .finally(() => {
+                    if (this.#scanStartPending === pendingStart) this.#scanStartPending = undefined;
+                });
+            this.#scanStartPending = pendingStart;
+            await this.#raceAdapter(startOperation, timeoutMs, "Timed out starting BLE scan", signal);
             this.#log?.debug("BLE scan started", { elapsedMs: Date.now() - scanStartStartedAt });
             await this.#raceAdapter(waitForScanEnd(signal, timeoutMs, options?.targetEndpointId ? targetFound : undefined));
         } catch (error) {

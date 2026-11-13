@@ -537,12 +537,12 @@ export class HaritoraX {
         this.#scanController = undefined;
         const scanning = this.#scanning;
         this.#scanning = undefined;
+        this.#dongle.dispose();
+        this.#wired.dispose();
         await Promise.all([
             ...(scanning ? [scanning.catch(() => this.#endpoints)] : []),
             ...[...this.#endpointOperations.values()].map((operation) => operation.catch(() => undefined)),
         ]);
-        this.#dongle.dispose();
-        this.#wired.dispose();
         this.#ble.dispose();
 
         for (const unsubscribe of this.#subscriptions) unsubscribe();

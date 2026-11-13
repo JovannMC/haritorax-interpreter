@@ -756,6 +756,28 @@ async function flush(): Promise<void> {
 }
 
 describe("pairing", () => {
+    it("cancels pairing during its initial delay when disposed", async () => {
+        const { app, serial } = await connected();
+        serial.emitFrame("o:3040");
+        serial.emitFrame("r:301");
+
+        mock.timers.enable({ apis: ["setTimeout"] });
+        try {
+            const pending = app.pair("COM4", 0).catch((error: unknown) => error);
+            await flush();
+            assert.deepEqual(serial.writes, ["COM4:o:1140"]);
+
+            const disposing = app.dispose();
+            const error = await pending;
+            await disposing;
+
+            assert.equal((error as { code?: string }).code, "CONNECTION_FAILED");
+            assert.deepEqual(serial.writes, ["COM4:o:1140", "COM4:o:3040"]);
+        } finally {
+            mock.timers.reset();
+        }
+    });
+
     it("pairs a slot once its unpaired mark clears during the attempt, then goes back to sensing", async () => {
         const { app, serial } = await connected();
         serial.emitFrame("o:3040");
