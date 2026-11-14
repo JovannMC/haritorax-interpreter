@@ -603,7 +603,7 @@ export class HaritoraX {
             if (!parsed) return;
 
             const handler = this.#handlers.get(frame.endpointId) ?? this.#dongle;
-            handler.handleFrame(frame.endpointId, parsed.name, parsed.slot, payload, rawIdentifier.replace(/\d+$/, ""));
+            handler.handleFrame(frame.endpointId, parsed.name, parsed.slot, payload, rawIdentifier.slice(0, parsed.name.length));
         } catch (error) {
             this.#reportEndpointError(
                 frame.endpointId,

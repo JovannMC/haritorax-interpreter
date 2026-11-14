@@ -45,7 +45,7 @@ export class DeviceRegistry {
 
     // deviceId is the device serial number
     readonly #devices = new Map<string, DeviceSnapshot>();
-    readonly #registrations = new Map<string, DeviceRegistration>();
+    readonly #registrations = new Map<string, Map<string, DeviceRegistration>>();
     readonly #trackers = new Map<string, TrackerState>();
 
     constructor(options: DeviceRegistryOptions) {
@@ -92,7 +92,7 @@ export class DeviceRegistry {
     }
 
     registrationAt(endpointId: string, slot: string): DeviceRegistration | undefined {
-        return this.#registrations.get(endpointSlotKey(endpointId, slot));
+        return this.#registrations.get(endpointId)?.get(slot);
     }
 
     /*
@@ -104,8 +104,13 @@ export class DeviceRegistry {
         const { deviceId, endpointId, slot } = input;
         const imuCount = input.parts.length;
         const key = endpointSlotKey(endpointId, slot);
-        const previousSerial = this.#registrations.get(key)?.deviceId;
-        this.#registrations.set(key, input);
+        let registrations = this.#registrations.get(endpointId);
+        if (!registrations) {
+            registrations = new Map();
+            this.#registrations.set(endpointId, registrations);
+        }
+        const previousSerial = registrations.get(slot)?.deviceId;
+        registrations.set(slot, input);
 
         // if a different serial is on this endpoint/slot, disconnect and replace it
         // e.g. different dongle, different device paired to same slot
@@ -406,9 +411,7 @@ export class DeviceRegistry {
     }
 
     removeDevicesAtEndpoint(endpointId: string, reason: DisconnectReason): void {
-        for (const [key, input] of this.#registrations) {
-            if (input.endpointId === endpointId) this.#registrations.delete(key);
-        }
+        this.#registrations.delete(endpointId);
 
         const devices = [...this.#devices.values()].filter((device) => device.endpointId === endpointId);
         if (devices.length === 0) return;
