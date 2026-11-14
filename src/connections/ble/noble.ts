@@ -40,7 +40,7 @@ const DEFERRED_READS: readonly BleCharacteristic[] = Object.freeze([
     "charge-status",
 ]);
 const DEFAULT_OPERATION_TIMEOUT_MS = 10_000;
-const DISCONNECT_TIMEOUT_MS = 2_000;
+const DISCONNECT_TIMEOUT_MS = 5_000;
 
 export function createBleConnection(options: NobleBleOptions = {}): BleConnection {
     return new BleConnection(createNobleBackend(options), options);
